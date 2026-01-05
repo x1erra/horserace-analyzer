@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { HiOutlineChartBar, HiOutlineFlag, HiOutlineSparkles } from 'react-icons/hi';
+import { HiOutlineChartBar, HiOutlineFlag, HiOutlineSparkles, HiOutlineDocumentText, HiOutlineUpload } from 'react-icons/hi'; // Added icons for Results and Upload
 import { GiHorseHead } from 'react-icons/gi';
 
 export default function Sidebar() {
@@ -10,7 +10,6 @@ export default function Sidebar() {
                     <GiHorseHead className="w-8 h-8 text-purple-400" />
                     Race Analyzer
                 </h1>
-                <p className="text-sm text-gray-300 mt-2">Powered by ML</p>
             </div>
 
             <nav className="p-4 space-y-1">
@@ -53,6 +52,26 @@ export default function Sidebar() {
                 >
                     <HiOutlineSparkles className="w-6 h-6" />
                     Predictions
+                </NavLink>
+                <NavLink
+                    to="/results"
+                    className={({ isActive }) =>
+                        `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                        }`
+                    }
+                >
+                    <HiOutlineDocumentText className="w-6 h-6" />
+                    Results
+                </NavLink>
+                <NavLink
+                    to="/upload"
+                    className={({ isActive }) =>
+                        `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                        }`
+                    }
+                >
+                    <HiOutlineUpload className="w-6 h-6" />
+                    Upload
                 </NavLink>
             </nav>
 

@@ -28,9 +28,9 @@ export default function Races() {
         }
 
         if (selectedDate === 'Today') {
-            filtered = filtered.filter(race => race.date === 'Jan 4, 2026');
-        } else if (selectedDate === 'Tomorrow') {
             filtered = filtered.filter(race => race.date === 'Jan 5, 2026');
+        } else if (selectedDate === 'Tomorrow') {
+            filtered = filtered.filter(race => race.date === 'Jan 6, 2026');
         } else if (selectedDate === 'This Week') {
             filtered = filtered.filter(race => race.date <= 'Jan 10, 2026');
         }

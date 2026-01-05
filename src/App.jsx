@@ -6,6 +6,8 @@ import RaceDetails from './pages/RaceDetails.jsx';
 import Races from './pages/Races.jsx';
 import Horses from './pages/Horses.jsx';
 import Predictions from './pages/Predictions.jsx';
+import Results from './pages/Results.jsx'; // Added for Results page
+import Upload from './pages/Upload.jsx'; // Added for Upload page
 import { useState } from 'react';
 
 function App() {
@@ -25,10 +27,12 @@ function App() {
           <main className="p-8 bg-black">
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/race/:id" element={<RaceDetails />} />
               <Route path="/races" element={<Races />} />
               <Route path="/horses" element={<Horses />} />
               <Route path="/predictions" element={<Predictions />} />
+              <Route path="/race/:id" element={<RaceDetails />} />
+              <Route path="/results" element={<Results />} /> {/* New route */}
+              <Route path="/upload" element={<Upload />} /> {/* New route */}
             </Routes>
           </main>
         </div>

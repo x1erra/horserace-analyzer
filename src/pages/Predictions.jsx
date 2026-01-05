@@ -28,7 +28,7 @@ export default function Predictions() {
             }
 
             if (valA < valB) return crit.direction === 'asc' ? -1 : 1;
-            if (valA > valB) return crit.direction === 'asc' ? 1 : -1;
+            if (valA > valB) return crit.direction === 'asc' ? 1 : 1;
         }
         return 0; // Equal if all criteria tie
     });
@@ -102,7 +102,6 @@ export default function Predictions() {
                     </tbody>
                 </table>
             </div>
-
             <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-md transition duration-200">
                 Run New Predictions
             </button>

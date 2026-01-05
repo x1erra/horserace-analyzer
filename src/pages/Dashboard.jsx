@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router-dom'; // New import for links
 
 export default function Dashboard() {
     return (
@@ -10,8 +10,7 @@ export default function Dashboard() {
                 {[1, 2, 3, 4, 5, 6].map((i) => (
                     <div
                         key={i}
-                        className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn"
-                        style={{ animationDelay: `${i * 50}ms` }}
+                        className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50"
                     >
                         <h4 className="text-xl font-bold text-white mb-2">
                             Race {i} - Gulfstream Park
@@ -24,7 +23,7 @@ export default function Dashboard() {
                             {30 + i * 2}% Win Prob
                         </p>
                         <Link
-                            to={`/race/${i}`}
+                            to={`/race/${i}`} // Dynamic link to /race/1, /race/2, etc.
                             className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center"
                         >
                             Analyze

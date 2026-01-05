@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "id": null,
+  "status": "completed",
+  "data": {
+    "races": []
+  },
+  "error": null,
+  "warning": null,
+  "sources": null,
+  "expires_at": "2026-01-05T12:05:33Z",
+  "credits_used": 21,
+  "tokens_used": 303
+}
