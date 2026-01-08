@@ -1,0 +1,13 @@
+# Daily Horse Racing Crawler Crontab
+# Runs at 1:00 AM every day to crawl previous day's races
+#
+# Format: minute hour day month day-of-week command
+# All times in UTC inside container (adjust if needed)
+
+# Run daily at 1:00 AM (adjust timezone as needed)
+0 1 * * * cd /app && /usr/local/bin/python3 /app/backend/daily_crawl.py >> /var/log/horse-racing-crawler.log 2>&1
+
+# Keep container alive - log heartbeat
+*/30 * * * * echo "[$(date)] Scheduler heartbeat" >> /var/log/horse-racing-crawler.log
+
+# Empty line required at end of crontab

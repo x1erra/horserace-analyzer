@@ -1,0 +1,101 @@
+version: '3.8'
+
+# Production Docker Compose Configuration
+# Optimized for Raspberry Pi 5 with resource limits and enhanced monitoring
+
+services:
+  # Flask Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: horse-racing-backend:latest
+    container_name: horse-racing-backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+      - FLASK_ENV=production
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    networks:
+      - horse-racing-network
+    # Resource limits for Pi 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          memory: 256M
+    # Enhanced health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:5001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Logging limits
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Daily Crawler Scheduler
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    image: horse-racing-scheduler:latest
+    container_name: horse-racing-scheduler
+    restart: unless-stopped
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+    volumes:
+      - ./logs:/var/log
+    networks:
+      - horse-racing-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 128M
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "cron"]
+      interval: 300s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+    # Logging limits
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  horse-racing-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  uploads:
+    driver: local
+  logs:
+    driver: local

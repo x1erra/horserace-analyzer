@@ -1,0 +1,16 @@
+# Flask Backend Dependencies
+Flask==3.0.0
+flask-cors==4.0.0
+python-dotenv==1.0.0
+
+# Database
+supabase==2.3.0
+
+# PDF Processing
+pdfplumber==0.11.0
+
+# Web Scraping & HTTP
+requests==2.31.0
+
+# Security
+werkzeug==3.0.1

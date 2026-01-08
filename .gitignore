@@ -22,3 +22,29 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+.env
+backend/.env
+
+# Backend data
+backend/*.json
+backend/*.csv
+extract-data-*.csv
+extract-data-*.json
+
+# Uploads
+uploads/
+DRF/*.pdf
+
+# Docker
+*.tar
+docker-compose.override.yml

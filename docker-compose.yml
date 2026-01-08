@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Flask Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: horse-racing-backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    networks:
+      - horse-racing-network
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:5001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Daily Crawler Scheduler
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: horse-racing-scheduler
+    restart: unless-stopped
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+    volumes:
+      - ./logs:/var/log
+    networks:
+      - horse-racing-network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "pgrep", "cron"]
+      interval: 300s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+
+networks:
+  horse-racing-network:
+    driver: bridge
+
+volumes:
+  uploads:
+  logs:

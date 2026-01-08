@@ -1,0 +1,24 @@
+version: '3.8'
+
+# Standalone scheduler for daily crawler
+# Use this if you want to deploy only the crawler without the full stack
+
+services:
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: horse-racing-scheduler
+    restart: unless-stopped
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+    volumes:
+      - ./logs:/var/log
+    healthcheck:
+      test: ["CMD", "pgrep", "cron"]
+      interval: 300s
+      timeout: 10s
+      retries: 2
+      start_period: 30s

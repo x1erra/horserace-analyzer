@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  horse-racing-scheduler:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile.scheduler
+    container_name: horse-racing-scheduler
+    restart: always
+    environment:
+      # Replace these with your actual credentials
+      # Or use .env file (see below)
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      TZ: America/New_York  # Set your timezone
+      LOG_DIR: /var/log
+    volumes:
+      # Mount logs directory for persistence
+      - ./logs:/var/log
+    networks:
+      - horse-racing-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  horse-racing-network:
+    driver: bridge
+
+# Usage:
+# 1. Create .env file in backend/ directory with your credentials
+# 2. Run: docker-compose -f docker-compose.scheduler.yml up -d
+# 3. View logs: docker-compose -f docker-compose.scheduler.yml logs -f
+# 4. Stop: docker-compose -f docker-compose.scheduler.yml down

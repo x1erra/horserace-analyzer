@@ -1,0 +1,47 @@
+# Dockerfile for Daily Crawler Scheduler
+# Optimized for Raspberry Pi 5 (ARM64)
+
+FROM python:3.13-slim-bookworm
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=America/New_York
+
+# Install system dependencies including cron
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ /app/backend/
+
+# Create log directory
+RUN mkdir -p /var/log
+
+# Copy crontab file
+COPY backend/crontab /etc/cron.d/horse-racing-crawler
+
+# Give execution rights on the cron job
+RUN chmod 0644 /etc/cron.d/horse-racing-crawler
+
+# Apply cron job
+RUN crontab /etc/cron.d/horse-racing-crawler
+
+# Create the log file to be able to run tail
+RUN touch /var/log/horse-racing-crawler.log
+
+# Health check - verify cron is running and script is executable
+HEALTHCHECK --interval=300s --timeout=10s --start-period=30s --retries=2 \
+    CMD pgrep cron || exit 1
+
+# Run cron in foreground
+CMD ["cron", "-f"]
