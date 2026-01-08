@@ -1,0 +1,44 @@
+{
+  "success": true,
+  "data": {
+    "track_name": "AQUEDUCT",
+    "date": "01/04/2026",
+    "races": [
+      {
+        "race_number": 1,
+        "distance": "6 Furlongs",
+        "surface": "Dirt",
+        "conditions": "CLAIMING $25,000",
+        "horses": [
+          {
+            "program_number": "4",
+            "horse_name": "Crossingthechannel",
+            "jockey": "Sanchez, Mychel J.",
+            "trainer": "Rodriguez, Rudy R.",
+            "odds": "0.45",
+            "finish_position": 1,
+            "comments": "Insideturn, drew clear"
+          },
+          {
+            "program_number": "2",
+            "horse_name": "White Smoke Rising",
+            "jockey": "Cancel, Eric",
+            "trainer": "Englehart, Jeremiah C.",
+            "odds": "7.30",
+            "finish_position": 2,
+            "comments": "2p, led, held place"
+          },
+          {
+            "program_number": "6",
+            "horse_name": "Buntus Foclora",
+            "jockey": "Lezcano, Jose",
+            "trainer": "Rice, Linda",
+            "odds": "10.60",
+            "finish_position": 3,
+            "comments": "3p turns, empty"
+          }
+        ]
+      }
+    ]
+  }
+}
