@@ -16,9 +16,10 @@ export default function Races() {
         const fetchRaces = async () => {
             try {
                 setLoading(true);
+                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 const endpoint = activeTab === 'today'
-                    ? 'http://localhost:5001/api/todays-races'
-                    : 'http://localhost:5001/api/past-races?limit=100';
+                    ? `${baseUrl}/api/todays-races`
+                    : `${baseUrl}/api/past-races?limit=100`;
 
                 const response = await axios.get(endpoint);
                 const raceData = response.data.races || [];
@@ -79,11 +80,10 @@ export default function Races() {
                         setSelectedTrack('All Tracks');
                         setSelectedDate('All Dates');
                     }}
-                    className={`px-6 py-3 font-medium transition ${
-                        activeTab === 'today'
+                    className={`px-6 py-3 font-medium transition ${activeTab === 'today'
                             ? 'text-purple-400 border-b-2 border-purple-400'
                             : 'text-gray-400 hover:text-white'
-                    }`}
+                        }`}
                 >
                     Today's Races
                 </button>
@@ -93,11 +93,10 @@ export default function Races() {
                         setSelectedTrack('All Tracks');
                         setSelectedDate('All Dates');
                     }}
-                    className={`px-6 py-3 font-medium transition ${
-                        activeTab === 'past'
+                    className={`px-6 py-3 font-medium transition ${activeTab === 'past'
                             ? 'text-purple-400 border-b-2 border-purple-400'
                             : 'text-gray-400 hover:text-white'
-                    }`}
+                        }`}
                 >
                     Past Races
                 </button>
@@ -164,15 +163,14 @@ export default function Races() {
                                     Race {race.race_number} - {race.track_name || race.track_code}
                                 </h4>
                                 {race.race_status && (
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                        race.race_status === 'completed'
+                                    <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
                                             ? 'bg-green-900/30 text-green-400'
                                             : race.race_status === 'upcoming'
-                                            ? 'bg-blue-900/30 text-blue-400'
-                                            : 'bg-gray-900/30 text-gray-400'
-                                    }`}>
+                                                ? 'bg-blue-900/30 text-blue-400'
+                                                : 'bg-gray-900/30 text-gray-400'
+                                        }`}>
                                         {race.race_status === 'completed' ? 'Complete' :
-                                         race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
+                                            race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
                                     </span>
                                 )}
                             </div>

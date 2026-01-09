@@ -11,7 +11,8 @@ export default function Dashboard() {
         const fetchTodaysRaces = async () => {
             try {
                 setLoading(true);
-                const response = await axios.get('http://localhost:5001/api/todays-races');
+                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+                const response = await axios.get(`${baseUrl}/api/todays-races`);
                 setRaces(response.data.races || []);
                 setError(null);
             } catch (err) {

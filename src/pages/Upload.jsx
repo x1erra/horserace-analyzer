@@ -49,8 +49,9 @@ export default function Upload() {
             const formData = new FormData();
             formData.append('file', selectedFile);
 
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
             const response = await axios.post(
-                'http://localhost:5001/api/upload-drf',
+                `${baseUrl}/api/upload-drf`,
                 formData,
                 {
                     headers: {

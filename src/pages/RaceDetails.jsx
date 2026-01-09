@@ -12,7 +12,8 @@ export default function RaceDetails() {
         const fetchRaceDetails = async () => {
             try {
                 setLoading(true);
-                const response = await axios.get(`http://localhost:5001/api/race-details/${id}`);
+                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+                const response = await axios.get(`${baseUrl}/api/race-details/${id}`);
                 setRaceData(response.data);
                 setError(null);
             } catch (err) {
@@ -73,13 +74,12 @@ export default function RaceDetails() {
                 <h3 className="text-3xl font-bold text-white">
                     Race {race.race_number} - {race.track_name}
                 </h3>
-                <span className={`px-4 py-2 rounded-md text-sm font-medium ${
-                    isCompleted
+                <span className={`px-4 py-2 rounded-md text-sm font-medium ${isCompleted
                         ? 'bg-green-900/30 text-green-400'
                         : isUpcoming
-                        ? 'bg-blue-900/30 text-blue-400'
-                        : 'bg-gray-900/30 text-gray-400'
-                }`}>
+                            ? 'bg-blue-900/30 text-blue-400'
+                            : 'bg-gray-900/30 text-gray-400'
+                    }`}>
                     {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
                 </span>
             </div>
@@ -139,9 +139,8 @@ export default function RaceDetails() {
                     </thead>
                     <tbody>
                         {sortedEntries.map((entry, index) => (
-                            <tr key={index} className={`border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200 ${
-                                entry.finish_position === 1 ? 'bg-yellow-900/10' : ''
-                            }`}>
+                            <tr key={index} className={`border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200 ${entry.finish_position === 1 ? 'bg-yellow-900/10' : ''
+                                }`}>
                                 {isCompleted && (
                                     <td className="p-4 font-bold text-white">
                                         {entry.finish_position || '-'}
