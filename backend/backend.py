@@ -15,7 +15,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Configuration
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'DRF')
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'uploads')
 ALLOWED_EXTENSIONS = {'pdf'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -70,10 +70,10 @@ def upload_drf():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-        # Parse PDF using parse_drf.py
-        root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        # Use sys.executable to get current python interpreter (works in venv and Docker)
+        import sys
+        python_bin = sys.executable
         parser_script = os.path.join(os.path.dirname(__file__), 'parse_drf.py')
-        python_bin = os.path.join(root_path, 'venv', 'bin', 'python3')
 
         result = subprocess.run(
             [python_bin, parser_script, filepath],
@@ -357,10 +357,10 @@ def trigger_crawl():
         except ValueError:
             return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
 
-        # Run crawler script
-        root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        # Use sys.executable to get current python interpreter
+        import sys
+        python_bin = sys.executable
         crawler_script = os.path.join(os.path.dirname(__file__), 'crawl_equibase.py')
-        python_bin = os.path.join(root_path, 'venv', 'bin', 'python3')
 
         result = subprocess.run(
             [python_bin, crawler_script, crawl_date],
