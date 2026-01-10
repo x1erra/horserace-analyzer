@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from supabase_client import get_supabase_client
+import traceback
 
 app = Flask(__name__)
 CORS(app)
@@ -41,6 +42,7 @@ def health_check():
             'database': 'connected'
         })
     except Exception as e:
+        traceback.print_exc()
         return jsonify({
             'status': 'unhealthy',
             'error': str(e)
@@ -369,7 +371,7 @@ def trigger_crawl():
             timeout=300  # 5 minutes
         )
 
-        if result.returncode == 0:
+        if result.returncode = 0:
             return jsonify({
                 'success': True,
                 'message': f'Crawler completed for {crawl_date}',
