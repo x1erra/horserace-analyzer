@@ -371,7 +371,7 @@ def trigger_crawl():
             timeout=300  # 5 minutes
         )
 
-        if result.returncode = 0:
+        if result.returncode == 0:
             return jsonify({
                 'success': True,
                 'message': f'Crawler completed for {crawl_date}',
