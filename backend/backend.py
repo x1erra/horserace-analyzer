@@ -176,20 +176,40 @@ def get_todays_races():
     """
     Get all races for today (upcoming races from DRF uploads)
     Returns: List of races with status='upcoming' for today's date
+    Query params:
+    - track: Filter by track name (optional)
+    - status: Filter by status (optional: 'Upcoming', 'Completed', 'All')
     """
     try:
         supabase = get_supabase_client()
         today = date.today().isoformat()
+        
+        track_filter = request.args.get('track')
+        status_filter = request.args.get('status')
 
         # Get races for today
-        response = supabase.table('hranalyzer_races')\
+        query = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location)')\
             .eq('race_date', today)\
-            .order('race_number')\
-            .execute()
+            .order('race_number')
+            
+        response = query.execute()
 
         races = []
         for race in response.data:
+            track_name = race.get('hranalyzer_tracks', {}).get('track_name', race['track_code'])
+            
+            # Python-side filtering
+            if track_filter and track_filter != 'All':
+                 if track_name != track_filter and race['track_code'] != track_filter:
+                     continue
+
+            if status_filter and status_filter != 'All':
+                if status_filter == 'Upcoming' and race['race_status'] == 'completed':
+                    continue
+                if status_filter == 'Completed' and race['race_status'] != 'completed':
+                    continue
+
             # Get entry count for each race
             entries_response = supabase.table('hranalyzer_race_entries')\
                 .select('id', count='exact')\
@@ -199,7 +219,7 @@ def get_todays_races():
             races.append({
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
-                'track_name': race.get('hranalyzer_tracks', {}).get('track_name', race['track_code']),
+                'track_name': track_name,
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': race['post_time'],
@@ -217,6 +237,78 @@ def get_todays_races():
             'races': races,
             'count': len(races),
             'date': today
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/filter-options', methods=['GET'])
+def get_filter_options():
+    """
+    Get all unique tracks and dates for filtering, plus today's summary
+    Returns: { 
+        tracks: [], 
+        dates: [], 
+        today_summary: [ { track_name, total, upcoming, completed } ] 
+    }
+    """
+    try:
+        supabase = get_supabase_client()
+        today = date.today().isoformat()
+
+        # 1. Get all distinct dates
+        dates_response = supabase.table('hranalyzer_races')\
+            .select('race_date')\
+            .order('race_date', desc=True)\
+            .execute()
+        
+        unique_dates = sorted(list(set(r['race_date'] for r in dates_response.data)), reverse=True)
+
+        # 2. Get all distinct tracks (for historical filter)
+        tracks_response = supabase.table('hranalyzer_races')\
+            .select('track_code, hranalyzer_tracks(track_name)')\
+            .execute()
+            
+        unique_tracks = {}
+        for r in tracks_response.data:
+            code = r['track_code']
+            name = r.get('hranalyzer_tracks', {}).get('track_name', code)
+            unique_tracks[name] = code 
+        
+        sorted_tracks = sorted(list(unique_tracks.keys()))
+
+        # 3. Get detailed summary for TODAY
+        today_response = supabase.table('hranalyzer_races')\
+            .select('*, hranalyzer_tracks(track_name)')\
+            .eq('race_date', today)\
+            .execute()
+            
+        summary_map = {}
+        
+        for r in today_response.data:
+            name = r.get('hranalyzer_tracks', {}).get('track_name', r['track_code'])
+            if name not in summary_map:
+                summary_map[name] = {
+                    'track_name': name,
+                    'track_code': r['track_code'],
+                    'total': 0,
+                    'upcoming': 0,
+                    'completed': 0
+                }
+            
+            summary_map[name]['total'] += 1
+            if r['race_status'] == 'completed':
+                summary_map[name]['completed'] += 1
+            else:
+                summary_map[name]['upcoming'] += 1
+                
+        today_summary = sorted(list(summary_map.values()), key=lambda x: x['track_name'])
+
+        return jsonify({
+            'dates': unique_dates,
+            'tracks': sorted_tracks,
+            'today_summary': today_summary
         })
 
     except Exception as e:
