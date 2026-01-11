@@ -28,12 +28,12 @@ help:
 # Build images
 build:
 	@echo "Building Docker images..."
-	docker-compose build --no-cache
+	docker compose build --no-cache
 
 # Start containers
 up:
 	@echo "Starting containers..."
-	docker-compose up -d
+	docker compose up -d
 	@echo "Waiting for services to be healthy..."
 	@sleep 5
 	@make ps
@@ -41,28 +41,28 @@ up:
 # Stop containers
 down:
 	@echo "Stopping containers..."
-	docker-compose down
+	docker compose down
 
 # Restart containers
 restart:
 	@echo "Restarting containers..."
-	docker-compose restart
+	docker compose restart
 	@sleep 3
 	@make ps
 
 # View logs
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 logs-backend:
-	docker-compose logs -f backend
+	docker compose logs -f backend
 
 logs-scheduler:
-	docker-compose logs -f scheduler
+	docker compose logs -f scheduler
 
 # List containers
 ps:
-	@docker-compose ps
+	@docker compose ps
 	@echo ""
 	@docker stats --no-stream
 
@@ -92,8 +92,8 @@ deploy:
 # Deploy full stack (production)
 deploy-prod:
 	@echo "Deploying full stack (production)..."
-	docker-compose -f docker-compose.prod.yml build --no-cache
-	docker-compose -f docker-compose.prod.yml up -d
+	docker compose -f docker-compose.prod.yml build --no-cache
+	docker compose -f docker-compose.prod.yml up -d
 	@echo "Production deployment complete!"
 	@sleep 5
 	@make health
@@ -101,7 +101,7 @@ deploy-prod:
 # Deploy scheduler only
 deploy-scheduler:
 	@echo "Deploying scheduler only..."
-	docker-compose -f docker-compose.scheduler.yml up -d
+	docker compose -f docker-compose.scheduler.yml up -d
 	@echo "Scheduler deployment complete!"
 
 # Check health
@@ -115,15 +115,15 @@ health:
 # Manual crawler run
 crawl:
 	@echo "Triggering manual crawl for yesterday..."
-	docker-compose exec scheduler python3 /app/backend/daily_crawl.py
+	docker compose exec scheduler python3 /app/backend/daily_crawl.py
 
 # Shell access
 shell-backend:
-	docker-compose exec backend /bin/bash
+	docker compose exec backend /bin/bash
 
 shell-scheduler:
-	docker-compose exec scheduler /bin/bash
+	docker compose exec scheduler /bin/bash
 
 # View crawler logs
 crawler-logs:
-	docker-compose exec scheduler tail -f /var/log/horse-racing-crawler.log
+	docker compose exec scheduler tail -f /var/log/horse-racing-crawler.log
