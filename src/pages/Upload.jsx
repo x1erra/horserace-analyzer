@@ -121,8 +121,8 @@ export default function Upload() {
 
             {/* Status Messages */}
             {uploadStatus && (
-                <div className={`p-4 rounded-md ${parseResult ? 'bg-green-900/20 border border-green-500/50' : 'bg-red-900/20 border border-red-500/50'}`}>
-                    <p className={`${parseResult ? 'text-green-400' : 'text-red-400'} font-medium`}>
+                <div className={`p-4 rounded-md ${(parseResult || uploading) ? 'bg-green-900/20 border border-green-500/50' : 'bg-red-900/20 border border-red-500/50'}`}>
+                    <p className={`${(parseResult || uploading) ? 'text-green-400' : 'text-red-400'} font-medium`}>
                         {uploadStatus}
                     </p>
                 </div>
