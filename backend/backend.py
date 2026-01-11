@@ -139,7 +139,6 @@ def get_todays_races():
         response = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location)')\
             .eq('race_date', today)\
-            .eq('race_status', 'upcoming')\
             .order('race_number')\
             .execute()
 
@@ -188,6 +187,7 @@ def get_past_races():
     """
     try:
         supabase = get_supabase_client()
+        today = date.today().isoformat()
 
         # Get query parameters
         track = request.args.get('track')
@@ -195,9 +195,10 @@ def get_past_races():
         end_date = request.args.get('end_date')
         limit = int(request.args.get('limit', 50))
 
-        # Build query
+        # Build query - strictly previous days
         query = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location)')\
+            .lt('race_date', today)\
             .in_('race_status', ['completed', 'past_drf_only'])
 
         if track:
