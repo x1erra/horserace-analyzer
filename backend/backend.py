@@ -245,7 +245,7 @@ def get_past_races():
 
         # Build query - strictly previous days
         query = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name, location)')\
+            .select('*, hranalyzer_tracks(track_name, location), winning_horse:hranalyzer_horses(horse_name)')\
             .lt('race_date', today)\
             .in_('race_status', ['completed', 'past_drf_only'])
 
@@ -283,7 +283,10 @@ def get_past_races():
                 'entry_count': entries_response.count,
                 'race_status': race['race_status'],
                 'data_source': race['data_source'],
-                'id': race['id']
+                'id': race['id'],
+                'winner': race.get('winning_horse', {}).get('horse_name') if race.get('winning_horse') else 'N/A',
+                'time': race.get('final_time') or 'N/A',
+                'link': race.get('equibase_chart_url') or '#'
             })
 
 
