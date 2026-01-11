@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom';
 import { HiOutlineChartBar, HiOutlineFlag, HiOutlineSparkles, HiOutlineDocumentText, HiOutlineUpload } from 'react-icons/hi'; // Added icons for Results and Upload
-import { GiHorseHead } from 'react-icons/gi';
 
 export default function Sidebar({ isOpen, onClose }) {
     return (
@@ -23,8 +22,8 @@ export default function Sidebar({ isOpen, onClose }) {
             >
                 <div className="p-6 border-b border-purple-900/50 flex justify-between items-center">
                     <h1 className="text-3xl font-bold text-white flex items-center gap-2">
-                        <GiHorseHead className="w-8 h-8 text-purple-400" />
-                        Race Analyzer
+                        <img src="/horse_logo.png" alt="TrackData Logo" className="w-10 h-10 object-contain" />
+                        TrackData
                     </h1>
                     {/* Close button for mobile */}
                     <button onClick={onClose} className="md:hidden text-gray-400 hover:text-white">
