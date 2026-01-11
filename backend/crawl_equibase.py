@@ -102,11 +102,18 @@ def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
 
             # Try to extract table data for horses
             tables = page.extract_tables()
+            horses = []
             if tables:
                 logger.info(f"Found {len(tables)} tables in PDF")
                 horses = parse_horse_table(tables, text)
-                if horses:
-                    race_data['horses'] = horses
+            
+            # Fallback to text parsing if table method failed
+            if not horses:
+                logger.info("No horses found in tables, attempting text fallback parsing")
+                horses = parse_horses_from_text(text)
+                
+            if horses:
+                race_data['horses'] = horses
 
             return race_data
 
@@ -256,6 +263,66 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
             continue
 
     logger.info(f"Parsed {len(horses)} horses from table")
+    return horses
+
+
+def parse_horses_from_text(text: str) -> List[Dict]:
+    """
+    Fallback parser for horse data from raw text when table extraction fails
+    Expects format: LastRaced Pgm HorseName(Jockey) ...
+    """
+    horses = []
+    lines = text.split('\n')
+    
+    start_parsing = False
+    
+    # Regex to capture: Pgm, HorseName, Jockey, (skip), Odds
+    # Example: 20Nov255AQU2 1 Coquito(Carmouche,Kendrick) 123 Lb ... 0.48* chased3w,edgedclear
+    # We look for Pgm (number), Name(Jockey), and Odds (decimal at end)
+    pattern = re.compile(r'^\s*\S+\s+(\d+)\s+([^(]+)\(([^)]+)\).*?(\d+\.\d+\*?)\s+')
+    
+    for line in lines:
+        # Detect header
+        if 'HorseName(Jockey)' in line or 'Horse Name (Jockey)' in line:
+            start_parsing = True
+            continue
+            
+        if not start_parsing:
+            continue
+            
+        # Stop parsing if we hit other sections
+        if 'Fractional Times' in line or 'Final Time' in line or 'Run-Up' in line or line.strip() == '':
+            if len(horses) > 0: # If we already found horses, stop
+                break
+        
+        match = re.search(pattern, line)
+        if match:
+            try:
+                pgm = match.group(1)
+                horse_name = match.group(2).strip()
+                jockey = match.group(3).strip()
+                odds = match.group(4).replace('*', '')
+                
+                horses.append({
+                    'program_number': pgm,
+                    'horse_name': horse_name,
+                    'jockey': jockey,
+                    'trainer': None, # Difficult to parse from this line
+                    'owner': None,
+                    'weight': None,
+                    'odds': odds,
+                    'finish_position': len(horses) + 1,
+                    'comments': None,
+                    'speed_figure': None,
+                    'win_payout': None,
+                    'place_payout': None,
+                    'show_payout': None
+                })
+            except Exception as e:
+                logger.debug(f"Regex match error on line '{line}': {e}")
+                continue
+
+    logger.info(f"Parsed {len(horses)} horses from text fallback")
     return horses
 
 
