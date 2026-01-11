@@ -56,6 +56,17 @@ export default function Sidebar({ isOpen, onClose }) {
                         Races
                     </NavLink>
                     <NavLink
+                        to="/results"
+                        onClick={onClose}
+                        className={({ isActive }) =>
+                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            }`
+                        }
+                    >
+                        <HiOutlineDocumentText className="w-6 h-6" />
+                        Results
+                    </NavLink>
+                    <NavLink
                         to="/horses"
                         onClick={onClose}
                         className={({ isActive }) =>
@@ -87,17 +98,6 @@ export default function Sidebar({ isOpen, onClose }) {
                     >
                         <HiOutlineCurrencyDollar className="w-6 h-6" />
                         Betting
-                    </NavLink>
-                    <NavLink
-                        to="/results"
-                        onClick={onClose}
-                        className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
-                            }`
-                        }
-                    >
-                        <HiOutlineDocumentText className="w-6 h-6" />
-                        Results
                     </NavLink>
                     <NavLink
                         to="/upload"
