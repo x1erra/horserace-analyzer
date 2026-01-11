@@ -176,42 +176,20 @@ def get_todays_races():
     """
     Get all races for today (upcoming races from DRF uploads)
     Returns: List of races with status='upcoming' for today's date
-    Query params:
-    - track: Filter by track name
     """
     try:
         supabase = get_supabase_client()
         today = date.today().isoformat()
-        track_filter = request.args.get('track')
 
         # Get races for today
-        query = supabase.table('hranalyzer_races')\
+        response = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location)')\
             .eq('race_date', today)\
-            .order('race_number')
-
-        if track_filter and track_filter != 'All' and track_filter != 'All Tracks':
-             # Note: exact match on track_name might be tricky if frontend sends short name vs long name
-             # Ideally we filter by track_code, but UI uses names often. 
-             # Let's try to match either if possible, or assume frontend sends what we need.
-             # For now, let's filter in python to be safe if we can't easily join-filter on track name 
-             # (Supabase join filtering syntax is specific: inner join usually required).
-             # Actually, let's just fetch all for today (usually small set) and filter in python 
-             # OR if we want to be strict, we can try. 
-             # Given "today's races" is usually small (<100 rows), python filtering is fine and safer.
-             pass
-
-        response = query.execute()
+            .order('race_number')\
+            .execute()
 
         races = []
         for race in response.data:
-            track_name = race.get('hranalyzer_tracks', {}).get('track_name', race['track_code'])
-            
-            # Python-side filtering for safety and ease
-            if track_filter and track_filter not in ['All', 'All Tracks']:
-                 if track_name != track_filter and race['track_code'] != track_filter:
-                     continue
-
             # Get entry count for each race
             entries_response = supabase.table('hranalyzer_race_entries')\
                 .select('id', count='exact')\
@@ -221,7 +199,7 @@ def get_todays_races():
             races.append({
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
-                'track_name': track_name,
+                'track_name': race.get('hranalyzer_tracks', {}).get('track_name', race['track_code']),
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': race['post_time'],
@@ -239,64 +217,6 @@ def get_todays_races():
             'races': races,
             'count': len(races),
             'date': today
-        })
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/filter-options', methods=['GET'])
-def get_filter_options():
-    """
-    Get all unique tracks and dates for filtering
-    Returns: { tracks: [], dates: [], today_tracks: [] }
-    """
-    try:
-        supabase = get_supabase_client()
-        today = date.today().isoformat()
-
-        # 1. Get all distinct dates
-        dates_response = supabase.table('hranalyzer_races')\
-            .select('race_date')\
-            .order('race_date', desc=True)\
-            .execute()
-        
-        # Unique dates
-        unique_dates = sorted(list(set(r['race_date'] for r in dates_response.data)), reverse=True)
-
-        # 2. Get all distinct tracks (codes and names)
-        # We'll fetch a sample of recent races to get track names widely available
-        # Or better, fetch from tracks table if we have it fully populated.
-        # Let's assume we want tracks that actually have races.
-        tracks_response = supabase.table('hranalyzer_races')\
-            .select('track_code, hranalyzer_tracks(track_name)')\
-            .execute()
-            
-        unique_tracks = {}
-        for r in tracks_response.data:
-            code = r['track_code']
-            name = r.get('hranalyzer_tracks', {}).get('track_name', code)
-            unique_tracks[name] = code # Name as key to dedupe by name, but actually we want list of names usually
-        
-        sorted_tracks = sorted(list(unique_tracks.keys()))
-
-        # 3. Get tracks with races TODAY
-        today_response = supabase.table('hranalyzer_races')\
-            .select('track_code, hranalyzer_tracks(track_name)')\
-            .eq('race_date', today)\
-            .execute()
-            
-        today_tracks_set = set()
-        for r in today_response.data:
-            name = r.get('hranalyzer_tracks', {}).get('track_name', r['track_code'])
-            today_tracks_set.add(name)
-            
-        sorted_today_tracks = sorted(list(today_tracks_set))
-
-        return jsonify({
-            'dates': unique_dates,
-            'tracks': sorted_tracks,
-            'today_tracks': sorted_today_tracks
         })
 
     except Exception as e:
@@ -721,7 +641,7 @@ def resolve_bets():
             'resolved_count': resolved_count,
             'details': updated_bets
         })
-
+        
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
