@@ -124,7 +124,19 @@ export default function Sidebar({ isOpen, onClose }) {
                 </nav>
 
                 <div className="p-4 mt-auto border-t border-purple-900/50">
-                    <p className="text-xs text-gray-400 text-center">v0.1 • 2026</p>
+                    <p className="text-xs text-gray-400 text-center mb-4">v0.1 • 2026</p>
+                    <button
+                        onClick={() => {
+                            localStorage.removeItem('isAppAuthenticated');
+                            window.location.reload();
+                        }}
+                        className="w-full flex items-center gap-3 p-3 rounded-lg transition hover:bg-red-900/20 text-gray-400 hover:text-red-400 group"
+                    >
+                        <svg className="w-6 h-6 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        <span className="font-medium">Logout</span>
+                    </button>
                 </div>
             </aside>
         </>
