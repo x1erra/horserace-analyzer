@@ -77,17 +77,28 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-8">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h3 className="text-3xl font-bold text-white">
-                    Today's Races ({races.length})
-                </h3>
+            <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                    <h3 className="text-3xl font-bold text-white">
+                        Today's Races ({races.length})
+                    </h3>
+                    <Link
+                        to="/upload"
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg transition text-sm font-medium flex items-center gap-2 shadow-lg shadow-purple-900/20"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Upload PDF
+                    </Link>
+                </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 pb-2">
                     <button
                         onClick={() => setSelectedTrack('All')}
-                        className={`px-4 py-2 rounded-full text-sm font-medium transition ${selectedTrack === 'All'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition border ${selectedTrack === 'All'
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'bg-transparent text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-200'
                             }`}
                     >
                         All Tracks
@@ -96,20 +107,14 @@ export default function Dashboard() {
                         <button
                             key={track}
                             onClick={() => setSelectedTrack(track)}
-                            className={`px-4 py-2 rounded-full text-sm font-medium transition ${selectedTrack === track
-                                    ? 'bg-purple-600 text-white'
-                                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition border ${selectedTrack === track
+                                    ? 'bg-purple-600 text-white border-purple-600'
+                                    : 'bg-transparent text-gray-400 border-gray-800 hover:border-gray-600 hover:text-gray-200'
                                 }`}
                         >
                             {track}
                         </button>
                     ))}
-                    <Link
-                        to="/upload"
-                        className="ml-2 bg-gray-800 hover:bg-gray-700 text-purple-400 px-4 py-2 rounded-full text-sm font-medium transition flex items-center gap-2"
-                    >
-                        <span>+</span> Upload
-                    </Link>
                 </div>
             </div>
 

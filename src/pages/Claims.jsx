@@ -76,7 +76,9 @@ export default function Claims() {
                 if (aValue > bValue) {
                     return sortConfig.direction === 'asc' ? 1 : -1;
                 }
-                return 0;
+
+                // Secondary sort: Race Number (Always Ascending)
+                return Number(a.race_number) - Number(b.race_number);
             });
         }
 
