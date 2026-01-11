@@ -4,7 +4,7 @@ import axios from 'axios';
 
 export default function Races() {
     const [activeTab, setActiveTab] = useState('today'); // 'today' or 'past'
-    const [selectedTrack, setSelectedTrack] = useState('All Tracks');
+    const [selectedTrack, setSelectedTrack] = useState('All'); // Changed default to 'All'
     const [selectedDate, setSelectedDate] = useState('All Dates');
     const [allRaces, setAllRaces] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -12,7 +12,7 @@ export default function Races() {
     const [hasSearched, setHasSearched] = useState(false);
 
     // Metadata for filters
-    const [availableTracks, setAvailableTracks] = useState(['All Tracks']);
+    const [availableTracks, setAvailableTracks] = useState([{ name: 'All Tracks', code: 'All' }]);
     const [availableDates, setAvailableDates] = useState(['All Dates']);
     const [metaLoading, setMetaLoading] = useState(true);
 
@@ -24,7 +24,7 @@ export default function Races() {
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
 
                 if (response.data) {
-                    setAvailableTracks(['All Tracks', ...response.data.tracks]);
+                    setAvailableTracks([{ name: 'All Tracks', code: 'All' }, ...response.data.tracks]);
                     setAvailableDates(['All Dates', ...response.data.dates]);
                 }
             } catch (err) {
@@ -39,7 +39,7 @@ export default function Races() {
     // Reset state when tab changes
     const handleTabChange = (tab) => {
         setActiveTab(tab);
-        setSelectedTrack('All Tracks');
+        setSelectedTrack('All');
         setSelectedDate('All Dates');
         setAllRaces([]);
         setHasSearched(false);
@@ -61,11 +61,11 @@ export default function Races() {
 
             if (activeTab === 'today') {
                 // Dashboard filter logic style
-                if (selectedTrack !== 'All Tracks') params.track = selectedTrack;
+                if (selectedTrack !== 'All') params.track = selectedTrack;
             } else {
                 // Past races logic
                 params.limit = 100;
-                if (selectedTrack !== 'All Tracks') params.track = selectedTrack; // Actually code but usually name works if matched. Let's send what we have. API handles it.
+                if (selectedTrack !== 'All') params.track = selectedTrack;
                 if (selectedDate !== 'All Dates') {
                     params.start_date = selectedDate;
                     params.end_date = selectedDate;
@@ -131,7 +131,7 @@ export default function Races() {
                             className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
                         >
                             {availableTracks.map(track => (
-                                <option key={track} value={track}>{track}</option>
+                                <option key={track.code} value={track.code}>{track.name}</option>
                             ))}
                         </select>
                     </div>

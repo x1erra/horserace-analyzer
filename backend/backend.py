@@ -276,7 +276,12 @@ def get_filter_options():
             name = r.get('hranalyzer_tracks', {}).get('track_name', code)
             unique_tracks[name] = code 
         
-        sorted_tracks = sorted(list(unique_tracks.keys()))
+        sorted_tracks = []
+        for name in sorted(list(unique_tracks.keys())):
+            sorted_tracks.append({
+                'name': name,
+                'code': unique_tracks[name]
+            })
 
         # 3. Get detailed summary for TODAY
         today_response = supabase.table('hranalyzer_races')\
