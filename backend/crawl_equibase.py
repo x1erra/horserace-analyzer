@@ -76,6 +76,10 @@ def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
     Returns: Extracted race data or None if parsing fails
     """
     try:
+        if not pdf_bytes.startswith(b'%PDF'):
+            logger.warning("Downloaded content is not a valid PDF (likely HTML placeholder)")
+            return None
+
         pdf_file = BytesIO(pdf_bytes)
 
         with pdfplumber.open(pdf_file) as pdf:
