@@ -16,10 +16,8 @@ function App() {
   return (
     <Router>
       <div className="min-h-screen bg-black flex flex-col md:flex-row">
-        {/* Sidebar - hidden on mobile, fixed on desktop */}
-        <div className={`${isSidebarOpen ? 'block' : 'hidden'} md:block`}>
-          <Sidebar />
-        </div>
+        {/* Sidebar - responsive behavior handled internally */}
+        <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
         {/* Main Content */}
         <div className="flex-1 md:ml-64">
