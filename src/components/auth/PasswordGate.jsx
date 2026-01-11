@@ -45,7 +45,7 @@ const PasswordGate = ({ children }) => {
 
     return (
         <div className="min-h-screen bg-black flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-stone-900 rounded-xl shadow-2xl border border-stone-800 p-8">
+            <div className="w-full max-w-md bg-black rounded-xl shadow-2xl border border-purple-900/30 p-8">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-6">
                         <img src="/horse_logo.png" alt="TrackData Logo" className="w-24 h-24 object-contain" />
