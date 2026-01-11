@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { HiOutlineChartBar, HiOutlineFlag, HiOutlineSparkles, HiOutlineDocumentText, HiOutlineUpload } from 'react-icons/hi'; // Added icons for Results and Upload
+import { HiOutlineChartBar, HiOutlineFlag, HiOutlineSparkles, HiOutlineDocumentText, HiOutlineUpload, HiOutlineUser } from 'react-icons/hi'; // Added icons for Results and Upload
+import { GiHorseHead } from 'react-icons/gi';
 
 export default function Sidebar({ isOpen, onClose }) {
     return (
@@ -62,7 +63,7 @@ export default function Sidebar({ isOpen, onClose }) {
                             }`
                         }
                     >
-                        <GiHorseHead className="w-6 h-6" />
+                        <HiOutlineFlag className="w-6 h-6" />
                         Horses
                     </NavLink>
                     <NavLink

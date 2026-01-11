@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { GiHorseHead } from 'react-icons/gi';
+import { HiOutlineUser, HiOutlineFlag } from 'react-icons/hi';
 
 export default function Favourites() {
     const [favourites, setFavourites] = useState([]);
