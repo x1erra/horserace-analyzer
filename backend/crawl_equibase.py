@@ -369,8 +369,11 @@ def parse_claims_text(text: str) -> List[Dict]:
     
     # 1. Parse Claiming Prices first to get price map
     # Example: Claiming Prices: 1 - Coquito: $20,000; 3 - Enigmatic: $20,000;
+    # (or without spaces: ClaimingPrices:...)
     price_map = {}
-    price_match = re.search(r'Claiming Prices:(.*?)(?:Scratched|Total|Footnotes|$)', text, re.DOTALL | re.IGNORECASE)
+    
+    # Flexible regex: Claiming\s*Prices\s*:
+    price_match = re.search(r'Claiming\s*Prices\s*:(.*?)(?:Scratched|Total|Footnotes|$)', text, re.DOTALL | re.IGNORECASE)
     if price_match:
         price_text = price_match.group(1).strip()
         # Split by semicolon or just find all matches
@@ -383,26 +386,24 @@ def parse_claims_text(text: str) -> List[Dict]:
             price_map[clean_name] = price_val
 
     # 2. Parse Claimed Horse lines
-    # Look for "Claimed Horse(s):"
+    # Look for "Claimed Horse(s):" (with or without spaces)
     
     for line in lines:
-        if 'Claimed Horse(s):' in line:
+        # Flexible match for "Claimed Horse(s):"
+        if re.search(r'Claimed\s*Horse\(s\)\s*:', line, re.IGNORECASE):
             # Format often: "N Claimed Horse(s): Name New Trainer: Name New Owner: Name"
             # Use regex to extract parts
-            # Note: Sometimes multiple claimed horses are listed? Usually one per line if multiple lines, or multiple on one line?
-            # The example shows "1 Claimed Horse(s): Coquito New Trainer... New Owner..."
             
-            # Pattern to catch the specific format in the screenshot
-            # It seems to be: [Count] Claimed Horse(s): [Name] New Trainer: [Trainer] New Owner: [Owner]
+            # Pattern to catch the specific format in the screenshot and debug text
+            # It seems to be: [Count] ClaimedHorse(s): [Name] NewTrainer:[Trainer] NewOwner:[Owner]
             
-            # Try to split by known delimiters
             try:
                 # Remove the prefix "N Claimed Horse(s):"
-                content = re.sub(r'^\d*\s*Claimed Horse\(s\):\s*', '', line.strip())
+                content = re.sub(r'^\d*\s*Claimed\s*Horse\(s\)\s*:\s*', '', line.strip(), flags=re.IGNORECASE)
                 
-                # Split by labels
-                # We can use Positive Lookahead or just split logic
-                parts = re.split(r'\s+New Trainer:\s+|\s+New Owner:\s+', content)
+                # Split by labels "New Trainer:" and "New Owner:" (flexible spaces)
+                # Split using capturing group to keep delimiters if needed, but here just split
+                parts = re.split(r'\s*New\s*Trainer\s*:\s*|\s*New\s*Owner\s*:\s*', content, flags=re.IGNORECASE)
                 
                 if len(parts) >= 3:
                     horse_name = parts[0].strip()
