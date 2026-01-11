@@ -9,6 +9,7 @@ export default function Claims() {
     const [error, setError] = useState(null);
     const [selectedTrack, setSelectedTrack] = useState('All Tracks');
     const [selectedDate, setSelectedDate] = useState('All Dates');
+    const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
 
     useEffect(() => {
         const fetchClaims = async () => {
@@ -32,10 +33,11 @@ export default function Claims() {
         fetchClaims();
     }, []);
 
-    // Filter logic
+    // Filter and Sort logic
     useEffect(() => {
-        let filtered = claims;
+        let filtered = [...claims];
 
+        // 1. Filter
         if (selectedTrack !== 'All Tracks') {
             filtered = filtered.filter(claim =>
                 claim.track_name === selectedTrack || claim.track_code === selectedTrack
@@ -46,8 +48,48 @@ export default function Claims() {
             filtered = filtered.filter(claim => claim.race_date === selectedDate);
         }
 
+        // 2. Sort
+        if (sortConfig.key) {
+            filtered.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
+
+                // Handle special cases
+                if (sortConfig.key === 'claim_price' || sortConfig.key === 'race_number') {
+                    aValue = Number(aValue || 0);
+                    bValue = Number(bValue || 0);
+                } else if (sortConfig.key === 'new_owner') {
+                    aValue = (a.new_owner_name || '').toLowerCase();
+                    bValue = (b.new_owner_name || '').toLowerCase();
+                } else if (sortConfig.key === 'new_trainer') {
+                    aValue = (a.new_trainer_name || '').toLowerCase();
+                    bValue = (b.new_trainer_name || '').toLowerCase();
+                } else {
+                    // Strings (date, track, horse)
+                    aValue = (aValue || '').toString().toLowerCase();
+                    bValue = (bValue || '').toString().toLowerCase();
+                }
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+
         setFilteredClaims(filtered);
-    }, [selectedTrack, selectedDate, claims]);
+    }, [selectedTrack, selectedDate, claims, sortConfig]);
+
+    const handleSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
 
     // Unique tracks and dates for filters
     const tracks = ['All Tracks', ...new Set(claims.map(c => c.track_name || c.track_code).filter(Boolean))].sort();
@@ -104,12 +146,42 @@ export default function Claims() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-gray-900/50 border-b border-purple-900/30 text-gray-400 text-sm uppercase">
-                                <th className="p-4 font-semibold">Date</th>
-                                <th className="p-4 font-semibold">Track</th>
-                                <th className="p-4 font-semibold">Race</th>
-                                <th className="p-4 font-semibold">Horse</th>
-                                <th className="p-4 font-semibold">New Owner / Trainer</th>
-                                <th className="p-4 font-semibold text-right">Price</th>
+                                <th
+                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('race_date')}
+                                >
+                                    Date {sortConfig.key === 'race_date' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th
+                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('track_name')}
+                                >
+                                    Track {sortConfig.key === 'track_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th
+                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('race_number')}
+                                >
+                                    Race {sortConfig.key === 'race_number' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th
+                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('horse_name')}
+                                >
+                                    Horse {sortConfig.key === 'horse_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th
+                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('new_owner')}
+                                >
+                                    New Owner / Trainer {sortConfig.key === 'new_owner' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th
+                                    className="p-4 font-semibold text-right cursor-pointer hover:text-purple-400 transition select-none"
+                                    onClick={() => handleSort('claim_price')}
+                                >
+                                    Price {sortConfig.key === 'claim_price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                </th>
                                 <th className="p-4 font-semibold text-center">Action</th>
                             </tr>
                         </thead>
