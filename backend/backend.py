@@ -244,9 +244,12 @@ def get_past_races():
         limit = int(request.args.get('limit', 50))
 
         # Build query - strictly previous days
+        # We need the horses join for the explicit winning_horse_id link
         query = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location), winning_horse:hranalyzer_horses(horse_name)')\
             .lt('race_date', today)\
+            .order('race_date', desc=True)\
+            .order('race_number', desc=False)\
             .in_('race_status', ['completed', 'past_drf_only'])
 
         if track:
@@ -256,15 +259,29 @@ def get_past_races():
         if end_date:
             query = query.lte('race_date', end_date)
 
-        response = query.order('race_date', desc=True)\
-            .order('race_number')\
-            .limit(limit)\
-            .execute()
+        response = query.limit(limit).execute()
 
         races = []
         for race in response.data:
+            winner_name = 'N/A'
+            
+            # 1. Try winning_horse relation (explicit link in races table)
+            if race.get('winning_horse'):
+                winner_name = race['winning_horse'].get('horse_name', 'N/A')
+            
+            # 2. Fallback: Search entries table for finish_position=1
+            if winner_name == 'N/A':
+                w_res = supabase.table('hranalyzer_race_entries')\
+                    .select('hranalyzer_horses(horse_name)')\
+                    .eq('race_id', race['id'])\
+                    .eq('finish_position', 1)\
+                    .execute()
+                
+                if w_res.data and w_res.data[0].get('hranalyzer_horses'):
+                    winner_name = w_res.data[0]['hranalyzer_horses'].get('horse_name', 'N/A')
+
             # Get entry count
-            entries_response = supabase.table('hranalyzer_race_entries')\
+            ec_res = supabase.table('hranalyzer_race_entries')\
                 .select('id', count='exact')\
                 .eq('race_id', race['id'])\
                 .execute()
@@ -280,15 +297,14 @@ def get_past_races():
                 'surface': race['surface'],
                 'distance': race['distance'],
                 'purse': race['purse'],
-                'entry_count': entries_response.count,
+                'entry_count': ec_res.count,
                 'race_status': race['race_status'],
                 'data_source': race['data_source'],
                 'id': race['id'],
-                'winner': race.get('winning_horse', {}).get('horse_name') if race.get('winning_horse') else 'N/A',
+                'winner': winner_name,
                 'time': race.get('final_time') or 'N/A',
                 'link': race.get('equibase_chart_url') or '#'
             })
-
 
         return jsonify({
             'races': races,
@@ -296,7 +312,9 @@ def get_past_races():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'details': 'Error in get_past_races'}), 500
 
 
 @app.route('/api/race-details/<race_key>', methods=['GET'])

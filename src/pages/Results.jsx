@@ -114,13 +114,16 @@ export default function Results() {
                                 <th className="p-4 cursor-pointer hover:bg-purple-900/50 transition duration-200" onClick={() => handleSort('time')}>
                                     Time {getArrow('time')}
                                 </th>
+                                <th className="p-4 cursor-pointer hover:bg-purple-900/50 transition duration-200" onClick={() => handleSort('race_status')}>
+                                    Status {getArrow('race_status')}
+                                </th>
                                 <th className="p-4">Details</th>
                             </tr>
                         </thead>
                         <tbody>
                             {sortedAndFilteredResults.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="p-8 text-center text-gray-500 italic">No race results found.</td>
+                                    <td colSpan="7" className="p-8 text-center text-gray-500 italic">No race results found.</td>
                                 </tr>
                             ) : (
                                 sortedAndFilteredResults.map((result, index) => (
@@ -130,6 +133,14 @@ export default function Results() {
                                         <td className="p-4">{result.race_number}</td>
                                         <td className="p-4 text-purple-400 font-medium">{result.winner || 'N/A'}</td>
                                         <td className="p-4 font-mono text-sm">{result.time || 'N/A'}</td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${result.race_status === 'completed'
+                                                    ? 'bg-green-900/40 text-green-400 border border-green-900/50'
+                                                    : 'bg-gray-900/40 text-gray-400 border border-gray-900/50'
+                                                }`}>
+                                                {result.race_status === 'completed' ? 'Completed' : 'Upcoming/No Data'}
+                                            </span>
+                                        </td>
                                         <td className="p-4">
                                             {result.link && result.link !== '#' ? (
                                                 <a href={result.link} target="_blank" rel="noopener noreferrer" className="text-purple-500 hover:text-purple-400 transition duration-200 flex items-center gap-1">
