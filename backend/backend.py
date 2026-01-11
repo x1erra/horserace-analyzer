@@ -244,13 +244,22 @@ def get_past_races():
         limit = int(request.args.get('limit', 50))
 
         # Build query - strictly previous days
-        # We need the horses join for the explicit winning_horse_id link
+        # We use joins to fetch winners and entry counts in a single query (N+1 optimization)
         query = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name, location), winning_horse:hranalyzer_horses(horse_name)')\
+            .select('''
+                *, 
+                track:hranalyzer_tracks(track_name, location), 
+                winning_horse:hranalyzer_horses(horse_name),
+                winner_entry:hranalyzer_race_entries(finish_position, horse:hranalyzer_horses(horse_name)),
+                all_entries:hranalyzer_race_entries(id)
+            ''')\
             .lt('race_date', today)\
             .order('race_date', desc=True)\
             .order('race_number', desc=False)\
             .in_('race_status', ['completed', 'past_drf_only'])
+
+        # Filter the winner_entry join to only include the first place horse
+        query = query.eq('winner_entry.finish_position', 1)
 
         if track:
             query = query.eq('track_code', track)
@@ -265,31 +274,20 @@ def get_past_races():
         for race in response.data:
             winner_name = 'N/A'
             
-            # 1. Try winning_horse relation (explicit link in races table)
+            # 1. Try explicit winning_horse relation
             if race.get('winning_horse'):
                 winner_name = race['winning_horse'].get('horse_name', 'N/A')
             
-            # 2. Fallback: Search entries table for finish_position=1
-            if winner_name == 'N/A':
-                w_res = supabase.table('hranalyzer_race_entries')\
-                    .select('hranalyzer_horses(horse_name)')\
-                    .eq('race_id', race['id'])\
-                    .eq('finish_position', 1)\
-                    .execute()
-                
-                if w_res.data and w_res.data[0].get('hranalyzer_horses'):
-                    winner_name = w_res.data[0]['hranalyzer_horses'].get('horse_name', 'N/A')
-
-            # Get entry count
-            ec_res = supabase.table('hranalyzer_race_entries')\
-                .select('id', count='exact')\
-                .eq('race_id', race['id'])\
-                .execute()
+            # 2. Try the joined winner_entry (fallback for crawled results)
+            if winner_name == 'N/A' and race.get('winner_entry'):
+                winners = race['winner_entry']
+                if winners and winners[0].get('horse'):
+                    winner_name = winners[0]['horse'].get('horse_name', 'N/A')
 
             races.append({
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
-                'track_name': race.get('hranalyzer_tracks', {}).get('track_name', race['track_code']),
+                'track_name': race.get('track', {}).get('track_name', race['track_code']),
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': race['post_time'],
@@ -297,13 +295,13 @@ def get_past_races():
                 'surface': race['surface'],
                 'distance': race['distance'],
                 'purse': race['purse'],
-                'entry_count': ec_res.count,
+                'entry_count': len(race.get('all_entries', [])),
                 'race_status': race['race_status'],
                 'data_source': race['data_source'],
                 'id': race['id'],
                 'winner': winner_name,
                 'time': race.get('final_time') or 'N/A',
-                'link': race.get('equibase_chart_url') or '#'
+                'link': race.get('equibase_chart_url') or 'N/A'
             })
 
         return jsonify({
