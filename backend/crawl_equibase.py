@@ -443,7 +443,6 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'race_key': race_key,
             'track_id': track_id,
             'track_code': track_code,
-            'track_name': race_data.get('track_name', track_code),
             'race_date': race_date.strftime('%Y-%m-%d'),
             'race_number': race_number,
             'post_time': race_data.get('post_time'),
@@ -489,6 +488,25 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
         return False
 
 
+def get_or_create_participant(supabase, table_name: str, name_col: str, name_val: str) -> Optional[str]:
+    """Generic helper to get or create a named entity (Jockey, Trainer, etc)"""
+    try:
+        # Check existing
+        res = supabase.table(table_name).select('id').eq(name_col, name_val).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]['id']
+        
+        # Create new
+        new_record = {name_col: name_val}
+        res = supabase.table(table_name).insert(new_record).execute()
+        if res.data:
+            return res.data[0]['id']
+            
+    except Exception as e:
+        logger.error(f"Error in get_or_create_participant for {table_name}: {e}")
+    return None
+
+
 def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
     """Insert horse and race entry"""
     try:
@@ -497,19 +515,30 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
             return
 
         # Get or create horse
-        horse_result = supabase.table('hranalyzer_horses').select('id').eq('name', horse_name).execute()
+        horse_result = supabase.table('hranalyzer_horses').select('id').eq('horse_name', horse_name).execute()
 
         if horse_result.data and len(horse_result.data) > 0:
             horse_id = horse_result.data[0]['id']
         else:
             # Create horse
-            new_horse = {'name': horse_name}
-            horse_insert = supabase.table('hranalyzer_horses').insert(new_horse).execute()
+            new_horse = {'horse_name': horse_name}
             if horse_insert.data:
                 horse_id = horse_insert.data[0]['id']
             else:
                 logger.error(f"Could not create horse: {horse_name}")
                 return
+
+        # Get/Create Jockey
+        jockey_id = None
+        jockey_name = horse_data.get('jockey')
+        if jockey_name:
+            jockey_id = get_or_create_participant(supabase, 'hranalyzer_jockeys', 'jockey_name', jockey_name)
+
+        # Get/Create Trainer
+        trainer_id = None
+        trainer_name = horse_data.get('trainer')
+        if trainer_name:
+            trainer_id = get_or_create_participant(supabase, 'hranalyzer_trainers', 'trainer_name', trainer_name)
 
         # Create race entry
         entry_data = {
@@ -517,8 +546,8 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
             'horse_id': horse_id,
             'program_number': horse_data.get('program_number'),
             'finish_position': horse_data.get('finish_position'),
-            'jockey_id': horse_data.get('jockey'),
-            'trainer_id': horse_data.get('trainer'),
+            'jockey_id': jockey_id,
+            'trainer_id': trainer_id,
             'final_odds': horse_data.get('odds'),
             'win_payout': horse_data.get('win_payout'),
             'place_payout': horse_data.get('place_payout'),
