@@ -198,6 +198,30 @@ CREATE TABLE IF NOT EXISTS hranalyzer_exotic_payouts (
 CREATE INDEX IF NOT EXISTS idx_hranalyzer_exotic_race ON hranalyzer_exotic_payouts(race_id);
 
 -- ==============================================
+-- CLAIMS TABLE
+-- ==============================================
+
+CREATE TABLE IF NOT EXISTS hranalyzer_claims (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  race_id UUID NOT NULL REFERENCES hranalyzer_races(id) ON DELETE CASCADE,
+  
+  -- Horse info
+  horse_name VARCHAR(255) NOT NULL,
+  program_number VARCHAR(10),
+  
+  -- Claim info
+  new_trainer_name VARCHAR(255),
+  new_owner_name VARCHAR(255),
+  claim_price DECIMAL(12, 2),
+  
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  CONSTRAINT unique_race_claim UNIQUE(race_id, horse_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hranalyzer_claims_race ON hranalyzer_claims(race_id);
+
+-- ==============================================
 -- LOGGING TABLES
 -- ==============================================
 

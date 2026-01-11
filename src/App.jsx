@@ -9,6 +9,7 @@ import Predictions from './pages/Predictions.jsx';
 import Betting from './pages/Betting.jsx';
 import Results from './pages/Results.jsx'; // Added for Results page
 import Upload from './pages/Upload.jsx'; // Added for Upload page
+import Claims from './pages/Claims.jsx'; // Added for Claims page
 import { useState } from 'react';
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
               <Route path="/betting" element={<Betting />} />
               <Route path="/race/:id" element={<RaceDetails />} />
               <Route path="/results" element={<Results />} /> {/* New route */}
+              <Route path="/claims" element={<Claims />} /> {/* New route */}
               <Route path="/upload" element={<Upload />} /> {/* New route */}
             </Routes>
           </main>

@@ -139,7 +139,8 @@ def parse_race_chart_text(text: str) -> Dict:
         'final_time': None,
         'fractional_times': [],
         'horses': [],
-        'exotic_payouts': []
+        'exotic_payouts': [],
+        'claims': []
     }
 
     lines = text.split('\n')
@@ -205,6 +206,9 @@ def parse_race_chart_text(text: str) -> Dict:
     if len(frac_match) > 0:
         # Filter to reasonable fractional times (between 20-70 seconds usually)
         data['fractional_times'] = [t for t in frac_match if 20.0 < float(t) < 70.0][:4]
+
+    # Extract claims
+    data['claims'] = parse_claims_text(text)
 
     return data
 
@@ -354,6 +358,84 @@ def parse_exotic_payouts(text: str) -> List[Dict]:
     return payouts
 
 
+def parse_claims_text(text: str) -> List[Dict]:
+    """
+    Parse claimed horses information
+    Example: 1 Claimed Horse(s): Coquito New Trainer: Linda Rice New Owner: Linda Rice
+    And prices: Claiming Prices: 1 - Coquito: $20,000; ...
+    """
+    claims = []
+    lines = text.split('\n')
+    
+    # 1. Parse Claiming Prices first to get price map
+    # Example: Claiming Prices: 1 - Coquito: $20,000; 3 - Enigmatic: $20,000;
+    price_map = {}
+    price_match = re.search(r'Claiming Prices:(.*?)(?:Scratched|Total|Footnotes|$)', text, re.DOTALL | re.IGNORECASE)
+    if price_match:
+        price_text = price_match.group(1).strip()
+        # Split by semicolon or just find all matches
+        # Pattern: number - Name: $price
+        price_items = re.findall(r'(\d+)\s*-\s*([^:]+):\s*\$([\d,]+)', price_text)
+        for num, name, price in price_items:
+            # Normalize name
+            clean_name = re.sub(r'[^\w\s]', '', name).strip()
+            price_val = float(price.replace(',', ''))
+            price_map[clean_name] = price_val
+
+    # 2. Parse Claimed Horse lines
+    # Look for "Claimed Horse(s):"
+    
+    for line in lines:
+        if 'Claimed Horse(s):' in line:
+            # Format often: "N Claimed Horse(s): Name New Trainer: Name New Owner: Name"
+            # Use regex to extract parts
+            # Note: Sometimes multiple claimed horses are listed? Usually one per line if multiple lines, or multiple on one line?
+            # The example shows "1 Claimed Horse(s): Coquito New Trainer... New Owner..."
+            
+            # Pattern to catch the specific format in the screenshot
+            # It seems to be: [Count] Claimed Horse(s): [Name] New Trainer: [Trainer] New Owner: [Owner]
+            
+            # Try to split by known delimiters
+            try:
+                # Remove the prefix "N Claimed Horse(s):"
+                content = re.sub(r'^\d*\s*Claimed Horse\(s\):\s*', '', line.strip())
+                
+                # Split by labels
+                # We can use Positive Lookahead or just split logic
+                parts = re.split(r'\s+New Trainer:\s+|\s+New Owner:\s+', content)
+                
+                if len(parts) >= 3:
+                    horse_name = parts[0].strip()
+                    trainer = parts[1].strip()
+                    owner = parts[2].strip()
+                    
+                    # Clean horse name (sometimes has program number prefix like "1 - Coquito" or just "Coquito")
+                    # Usage in price map might trigger finding simple name
+                    
+                    clean_horse_name = re.sub(r'[^\w\s]', '', horse_name).strip()
+                    
+                    price = price_map.get(clean_horse_name)
+                    # If not found, try fuzzy match or partial
+                    if not price:
+                        for k, v in price_map.items():
+                            if k in clean_horse_name or clean_horse_name in k:
+                                price = v
+                                break
+                    
+                    claims.append({
+                        'horse_name': horse_name,
+                        'new_trainer': trainer,
+                        'new_owner': owner,
+                        'claim_price': price
+                    })
+                
+            except Exception as e:
+                logger.debug(f"Error parsing claim line '{line}': {e}")
+                continue
+
+    return claims
+
+
 def extract_race_from_pdf(pdf_url: str, max_retries: int = 3) -> Optional[Dict]:
     """
     Extract race data from Equibase PDF using local parsing
@@ -481,6 +563,12 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             for payout in payouts:
                 insert_exotic_payout(supabase, race_id, payout)
 
+        # Insert claims
+        claims_data = race_data.get('claims', [])
+        if claims_data:
+            for claim in claims_data:
+                insert_claim(supabase, race_id, claim)
+
         return True
 
     except Exception as e:
@@ -585,6 +673,30 @@ def insert_exotic_payout(supabase, race_id: int, payout_data: Dict):
 
     except Exception as e:
         logger.error(f"Error inserting exotic payout: {e}")
+
+
+def insert_claim(supabase, race_id: int, claim_data: Dict):
+    """Insert claim data"""
+    try:
+        claim_insert = {
+            'race_id': race_id,
+            'horse_name': claim_data.get('horse_name'),
+            'new_trainer_name': claim_data.get('new_trainer'),
+            'new_owner_name': claim_data.get('new_owner'),
+            'claim_price': claim_data.get('claim_price')
+        }
+        
+        # Try to match program number if possible, but for now we rely on horse_name
+        
+        supabase.table('hranalyzer_claims').insert(claim_insert).execute()
+        logger.debug(f"Inserted claim for {claim_data.get('horse_name')}")
+        
+    except Exception as e:
+        # Ignore duplicate errors if re-running
+        if 'unique' in str(e) or 'duplicate' in str(e):
+             pass
+        else:
+             logger.error(f"Error inserting claim: {e}")
 
 
 def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:

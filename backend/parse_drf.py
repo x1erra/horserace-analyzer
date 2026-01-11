@@ -868,16 +868,48 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                     successful_races += 1
                     logger.info(f"Inserted race {race_data['race_number']} with {entries_count} entries")
 
+            # Update upload log if ID provided
+            if upload_log_id:
+                try:
+                    supabase.table('hranalyzer_upload_logs').update({
+                        'upload_status': 'completed',
+                        'parse_status': 'success',
+                        'races_extracted': successful_races,
+                        'entries_extracted': total_entries,
+                        'track_code': metadata.get('track_code'),
+                        'race_date': metadata.get('race_date'),
+                        'parsed_at': datetime.now().isoformat()
+                    }).eq('id', upload_log_id).execute()
+                except Exception as e:
+                    logger.error(f"Error updating upload log: {e}")
+
             return {
                 'success': True,
                 'races_count': successful_races,
                 'entries_count': total_entries,
-                'track_code': metadata['track_code'],
-                'race_date': metadata['race_date']
+                'track_code': metadata.get('track_code'),
+                'race_date': metadata.get('race_date')
             }
 
     except Exception as e:
         logger.error(f"Error parsing PDF {pdf_path}: {e}", exc_info=True)
+        
+        # Update upload log on failure
+        if upload_log_id:
+            try:
+                # Need to get supabase client again if it wasn't initialized
+                if 'supabase' not in locals():
+                    supabase = get_supabase_client()
+                    
+                supabase.table('hranalyzer_upload_logs').update({
+                    'upload_status': 'failed',
+                    'parse_status': 'failed',
+                    'error_message': str(e),
+                    'parsed_at': datetime.now().isoformat()
+                }).eq('id', upload_log_id).execute()
+            except Exception as log_error:
+                logger.error(f"Error updating fail status in upload log: {log_error}")
+                
         return {
             'success': False,
             'error': str(e)
@@ -907,15 +939,18 @@ if __name__ == '__main__':
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python3 parse_drf.py <pdf_path>")
+        print("Usage: python3 parse_drf.py <pdf_path> [upload_log_id]")
         sys.exit(1)
 
     pdf_path = sys.argv[1]
+    upload_log_id = sys.argv[2] if len(sys.argv) > 2 else None
 
     print(f"Parsing DRF PDF: {pdf_path}")
+    if upload_log_id:
+        print(f"Log ID: {upload_log_id}")
     print("=" * 60)
 
-    result = parse_drf_pdf_safe(pdf_path)
+    result = parse_drf_pdf_safe(pdf_path, upload_log_id)
 
     print("\nResult:")
     print(f"  Success: {result['success']}")

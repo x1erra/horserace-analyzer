@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import RecentUploads from '../components/RecentUploads';
 
 export default function Dashboard() {
     const [races, setRaces] = useState([]);
@@ -65,6 +66,10 @@ export default function Dashboard() {
                         Upload DRF PDF
                     </Link>
                 </div>
+
+                <div className="mt-12">
+                    <RecentUploads limit={3} compact={true} />
+                </div>
             </div>
         );
     }
@@ -126,6 +131,10 @@ export default function Dashboard() {
                         </Link>
                     </div>
                 ))}
+            </div>
+
+            <div className="mt-12 border-t border-gray-800 pt-8">
+                <RecentUploads limit={5} compact={true} />
             </div>
         </div>
     );

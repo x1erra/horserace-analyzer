@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import RecentUploads from '../components/RecentUploads';
 
 export default function Upload() {
     const navigate = useNavigate();
@@ -184,8 +185,8 @@ export default function Upload() {
                 </ol>
             </div>
 
-            {/* Recent Uploads (optional future enhancement) */}
-            {/* Could show list of recent uploads here */}
+            {/* Recent Uploads */}
+            <RecentUploads limit={10} />
         </div>
     );
 }

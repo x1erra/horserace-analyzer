@@ -67,6 +67,17 @@ export default function Sidebar({ isOpen, onClose }) {
                         Results
                     </NavLink>
                     <NavLink
+                        to="/claims"
+                        onClick={onClose}
+                        className={({ isActive }) =>
+                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            }`
+                        }
+                    >
+                        <HiOutlineUser className="w-6 h-6" />
+                        Claims
+                    </NavLink>
+                    <NavLink
                         to="/horses"
                         onClick={onClose}
                         className={({ isActive }) =>

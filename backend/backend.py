@@ -72,13 +72,29 @@ def upload_drf():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
+        # Create upload log entry
+        supabase = get_supabase_client()
+        upload_log = supabase.table('hranalyzer_upload_logs').insert({
+            'filename': filename,
+            'file_path': filepath,
+            'file_size': os.path.getsize(filepath),
+            'upload_status': 'parsing'
+        }).execute()
+        
+        upload_log_id = upload_log.data[0]['id'] if upload_log.data else None
+
         # Use sys.executable to get current python interpreter (works in venv and Docker)
         import sys
         python_bin = sys.executable
         parser_script = os.path.join(os.path.dirname(__file__), 'parse_drf.py')
+        
+        # Prepare arguments
+        args = [python_bin, parser_script, filepath]
+        if upload_log_id:
+            args.append(upload_log_id)
 
         result = subprocess.run(
-            [python_bin, parser_script, filepath],
+            args,
             capture_output=True,
             text=True,
             timeout=60
@@ -123,6 +139,36 @@ def upload_drf():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/uploads', methods=['GET'])
+def get_recent_uploads():
+    """Get list of recent DRF uploads"""
+    try:
+        supabase = get_supabase_client()
+        limit = int(request.args.get('limit', 10))
+        
+        response = supabase.table('hranalyzer_upload_logs')\
+            .select('*')\
+            .order('uploaded_at', desc=True)\
+            .limit(limit)\
+            .execute()
+            
+        return jsonify({
+            'uploads': response.data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/uploads/<filename>', methods=['GET'])
+def serve_upload(filename):
+    """Serve uploaded PDF file"""
+    from flask import send_from_directory
+    try:
+        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    except Exception as e:
+        return jsonify({'error': 'File not found'}), 404
 
 
 @app.route('/api/todays-races', methods=['GET'])
@@ -302,14 +348,21 @@ def get_race_details(race_key):
                 'show_payout': entry['show_payout']
             })
 
-        # Get exotic payouts if this is a completed race
+        # Get exotic payouts and claims if this is a completed race
         exotic_payouts = []
+        claims = []
         if race['race_status'] == 'completed':
             exotics_response = supabase.table('hranalyzer_exotic_payouts')\
                 .select('*')\
                 .eq('race_id', race['id'])\
                 .execute()
             exotic_payouts = exotics_response.data
+            
+            claims_response = supabase.table('hranalyzer_claims')\
+                .select('*')\
+                .eq('race_id', race['id'])\
+                .execute()
+            claims = claims_response.data
 
         return jsonify({
             'race': {
@@ -334,10 +387,79 @@ def get_race_details(race_key):
                 'equibase_pdf_url': race['equibase_pdf_url']
             },
             'entries': entries,
-            'exotic_payouts': exotic_payouts
+            'exotic_payouts': exotic_payouts,
+            'claims': claims
         })
 
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/claims', methods=['GET'])
+def get_claims():
+    """
+    Get claimed horses with optional filters
+    Query params:
+    - track: Filter by track code
+    - start_date: Filter by date range
+    - end_date: Filter by date range
+    - limit: Limit results (default 100)
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get query parameters
+        track = request.args.get('track')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = int(request.args.get('limit', 100))
+        
+        # Select claims with race info
+        query = supabase.table('hranalyzer_claims')\
+            .select('*, hranalyzer_races(race_key, track_code, race_date, race_number, hranalyzer_tracks(track_name))')\
+            .order('created_at', desc=True)\
+            .limit(limit)
+            
+        response = query.execute()
+        
+        claims = []
+        for item in response.data:
+            race = item.get('hranalyzer_races')
+            if not race:
+                continue
+            
+            # Helper to access nested track name safely
+            track_info = race.get('hranalyzer_tracks')
+            track_name = track_info.get('track_name') if track_info else race['track_code']
+
+            # Python-side filtering
+            if track and race['track_code'] != track and track_name != track:
+                continue
+            if start_date and race['race_date'] < start_date:
+                continue
+            if end_date and race['race_date'] > end_date:
+                continue
+            
+            claims.append({
+                'id': item['id'],
+                'race_key': race['race_key'],
+                'race_date': race['race_date'],
+                'track_code': race['track_code'],
+                'track_name': track_name,
+                'race_number': race['race_number'],
+                'horse_name': item['horse_name'],
+                'new_trainer': item['new_trainer_name'],
+                'new_owner': item['new_owner_name'],
+                'claim_price': item['claim_price']
+            })
+            
+        return jsonify({
+            'claims': claims,
+            'count': len(claims)
+        })
+
+    except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

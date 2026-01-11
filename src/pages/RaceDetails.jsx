@@ -38,7 +38,7 @@ export default function RaceDetails() {
     if (error) return <div className="text-red-400 text-center p-20">{error}</div>;
     if (!raceData || !raceData.race) return <div className="text-gray-400 text-center p-20">Race not found.</div>;
 
-    const { race, entries, exotic_payouts } = raceData;
+    const { race, entries, exotic_payouts, claims } = raceData;
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
 
@@ -75,10 +75,10 @@ export default function RaceDetails() {
                     Race {race.race_number} - {race.track_name}
                 </h3>
                 <span className={`px-4 py-2 rounded-md text-sm font-medium ${isCompleted
-                        ? 'bg-green-900/30 text-green-400'
-                        : isUpcoming
-                            ? 'bg-blue-900/30 text-blue-400'
-                            : 'bg-gray-900/30 text-gray-400'
+                    ? 'bg-green-900/30 text-green-400'
+                    : isUpcoming
+                        ? 'bg-blue-900/30 text-blue-400'
+                        : 'bg-gray-900/30 text-gray-400'
                     }`}>
                     {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
                 </span>
@@ -191,6 +191,37 @@ export default function RaceDetails() {
                                 <p className="text-green-400 text-lg font-bold mt-2">${payout.payout}</p>
                             </div>
                         ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Claims (only for completed races) */}
+            {isCompleted && claims && claims.length > 0 && (
+                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '225ms' }}>
+                    <h4 className="text-xl font-semibold text-white mb-4">Claims</h4>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-gray-300">
+                            <thead className="bg-purple-900/50">
+                                <tr>
+                                    <th className="p-4">Horse</th>
+                                    <th className="p-4">New Trainer</th>
+                                    <th className="p-4">New Owner</th>
+                                    <th className="p-4 text-right">Price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {claims.map((claim, index) => (
+                                    <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition">
+                                        <td className="p-4 font-bold text-white">{claim.horse_name}</td>
+                                        <td className="p-4">{claim.new_trainer_name || 'N/A'}</td>
+                                        <td className="p-4">{claim.new_owner_name || 'N/A'}</td>
+                                        <td className="p-4 text-right text-green-400">
+                                            {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
