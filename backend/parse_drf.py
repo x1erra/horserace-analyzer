@@ -214,23 +214,36 @@ def is_race_header_page(page_text: str) -> Tuple[bool, Optional[int]]:
     if len(lines) < 4:
         return False, None
 
-    # Check line 2 for standalone race number
-    line2 = lines[1].strip()
-    if not line2.isdigit():
-        return False, None
+    # Scan first 6 lines for the race number (standalone digit)
+    # This handles cases where PDF extraction adds empty lines at top
+    for i in range(min(6, len(lines) - 2)):
+        line = lines[i].strip()
+        
+        if line.isdigit():
+            # Potential race number
+            race_number = int(line)
+            
+            # Check next few lines for Track Name or "Race" keywords
+            # This distinguishes it from a horse program number
+            # Horse entry: Next line has Horse Name, "Life", "Sire", etc.
+            # Race header: Next line has Track Name, Distance, etc.
+            
+            context_lines = [l.upper() for l in lines[i+1:i+4]]
+            context_text = " ".join(context_lines)
+            
+            is_valid_header = False
+            
+            # Check for track indicators
+            if any(track in context_text for track in ['GULFSTREAM', 'PARK', 'DOWNS', 'AQUEDUCT', 'BELMONT', 'KEENELAND', 'SARATOGA', 'DEL MAR', 'SANTA ANITA']):
+                is_valid_header = True
+                
+            # Double check it's not a horse entry
+            # Horse entries often have "Life" or breeding info immediately
+            if 'LIFE' in context_text or 'SIRE:' in context_text:
+                continue
 
-    race_number = int(line2)
-
-    # Check line 3 for track name (not horse info)
-    line3 = lines[2].strip()
-
-    # Race header pages have track name on line 3
-    # Horse entry pages have horse names/breeding info
-    # Track names contain "Park", "Downs", or are standalone track names
-    if any(track in line3.upper() for track in ['GULFSTREAM PARK', 'GULFSTREAM', 'PARK', 'DOWNS']):
-        # Make sure it's not a horse entry (which would have "Life", "Sire:", etc.)
-        if 'LIFE' not in page_text[:500].upper() or line3.strip() == 'Gulfstream Park':
-            return True, race_number
+            if is_valid_header:
+                return True, race_number
 
     return False, None
 
@@ -724,8 +737,10 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                 is_header, race_number = is_race_header_page(page_text)
 
                 if is_header:
-                    # If this is Race 2 header and we have Race 1 entries, save Race 1 first
-                    if race_number == 2 and len(race_1_entries) > 0:
+                    # Logic for Implicit Race 1:
+                    # If this is the FIRST header we've found (current_race is None)
+                    # AND we have collected race_1_entries (meaning we saw horse pages before this header)
+                    if current_race is None and len(race_1_entries) > 0:
                         race_1 = {
                             'race_number': 1,
                             'post_time': None,
@@ -738,7 +753,8 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                             'entries': race_1_entries
                         }
                         races_data.append(race_1)
-                        logger.info(f"Found race 1 with {len(race_1_entries)} entries")
+                        logger.info(f"Found implicit race 1 with {len(race_1_entries)} entries")
+                        race_1_entries = [] # Clear to prevent double add
 
                     # Save previous race if exists
                     if current_race:
