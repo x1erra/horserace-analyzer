@@ -208,8 +208,10 @@ def get_todays_races():
                 'distance': race['distance'],
                 'purse': race['purse'],
                 'entry_count': entries_response.count,
-                'race_status': race['race_status']
+                'race_status': race['race_status'],
+                'id': race['id']
             })
+
 
         return jsonify({
             'races': races,
@@ -280,8 +282,10 @@ def get_past_races():
                 'purse': race['purse'],
                 'entry_count': entries_response.count,
                 'race_status': race['race_status'],
-                'data_source': race['data_source']
+                'data_source': race['data_source'],
+                'id': race['id']
             })
+
 
         return jsonify({
             'races': races,
@@ -461,6 +465,168 @@ def get_claims():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/bets', methods=['POST'])
+def place_bet():
+    """Place a new bet"""
+    try:
+        data = request.get_json()
+        race_id = data.get('race_id')
+        horse_number = data.get('horse_number')
+        horse_name = data.get('horse_name')
+        bet_type = data.get('bet_type', 'Win')
+        amount = data.get('amount', 2.00)
+
+        if not race_id or not bet_type:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        supabase = get_supabase_client()
+        
+        # Verify race exists
+        race = supabase.table('hranalyzer_races').select('id, race_status').eq('id', race_id).single().execute()
+        if not race.data:
+            return jsonify({'error': 'Race not found'}), 404
+
+        # Insert bet
+        bet = {
+            'race_id': race_id,
+            'horse_number': horse_number,
+            'horse_name': horse_name,
+            'bet_type': bet_type,
+            'bet_amount': amount,
+            'status': 'Pending'
+        }
+        
+        response = supabase.table('hranalyzer_bets').insert(bet).execute()
+        
+        return jsonify({
+            'success': True,
+            'bet': response.data[0]
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/bets', methods=['GET'])
+def get_bets():
+    """Get all bets with race info"""
+    try:
+        supabase = get_supabase_client()
+        limit = int(request.args.get('limit', 50))
+        
+        response = supabase.table('hranalyzer_bets')\
+            .select('*, hranalyzer_races(race_key, race_number, race_date, track_code, race_status)')\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+            
+        return jsonify({
+            'bets': response.data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/bets/resolve', methods=['POST'])
+def resolve_bets():
+    """
+    Check pending bets against completed races and resolve them.
+    Can be triggered manually or by crawler.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # 1. Get all pending bets
+        pending_bets = supabase.table('hranalyzer_bets')\
+            .select('*, hranalyzer_races(race_status, id)')\
+            .eq('status', 'Pending')\
+            .execute()
+            
+        resolved_count = 0
+        updated_bets = []
+        
+        for bet in pending_bets.data:
+            race = bet.get('hranalyzer_races')
+            if not race or race.get('race_status') != 'completed':
+                continue
+                
+            # Race is completed! Check results.
+            race_id = bet['race_id']
+            horse_number = bet['horse_number']
+            bet_type = bet['bet_type']
+            
+            # Fetch entries for this race to find the winner/payouts
+            entries = supabase.table('hranalyzer_race_entries')\
+                .select('*')\
+                .eq('race_id', race_id)\
+                .execute()
+                
+            # Find the horse we bet on
+            my_horse = next((e for e in entries.data if e['program_number'] == horse_number), None)
+            
+            if not my_horse:
+                # Scratched or not found?
+                # Check scratches
+                # For now mark as Loss if not found, or maybe 'Void' if scratched logic strictly implemented
+                # Simple logic: Loss
+                new_status = 'Loss'
+                payout = 0
+            elif my_horse.get('scratched'):
+                new_status = 'Scratched' # Refund usually
+                payout = 0 # Or refund amount?
+            else:
+                new_status = 'Loss'
+                payout = 0
+                
+                if bet_type == 'Win':
+                    if my_horse.get('finish_position') == 1:
+                        new_status = 'Win'
+                        payout = my_horse.get('win_payout', 0) or 0
+                elif bet_type == 'Place':
+                    if my_horse.get('finish_position') in [1, 2]:
+                        new_status = 'Win'
+                        payout = my_horse.get('place_payout', 0) or 0
+                elif bet_type == 'Show':
+                    if my_horse.get('finish_position') in [1, 2, 3]:
+                        new_status = 'Win'
+                        payout = my_horse.get('show_payout', 0) or 0
+                        
+                # Handle multiplier (payouts are usually for $2 bet)
+                if new_status == 'Win':
+                    # Basic payout is for $2. If bet_amount is different, scale it.
+                    # Payout from Equibase is usually for a $2 wager.
+                    ratio = float(bet['bet_amount']) / 2.0
+                    payout = float(payout) * ratio
+            
+            # Update bet
+            update_data = {
+                'status': new_status,
+                'payout': payout,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            supabase.table('hranalyzer_bets').update(update_data).eq('id', bet['id']).execute()
+            resolved_count += 1
+            updated_bets.append({
+                'id': bet['id'], 
+                'old_status': 'Pending', 
+                'new_status': new_status,
+                'payout': payout
+            })
+            
+        return jsonify({
+            'success': True,
+            'resolved_count': resolved_count,
+            'details': updated_bets
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 
 @app.route('/api/trigger-crawl', methods=['POST'])

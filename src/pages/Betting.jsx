@@ -1,99 +1,237 @@
 import { useState, useEffect } from 'react';
 
+const API_BASE_URL = 'http://localhost:5001/api';
+
 export default function Betting() {
     const [tickets, setTickets] = useState([]);
     const [winRate, setWinRate] = useState(0);
-    const [formData, setFormData] = useState({ raceId: '', horse: '', betType: 'Win' });
+    const [races, setRaces] = useState([]);
+    const [selectedRaceId, setSelectedRaceId] = useState('');
+    const [raceDetails, setRaceDetails] = useState(null);
+    const [loading, setLoading] = useState(false);
 
-    // Load from localStorage on mount
+    // Form State
+    const [formData, setFormData] = useState({
+        horseNumber: '',
+        horseName: '',
+        betType: 'Win',
+        amount: 2.00
+    });
+
+    // Load bets and races on mount
     useEffect(() => {
-        const savedTickets = JSON.parse(localStorage.getItem('bettingTickets')) || [];
-        setTickets(savedTickets);
-        updateWinRate(savedTickets);
+        fetchBets();
+        fetchRaces();
     }, []);
 
-    // Update win rate
-    const updateWinRate = (updatedTickets) => {
-        const resolved = updatedTickets.filter(ticket => ticket.status !== 'Pending');
+    const fetchBets = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/bets`);
+            const data = await res.json();
+            if (data.bets) {
+                setTickets(data.bets);
+                updateWinRate(data.bets);
+            }
+        } catch (error) {
+            console.error('Error fetching bets:', error);
+        }
+    };
+
+    const fetchRaces = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/todays-races`);
+            const data = await res.json();
+            if (data.races) {
+                setRaces(data.races);
+            }
+        } catch (error) {
+            console.error('Error fetching races:', error);
+        }
+    };
+
+    const fetchRaceDetails = async (raceKey) => {
+        if (!raceKey) return;
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/race-details/${raceKey}`);
+            const data = await res.json();
+            setRaceDetails(data);
+            // Reset horse selection when race changes
+            setFormData(prev => ({ ...prev, horseNumber: '', horseName: '' }));
+        } catch (error) {
+            console.error('Error fetching race details:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRaceSelect = (e) => {
+        const raceId = e.target.value;
+        setSelectedRaceId(raceId);
+        const race = races.find(r => r.id === raceId);
+        if (race) {
+            fetchRaceDetails(race.race_key);
+        } else {
+            setRaceDetails(null);
+        }
+    };
+
+    const handleHorseSelect = (e) => {
+        const number = e.target.value;
+        const entry = raceDetails?.entries.find(ent => ent.program_number === number);
+        setFormData({
+            ...formData,
+            horseNumber: number,
+            horseName: entry ? entry.horse_name : ''
+        });
+    };
+
+    const updateWinRate = (bets) => {
+        const resolved = bets.filter(ticket => ticket.status !== 'Pending');
         const wins = resolved.filter(ticket => ticket.status === 'Win').length;
         const rate = resolved.length > 0 ? Math.round((wins / resolved.length) * 100) : 0;
         setWinRate(rate);
     };
 
-    // Save to localStorage
-    const saveTickets = (updatedTickets) => {
-        localStorage.setItem('bettingTickets', JSON.stringify(updatedTickets));
-        setTickets(updatedTickets);
-        updateWinRate(updatedTickets);
-    };
-
-    // Create ticket
-    const handleCreateTicket = (e) => {
+    const handleCreateTicket = async (e) => {
         e.preventDefault();
-        if (!formData.raceId || !formData.horse) return; // Basic validation
-        const newTicket = { ...formData, status: 'Pending' };
-        const updatedTickets = [...tickets, newTicket];
-        saveTickets(updatedTickets);
-        setFormData({ raceId: '', horse: '', betType: 'Win' });
+        if (!selectedRaceId || !formData.horseNumber) return;
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/bets`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    race_id: selectedRaceId,
+                    horse_number: formData.horseNumber,
+                    horse_name: formData.horseName,
+                    bet_type: formData.betType,
+                    amount: formData.amount
+                })
+            });
+
+            if (res.ok) {
+                fetchBets(); // Refresh list
+                // Reset form
+                setFormData({ ...formData, horseNumber: '', horseName: '' });
+                alert('Bet placed successfully!');
+            } else {
+                alert('Failed to place bet');
+            }
+        } catch (error) {
+            console.error('Error placing bet:', error);
+        }
     };
 
-    // Mark win/loss
-    const handleMarkStatus = (index, status) => {
-        const updatedTickets = [...tickets];
-        updatedTickets[index].status = status;
-        saveTickets(updatedTickets);
-    };
-
-    // Delete ticket
-    const handleDeleteTicket = (index) => {
-        if (!window.confirm('Are you sure you want to delete this ticket? This will update your win rate if resolved.')) return;
-        const updatedTickets = tickets.filter((_, i) => i !== index);
-        saveTickets(updatedTickets);
+    const handleResolveBets = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/bets/resolve`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                alert(`Resolved ${data.resolved_count} bets!`);
+                fetchBets();
+            } else {
+                alert('Failed to resolve bets');
+            }
+        } catch (error) {
+            console.error('Error resolving bets:', error);
+        }
     };
 
     return (
         <div className="space-y-8">
-            <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
-            <p className="text-sm text-gray-400 mb-4">Create virtual bet tickets and track your win rate over time.</p>
+            <div className="flex justify-between items-center">
+                <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
+                <button
+                    onClick={handleResolveBets}
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition duration-200"
+                >
+                    Check for Results / Resolve Bets
+                </button>
+            </div>
+
+            <p className="text-sm text-gray-400 mb-4">Place virtual bets on uploaded races and track your performance.</p>
 
             {/* Win Rate Stat */}
             <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50">
                 <h4 className="text-xl font-bold text-white mb-2">Your Win Rate</h4>
                 <p className="text-4xl font-bold text-purple-400">{winRate}%</p>
+                <p className="text-sm text-gray-500 mt-1">Based on {tickets.filter(t => t.status !== 'Pending').length} resolved bets</p>
             </div>
 
             {/* Form to Create Ticket */}
             <form onSubmit={handleCreateTicket} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-4">
-                <h4 className="text-xl font-bold text-white mb-4">Create New Ticket</h4>
-                <input
-                    type="text"
-                    placeholder="Race ID (e.g., 1)"
-                    value={formData.raceId}
-                    onChange={(e) => setFormData({ ...formData, raceId: e.target.value })}
-                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                    required
-                />
-                <input
-                    type="text"
-                    placeholder="Horse Name or Number"
-                    value={formData.horse}
-                    onChange={(e) => setFormData({ ...formData, horse: e.target.value })}
-                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                    required
-                />
-                <select
-                    value={formData.betType}
-                    onChange={(e) => setFormData({ ...formData, betType: e.target.value })}
-                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                >
-                    <option>Win</option>
-                    <option>Place</option>
-                    <option>Show</option>
-                    <option>Exacta</option>
-                    <option>Trifecta</option>
-                </select>
+                <h4 className="text-xl font-bold text-white mb-4">Place New Bet</h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Race Selector */}
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-1">Select Race</label>
+                        <select
+                            value={selectedRaceId}
+                            onChange={handleRaceSelect}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                            required
+                        >
+                            <option value="">-- Select a Race --</option>
+                            {races.map(race => (
+                                <option key={race.id} value={race.id}>
+                                    {race.track_code} Race {race.race_number} ({race.race_status})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Horse Selector */}
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-1">Select Horse</label>
+                        <select
+                            value={formData.horseNumber}
+                            onChange={handleHorseSelect}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                            disabled={!raceDetails}
+                            required
+                        >
+                            <option value="">-- Select Horse --</option>
+                            {raceDetails?.entries.map(entry => (
+                                <option key={entry.program_number} value={entry.program_number}>
+                                    #{entry.program_number} - {entry.horse_name} ({entry.morning_line_odds})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-1">Bet Type</label>
+                        <select
+                            value={formData.betType}
+                            onChange={(e) => setFormData({ ...formData, betType: e.target.value })}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                        >
+                            <option>Win</option>
+                            <option>Place</option>
+                            <option>Show</option>
+                            {/* <option>Exacta</option> */}
+                            {/* <option>Trifecta</option> */}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-gray-400 text-sm mb-1">Amount ($)</label>
+                        <input
+                            type="number"
+                            value={formData.amount}
+                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                            min="2"
+                            step="1"
+                        />
+                    </div>
+                </div>
+
                 <button type="submit" className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white py-3 rounded-md transition duration-200 font-medium">
-                    Create Ticket
+                    Place Bet
                 </button>
             </form>
 
@@ -102,48 +240,40 @@ export default function Betting() {
                 <table className="w-full text-left text-gray-300">
                     <thead className="bg-purple-900/50">
                         <tr>
-                            <th className="p-4">Race ID</th>
+                            <th className="p-4">Date</th>
+                            <th className="p-4">Track/Race</th>
                             <th className="p-4">Horse</th>
-                            <th className="p-4">Bet Type</th>
+                            <th className="p-4">Bet</th>
                             <th className="p-4">Status</th>
-                            <th className="p-4">Actions</th>
+                            <th className="p-4">Payout</th>
                         </tr>
                     </thead>
                     <tbody>
                         {tickets.length === 0 ? (
                             <tr>
-                                <td colSpan="5" className="p-4 text-center text-gray-400">No tickets created yet.</td>
+                                <td colSpan="6" className="p-4 text-center text-gray-400">No tickets found.</td>
                             </tr>
                         ) : (
                             tickets.map((ticket, index) => (
                                 <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200">
-                                    <td className="p-4">{ticket.raceId}</td>
-                                    <td className="p-4">{ticket.horse}</td>
-                                    <td className="p-4">{ticket.betType}</td>
-                                    <td className="p-4">{ticket.status}</td>
-                                    <td className="p-4 flex gap-2">
-                                        {ticket.status === 'Pending' && (
-                                            <>
-                                                <button
-                                                    onClick={() => handleMarkStatus(index, 'Win')}
-                                                    className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-3 py-1 rounded-md transition duration-200 text-sm font-medium"
-                                                >
-                                                    Mark Win
-                                                </button>
-                                                <button
-                                                    onClick={() => handleMarkStatus(index, 'Loss')}
-                                                    className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-3 py-1 rounded-md transition duration-200 text-sm font-medium"
-                                                >
-                                                    Mark Loss
-                                                </button>
-                                            </>
-                                        )}
-                                        <button
-                                            onClick={() => handleDeleteTicket(index)}
-                                            className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white px-3 py-1 rounded-md transition duration-200 text-sm font-medium"
-                                        >
-                                            Delete
-                                        </button>
+                                    <td className="p-4">{new Date(ticket.created_at).toLocaleDateString()}</td>
+                                    <td className="p-4">
+                                        {ticket.hranalyzer_races ? (
+                                            `${ticket.hranalyzer_races.track_code} Race ${ticket.hranalyzer_races.race_number}`
+                                        ) : 'Unknown'}
+                                    </td>
+                                    <td className="p-4">#{ticket.horse_number} {ticket.horse_name}</td>
+                                    <td className="p-4">${ticket.bet_amount} {ticket.bet_type}</td>
+                                    <td className="p-4">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
+                                                ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
+                                                    'bg-yellow-900 text-yellow-200'
+                                            }`}>
+                                            {ticket.status}
+                                        </span>
+                                    </td>
+                                    <td className="p-4 text-green-400 font-bold">
+                                        {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
                                     </td>
                                 </tr>
                             ))
