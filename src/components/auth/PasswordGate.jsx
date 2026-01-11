@@ -35,7 +35,7 @@ const PasswordGate = ({ children }) => {
 
     if (isLoading) {
         return <div className="min-h-screen bg-black flex items-center justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
         </div>;
     }
 
@@ -47,13 +47,11 @@ const PasswordGate = ({ children }) => {
         <div className="min-h-screen bg-black flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-stone-900 rounded-xl shadow-2xl border border-stone-800 p-8">
                 <div className="text-center mb-8">
-                    <div className="inline-block p-4 rounded-full bg-blue-500/10 mb-4">
-                        <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
+                    <div className="flex justify-center mb-6">
+                        <img src="/horse_logo.png" alt="TrackData Logo" className="w-24 h-24 object-contain" />
                     </div>
-                    <h1 className="text-2xl font-bold text-white mb-2">Restricted Access</h1>
-                    <p className="text-stone-400">Please enter your password to continue to TrackData.</p>
+                    <h1 className="text-3xl font-bold text-white mb-2">TrackData</h1>
+                    <p className="text-stone-400">Please enter your password to continue.</p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
@@ -61,7 +59,7 @@ const PasswordGate = ({ children }) => {
                         <input
                             type="password"
                             placeholder="Enter Password"
-                            className="w-full px-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                            className="w-full px-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all font-mono"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             autoFocus
@@ -76,15 +74,21 @@ const PasswordGate = ({ children }) => {
 
                     <button
                         type="submit"
-                        className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-blue-900/20"
+                        className="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-purple-900/20"
                     >
                         Unlock Application
                     </button>
                 </form>
 
                 <div className="mt-8 text-center">
-                    <p className="text-xs text-stone-600">
-                        Securely encrypted access. TrackData &copy; {new Date().getFullYear()}
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-stone-800 border border-stone-700">
+                        <svg className="w-3 h-3 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-[10px] uppercase tracking-widest text-stone-500 font-medium">Secured by AES-256</span>
+                    </div>
+                    <p className="mt-6 text-xs text-stone-600">
+                        TrackData &copy; {new Date().getFullYear()}
                     </p>
                 </div>
             </div>
