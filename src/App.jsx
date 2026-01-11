@@ -20,7 +20,7 @@ function App() {
         <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
         {/* Main Content */}
-        <div className="flex-1 md:ml-64">
+        <div className="flex-1">
           <Header onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
           <main className="p-8 bg-black">
             <Routes>
