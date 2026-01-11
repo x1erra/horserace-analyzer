@@ -12,7 +12,6 @@ services:
       # Or use .env file (see below)
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
-      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
       TZ: America/New_York  # Set your timezone
       LOG_DIR: /var/log
     volumes:
