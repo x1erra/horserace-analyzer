@@ -23,7 +23,7 @@ export default function Sidebar({ isOpen, onClose }) {
             >
                 <div className="p-6 border-b border-purple-900/50 flex justify-between items-center">
                     <h1 className="text-3xl font-bold text-white flex items-center gap-2">
-                        <img src="/horse_logo.png" alt="TrackData Logo" className="w-10 h-10 object-contain" />
+                        <img src="/horse_logo.png" alt="TrackData Logo" className="w-14 h-14 object-contain" />
                         TrackData
                     </h1>
                     {/* Close button for mobile */}
