@@ -3,69 +3,99 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 
 export default function Races() {
-    const [activeTab, setActiveTab] = useState('past'); // 'today' or 'past'
+    const [activeTab, setActiveTab] = useState('today'); // 'today' or 'past'
     const [selectedTrack, setSelectedTrack] = useState('All Tracks');
     const [selectedDate, setSelectedDate] = useState('All Dates');
     const [allRaces, setAllRaces] = useState([]);
-    const [filteredRaces, setFilteredRaces] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [hasSearched, setHasSearched] = useState(false);
 
-    // Fetch races based on active tab
+    // Metadata for filters
+    const [availableTracks, setAvailableTracks] = useState(['All Tracks']);
+    const [availableDates, setAvailableDates] = useState(['All Dates']);
+    const [metaLoading, setMetaLoading] = useState(true);
+
+    // Fetch filter metadata on mount
     useEffect(() => {
-        const fetchRaces = async () => {
+        const fetchMetadata = async () => {
             try {
-                setLoading(true);
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-                const endpoint = activeTab === 'today'
-                    ? `${baseUrl}/api/todays-races`
-                    : `${baseUrl}/api/past-races?limit=100`;
+                const response = await axios.get(`${baseUrl}/api/filter-options`);
 
-                const response = await axios.get(endpoint);
-                const raceData = response.data.races || [];
-                setAllRaces(raceData);
-                setError(null);
+                if (response.data) {
+                    setAvailableTracks(['All Tracks', ...response.data.tracks]);
+                    setAvailableDates(['All Dates', ...response.data.dates]);
+                }
             } catch (err) {
-                console.error("Error fetching races:", err);
-                setError("Failed to load race data. Is the backend running?");
+                console.error("Error fetching filter options:", err);
             } finally {
-                setLoading(false);
+                setMetaLoading(false);
             }
         };
-        fetchRaces();
-    }, [activeTab]);
+        fetchMetadata();
+    }, []);
 
-    // Filter logic
-    useEffect(() => {
-        let filtered = allRaces;
+    // Reset state when tab changes
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        setSelectedTrack('All Tracks');
+        setSelectedDate('All Dates');
+        setAllRaces([]);
+        setHasSearched(false);
+        setError(null);
+    };
 
-        if (selectedTrack !== 'All Tracks') {
-            filtered = filtered.filter(race =>
-                race.track_name === selectedTrack || race.track_code === selectedTrack
-            );
+    const handleSearch = async () => {
+        try {
+            setLoading(true);
+            setHasSearched(true);
+            setError(null);
+
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+            const endpoint = activeTab === 'today'
+                ? `${baseUrl}/api/todays-races`
+                : `${baseUrl}/api/past-races`;
+
+            const params = {};
+
+            // For 'today', we can filter server-side for track
+            // For 'past', we can filter server-side for track and date
+            if (selectedTrack !== 'All Tracks') {
+                params.track = selectedTrack;
+            }
+
+            if (activeTab === 'past') {
+                params.limit = 100; // Hard limit for safety
+                if (selectedDate !== 'All Dates') {
+                    params.start_date = selectedDate;
+                    params.end_date = selectedDate;
+                }
+            }
+
+            const response = await axios.get(endpoint, { params });
+            const raceData = response.data.races || [];
+
+            // Client-side filtering fallback (especially for 'today' if backend filter is loose)
+            // But we trust backend mostly. Double check track if needed.
+            setAllRaces(raceData);
+
+        } catch (err) {
+            console.error("Error fetching races:", err);
+            setError("Failed to load race data. Is the backend running?");
+        } finally {
+            setLoading(false);
         }
+    };
 
-        if (selectedDate !== 'All Dates') {
-            filtered = filtered.filter(race => race.race_date === selectedDate);
-        }
-
-        setFilteredRaces(filtered);
-    }, [selectedTrack, selectedDate, allRaces]);
-
-    // Unique tracks and dates for filters
-    const tracks = ['All Tracks', ...new Set(allRaces.map(r => r.track_name || r.track_code).filter(Boolean))].sort();
-    const dates = ['All Dates', ...new Set(allRaces.map(r => r.race_date).filter(Boolean))].sort().reverse();
-
-    if (loading) {
+    if (metaLoading) {
         return (
             <div className="text-white text-center p-20">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-                <p className="mt-4">Loading races...</p>
+                <p className="mt-4">Loading options...</p>
             </div>
         );
     }
-
-    if (error) return <div className="text-red-400 text-center p-20">{error}</div>;
 
     return (
         <div className="space-y-8">
@@ -75,11 +105,7 @@ export default function Races() {
             {/* Tab selector */}
             <div className="flex gap-4 border-b border-purple-900/50">
                 <button
-                    onClick={() => {
-                        setActiveTab('today');
-                        setSelectedTrack('All Tracks');
-                        setSelectedDate('All Dates');
-                    }}
+                    onClick={() => handleTabChange('today')}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'today'
                         ? 'text-purple-400 border-b-2 border-purple-400'
                         : 'text-gray-400 hover:text-white'
@@ -88,11 +114,7 @@ export default function Races() {
                     Today's Races
                 </button>
                 <button
-                    onClick={() => {
-                        setActiveTab('past');
-                        setSelectedTrack('All Tracks');
-                        setSelectedDate('All Dates');
-                    }}
+                    onClick={() => handleTabChange('past')}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'past'
                         ? 'text-purple-400 border-b-2 border-purple-400'
                         : 'text-gray-400 hover:text-white'
@@ -103,118 +125,154 @@ export default function Races() {
             </div>
 
             {/* Filter bar */}
-            <div className="flex flex-col md:flex-row gap-4 mb-8">
-                <select
-                    value={selectedTrack}
-                    onChange={(e) => setSelectedTrack(e.target.value)}
-                    className="w-full md:w-auto bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
-                >
-                    {tracks.map(track => (
-                        <option key={track} value={track}>{track}</option>
-                    ))}
-                </select>
-                {activeTab === 'past' && (
+            <div className="flex flex-col md:flex-row gap-4 mb-8 items-end">
+                <div className="flex-1 w-full">
+                    <label className="block text-xs text-gray-500 mb-1 ml-1">Track</label>
                     <select
-                        value={selectedDate}
-                        onChange={(e) => setSelectedDate(e.target.value)}
-                        className="w-full md:w-auto bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
+                        value={selectedTrack}
+                        onChange={(e) => setSelectedTrack(e.target.value)}
+                        className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
                     >
-                        {dates.map(date => (
-                            <option key={date} value={date}>{date}</option>
+                        {availableTracks.map(track => (
+                            <option key={track} value={track}>{track}</option>
                         ))}
                     </select>
+                </div>
+
+                {activeTab === 'past' && (
+                    <div className="flex-1 w-full">
+                        <label className="block text-xs text-gray-500 mb-1 ml-1">Date</label>
+                        <select
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
+                        >
+                            {availableDates.map(date => (
+                                <option key={date} value={date}>{date}</option>
+                            ))}
+                        </select>
+                    </div>
                 )}
+
+                <button
+                    onClick={handleSearch}
+                    disabled={loading}
+                    className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-8 py-3 rounded-md transition font-bold flex items-center justify-center gap-2"
+                >
+                    {loading ? (
+                        <>
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                            Loading...
+                        </>
+                    ) : (
+                        <>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Search
+                        </>
+                    )}
+                </button>
             </div>
 
-            {/* Results count */}
-            <p className="text-sm text-gray-400">
-                Showing {filteredRaces.length} {activeTab === 'today' ? "today's" : 'past'} races
-                {selectedTrack !== 'All Tracks' && ` from ${selectedTrack}`}
-                {selectedDate !== 'All Dates' && ` on ${selectedDate}`}
-            </p>
+            {error && <div className="text-red-400 text-center p-4 bg-red-900/20 rounded-lg">{error}</div>}
 
-            {/* Grid of race cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredRaces.length === 0 ? (
-                    <div className="col-span-full text-center p-12 bg-black rounded-xl border border-purple-900/50">
-                        <p className="text-gray-400 mb-4">
-                            {activeTab === 'today'
-                                ? "No races scheduled for today. Upload a DRF PDF to add races."
-                                : "No races match your filters."}
-                        </p>
-                        {activeTab === 'today' && (
-                            <Link
-                                to="/upload"
-                                className="inline-block bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-md transition"
-                            >
-                                Upload DRF PDF
-                            </Link>
+            {/* Results */}
+            {!hasSearched ? (
+                <div className="text-center p-12 bg-black rounded-xl border border-purple-900/30 border-dashed">
+                    <p className="text-gray-500">Select filters and click Search to view races</p>
+                </div>
+            ) : (
+                <>
+                    {/* Results count */}
+                    <p className="text-sm text-gray-400 mb-4">
+                        Found {allRaces.length} {activeTab === 'today' ? "today's" : 'past'} races
+                    </p>
+
+                    {/* Grid of race cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {allRaces.length === 0 ? (
+                            <div className="col-span-full text-center p-12 bg-black rounded-xl border border-purple-900/50">
+                                <p className="text-gray-400 mb-4">
+                                    {activeTab === 'today'
+                                        ? "No races found matching your criteria."
+                                        : "No past races found matching your criteria."}
+                                </p>
+                                {activeTab === 'today' && (
+                                    <Link
+                                        to="/upload"
+                                        className="inline-block bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-md transition"
+                                    >
+                                        Upload DRF PDF
+                                    </Link>
+                                )}
+                            </div>
+                        ) : (
+                            allRaces.map((race, index) => (
+                                <div
+                                    key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
+                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn h-full flex flex-col"
+                                    style={{ animationDelay: `${index % 12 * 50}ms` }}
+                                >
+                                    <div className="flex justify-between items-start mb-2">
+                                        <h4 className="text-xl font-bold text-white">
+                                            Race {race.race_number} - {race.track_name || race.track_code}
+                                        </h4>
+                                        {race.race_status && (
+                                            <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
+                                                ? 'bg-green-900/30 text-green-400'
+                                                : race.race_status === 'upcoming'
+                                                    ? 'bg-blue-900/30 text-blue-400'
+                                                    : 'bg-gray-900/30 text-gray-400'
+                                                }`}>
+                                                {race.race_status === 'completed' ? 'Complete' :
+                                                    race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <p className="text-sm text-gray-400 mb-4">
+                                        {race.race_date} • {race.post_time || 'TBD'}
+                                    </p>
+
+                                    <div className="space-y-2 mb-4">
+                                        {race.race_type && (
+                                            <p className="text-sm text-purple-300">
+                                                {race.race_type} • {race.surface}
+                                            </p>
+                                        )}
+                                        {race.distance && (
+                                            <p className="text-sm text-gray-400">
+                                                {race.distance}
+                                            </p>
+                                        )}
+                                        {race.purse && (
+                                            <p className="text-sm text-green-400">
+                                                Purse: {race.purse}
+                                            </p>
+                                        )}
+                                        <p className="text-sm text-gray-400">
+                                            {race.entry_count} entries
+                                        </p>
+                                        {race.data_source && (
+                                            <p className="text-xs text-gray-500">
+                                                Source: {race.data_source === 'drf' ? 'DRF Upload' : 'Equibase'}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <Link
+                                        to={`/race/${race.race_key}`}
+                                        className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
+                                    >
+                                        {activeTab === 'today' ? 'View Details' : 'View Results'}
+                                    </Link>
+                                </div>
+                            ))
                         )}
                     </div>
-                ) : (
-                    filteredRaces.map((race, index) => (
-                        <div
-                            key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
-                            className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn h-full flex flex-col"
-                            style={{ animationDelay: `${index % 12 * 50}ms` }}
-                        >
-                            <div className="flex justify-between items-start mb-2">
-                                <h4 className="text-xl font-bold text-white">
-                                    Race {race.race_number} - {race.track_name || race.track_code}
-                                </h4>
-                                {race.race_status && (
-                                    <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
-                                        ? 'bg-green-900/30 text-green-400'
-                                        : race.race_status === 'upcoming'
-                                            ? 'bg-blue-900/30 text-blue-400'
-                                            : 'bg-gray-900/30 text-gray-400'
-                                        }`}>
-                                        {race.race_status === 'completed' ? 'Complete' :
-                                            race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
-                                    </span>
-                                )}
-                            </div>
-
-                            <p className="text-sm text-gray-400 mb-4">
-                                {race.race_date} • {race.post_time || 'TBD'}
-                            </p>
-
-                            <div className="space-y-2 mb-4">
-                                {race.race_type && (
-                                    <p className="text-sm text-purple-300">
-                                        {race.race_type} • {race.surface}
-                                    </p>
-                                )}
-                                {race.distance && (
-                                    <p className="text-sm text-gray-400">
-                                        {race.distance}
-                                    </p>
-                                )}
-                                {race.purse && (
-                                    <p className="text-sm text-green-400">
-                                        Purse: {race.purse}
-                                    </p>
-                                )}
-                                <p className="text-sm text-gray-400">
-                                    {race.entry_count} entries
-                                </p>
-                                {race.data_source && (
-                                    <p className="text-xs text-gray-500">
-                                        Source: {race.data_source === 'drf' ? 'DRF Upload' : 'Equibase'}
-                                    </p>
-                                )}
-                            </div>
-
-                            <Link
-                                to={`/race/${race.race_key}`}
-                                className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
-                            >
-                                {activeTab === 'today' ? 'View Details' : 'View Results'}
-                            </Link>
-                        </div>
-                    ))
-                )}
-            </div>
+                </>
+            )}
         </div>
     );
 }
