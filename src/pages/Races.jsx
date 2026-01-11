@@ -81,8 +81,8 @@ export default function Races() {
                         setSelectedDate('All Dates');
                     }}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'today'
-                            ? 'text-purple-400 border-b-2 border-purple-400'
-                            : 'text-gray-400 hover:text-white'
+                        ? 'text-purple-400 border-b-2 border-purple-400'
+                        : 'text-gray-400 hover:text-white'
                         }`}
                 >
                     Today's Races
@@ -94,8 +94,8 @@ export default function Races() {
                         setSelectedDate('All Dates');
                     }}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'past'
-                            ? 'text-purple-400 border-b-2 border-purple-400'
-                            : 'text-gray-400 hover:text-white'
+                        ? 'text-purple-400 border-b-2 border-purple-400'
+                        : 'text-gray-400 hover:text-white'
                         }`}
                 >
                     Past Races
@@ -155,7 +155,7 @@ export default function Races() {
                     filteredRaces.map((race, index) => (
                         <div
                             key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
-                            className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn"
+                            className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn h-full flex flex-col"
                             style={{ animationDelay: `${index % 12 * 50}ms` }}
                         >
                             <div className="flex justify-between items-start mb-2">
@@ -164,10 +164,10 @@ export default function Races() {
                                 </h4>
                                 {race.race_status && (
                                     <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
-                                            ? 'bg-green-900/30 text-green-400'
-                                            : race.race_status === 'upcoming'
-                                                ? 'bg-blue-900/30 text-blue-400'
-                                                : 'bg-gray-900/30 text-gray-400'
+                                        ? 'bg-green-900/30 text-green-400'
+                                        : race.race_status === 'upcoming'
+                                            ? 'bg-blue-900/30 text-blue-400'
+                                            : 'bg-gray-900/30 text-gray-400'
                                         }`}>
                                         {race.race_status === 'completed' ? 'Complete' :
                                             race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
@@ -207,7 +207,7 @@ export default function Races() {
 
                             <Link
                                 to={`/race/${race.race_key}`}
-                                className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center"
+                                className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
                             >
                                 {activeTab === 'today' ? 'View Details' : 'View Results'}
                             </Link>

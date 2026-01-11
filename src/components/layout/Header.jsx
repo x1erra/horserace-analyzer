@@ -10,11 +10,8 @@ export default function Header({ onToggleSidebar }) {
                     Dashboard
                 </h2>
             </div>
+            {/* Removed Refresh Data and Accuracy as requested */}
             <div className="flex items-center gap-4">
-                <span className="text-sm text-gray-300">Accuracy: 82%</span>
-                <button className="bg-purple-800 hover:bg-purple-900 text-white px-4 py-2 rounded-md transition">
-                    Refresh Data
-                </button>
             </div>
         </header>
     );
