@@ -197,9 +197,10 @@ def parse_race_chart_text(text: str) -> Dict:
             break
 
     # Extract final time
-    time_match = re.search(r'FINAL TIME:\s*(\d+:\d+\.\d+)', text, re.IGNORECASE)
+    # More flexible regex to catch cases without colons, different separators, or missing spaces
+    time_match = re.search(r'FINAL\s*TIME:\s*([\d:.]+)', text, re.IGNORECASE)
     if time_match:
-        data['final_time'] = time_match.group(1)
+        data['final_time'] = time_match.group(1).strip()
 
     # Extract fractional times
     frac_match = re.findall(r'(\d+\.\d+)', text)
@@ -539,7 +540,7 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'race_status': 'completed',
             'data_source': 'equibase',
             'equibase_pdf_url': build_equibase_url(track_code, race_date, race_number),
-            'equibase_chart_url': f"https://www.equibase.com/premium/eqbChartfrmUS.cfm?track={track_code}&racedate={race_date.strftime('%m/%d/%Y')}&racenumber={race_number}"
+            'equibase_chart_url': f"https://www.equibase.com/static/chart/pdf/{track_code}{race_date.strftime('%m%d%y')}USA{race_number}.pdf"
         }
 
         # Insert or update race
