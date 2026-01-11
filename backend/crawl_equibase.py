@@ -522,6 +522,7 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
         else:
             # Create horse
             new_horse = {'horse_name': horse_name}
+            horse_insert = supabase.table('hranalyzer_horses').insert(new_horse).execute()
             if horse_insert.data:
                 horse_id = horse_insert.data[0]['id']
             else:
@@ -556,8 +557,14 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
             'weight': horse_data.get('weight')
         }
 
-        supabase.table('hranalyzer_race_entries').insert(entry_data).execute()
-        logger.debug(f"Inserted entry for horse {horse_name}")
+        try:
+            supabase.table('hranalyzer_race_entries').insert(entry_data).execute()
+            logger.debug(f"Inserted entry for horse {horse_name}")
+        except Exception as e:
+            if 'duplicate key' in str(e):
+                logger.debug(f"Entry already exists for {horse_name}, skipping")
+            else:
+                logger.error(f"Error inserting horse entry: {e}")
 
     except Exception as e:
         logger.error(f"Error inserting horse entry: {e}")
