@@ -647,13 +647,12 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
         }
 
         try:
-            supabase.table('hranalyzer_race_entries').insert(entry_data).execute()
-            logger.debug(f"Inserted entry for horse {horse_name}")
+            # Use upsert to handle case where entries were pre-populated by DRF PDF upload
+            # on_conflict specified to match unique constraint (race_id, program_number)
+            supabase.table('hranalyzer_race_entries').upsert(entry_data, on_conflict='race_id, program_number').execute()
+            logger.debug(f"Upserted entry for horse {horse_name}")
         except Exception as e:
-            if 'duplicate key' in str(e):
-                logger.debug(f"Entry already exists for {horse_name}, skipping")
-            else:
-                logger.error(f"Error inserting horse entry: {e}")
+            logger.error(f"Error upserting horse entry: {e}")
 
     except Exception as e:
         logger.error(f"Error inserting horse entry: {e}")
