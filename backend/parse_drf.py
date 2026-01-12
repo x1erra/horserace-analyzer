@@ -734,6 +734,7 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
             current_race = None
             current_race_entries = []
             race_1_entries = []  # Special handling for Race 1 (no header page)
+            race_1_post_time = None 
 
             for page_num, page in enumerate(pdf.pages):
                 page_text = page.extract_text()
@@ -754,7 +755,7 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                     if current_race is None and len(race_1_entries) > 0:
                         race_1 = {
                             'race_number': 1,
-                            'post_time': None,
+                            'post_time': race_1_post_time,
                             'race_type': None,
                             'surface': 'Dirt',  # Default
                             'distance': None,
@@ -813,6 +814,13 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                         else:
                             # Before any race header - must be Race 1
                             race_1_entries.extend(entries)
+                            
+                            # Attempt to find post time from these pages if we haven't yet
+                            if not race_1_post_time:
+                                time_pattern = r'Post\s*time[:\s]*(\d{1,2}:\d{2})\s*(?:[AP]M)?\s*(?:ET|PT|CT|MT)?'
+                                time_match = re.search(time_pattern, page_text, re.IGNORECASE)
+                                if time_match:
+                                    race_1_post_time = time_match.group(1)
 
             # Don't forget the last race
             if current_race:
@@ -845,7 +853,7 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
             elif len(race_1_entries) > 0:
                 race_1 = {
                     'race_number': 1,
-                    'post_time': None,
+                    'post_time': race_1_post_time,
                     'race_type': None,
                     'surface': 'Dirt',
                     'distance': None,
