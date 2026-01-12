@@ -388,24 +388,48 @@ def crawl_entries(target_date=None, tracks=None):
             'WO': 'Woodbine'
         }
         
-        for track_code in tracks:
-            # 1. Get readable name
-            name = track_name_map.get(track_code, track_code)
-            
+        target_day = str(target_date.day)
+        logger.info(f"Looking for links with text '{target_day}' for date {target_date}")
+        
+        # DEBUG: Dump all rows to see what we are working with
+        rows = driver.find_elements(By.TAG_NAME, "tr")
+        logger.info(f"Found {len(rows)} rows in page")
+        
+        for row in rows:
             try:
-                # Find valid link element for this track and day
-                # XPath: //tr[contains(., 'Track Name')]//a[normalize-space()='day']
-                xpath = f"//tr[contains(., '{name}')]//a[normalize-space()='{target_day}']"
-                links = driver.find_elements(By.XPATH, xpath)
+                row_text = row.text
+                if not row_text.strip(): continue
                 
-                if links:
-                    url = links[0].get_attribute('href')
-                    logger.info(f"Found URL for {track_code} ({name}): {url}")
-                    valid_urls[track_code] = url
-                else:
-                    logger.info(f"No link found for {track_code} on day {target_day}")
+                # Check if this row is for one of our tracks
+                found_track = None
+                for t_code, t_name in track_name_map.items():
+                    if t_name in row_text:
+                        found_track = (t_code, t_name)
+                        break
+                
+                if found_track:
+                    track_code, track_name = found_track
+                    logger.info(f"ROW MATCH [{track_code}]: {row_text[:50]}...")
+                    
+                    # Find links in this row
+                    links = row.find_elements(By.TAG_NAME, "a")
+                    for link in links:
+                        link_text = link.text.strip()
+                        link_href = link.get_attribute('href')
+                        logger.info(f"  - Link: '{link_text}' -> {link_href}")
+                        
+                        # Check match
+                        if link_text == target_day:
+                            logger.info(f"    !!! MATCH FOUND for {track_code} !!!")
+                            valid_urls[track_code] = link_href
+                            
             except Exception as e:
-                logger.warning(f"Error searching for {track_code}: {e}")
+                pass # Stale element etc
+
+        # Fallback loop to just log what's missing
+        for track_code in tracks:
+            if track_code not in valid_urls:
+                logger.info(f"No URL resolved for {track_code}")
 
         # 2. Crawl the found URLs
         for track_code, url in valid_urls.items():
