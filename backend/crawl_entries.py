@@ -1,27 +1,43 @@
 """
 Crawl Equibase Entries (Upcoming Races)
 Parses HTML from Equibase to get upcoming race data
+Uses Selenium with Headless Chrome to bypass WAF
 """
 import requests
 import re
 import logging
 import time
-import cloudscraper
+import os
 from datetime import datetime, date
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 from supabase_client import get_supabase_client
 from crawl_equibase import get_or_create_track, get_or_create_participant, COMMON_TRACKS
 
 logger = logging.getLogger(__name__)
 
-# Initialize CloudScraper
-scraper = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'desktop': True
-    }
-)
+def get_driver():
+    """Configure and return a headless Chrome driver"""
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
+    # Try to find chromium executable if on Pi/Linux
+    if os.path.exists("/usr/bin/chromium"):
+        options.binary_location = "/usr/bin/chromium"
+        
+    driver = webdriver.Chrome(options=options)
+    return driver
 
 def get_entries_url(track_code, race_date):
     """
@@ -309,19 +325,37 @@ def crawl_entries(target_date=None, tracks=None):
     
     stats = {'races_found': 0, 'races_inserted': 0}
     
-    for track in tracks:
-        url = get_entries_url(track, target_date)
-        logger.info(f"Fetching {url}")
+    driver = None
+    try:
+        logger.info("Starting Selenium Driver...")
+        driver = get_driver()
         
-        try:
-            resp = scraper.get(url, timeout=15)
-            if resp.status_code == 200:
-                # Basic check for empty/soft 404 behavior
-                if "No entries found" in resp.text:
+        for track in tracks:
+            url = get_entries_url(track, target_date)
+            logger.info(f"Fetching {url}")
+            
+            try:
+                driver.get(url)
+                # Wait for potential challenge or content
+                time.sleep(3) 
+                
+                # Check for Race Headers which indicates content load
+                # Or wait until "Race" text appears
+                content = driver.page_source
+                
+                if "No entries found" in content:
                     logger.info(f"No entries found for {track}")
                     continue
                     
-                races = parse_entries_html(resp.text, track, target_date)
+                # Basic verification of load by checking title or critical element
+                if "Pardon Our Interruption" in driver.title:
+                    logger.warning(f"Access Denied for {track} - WAF block triggered. Retrying...")
+                    time.sleep(5)
+                    driver.get(url) # Retry once
+                    time.sleep(5)
+                    content = driver.page_source
+                    
+                races = parse_entries_html(content, track, target_date)
                 if races:
                     logger.info(f"Found {len(races)} races for {track}")
                     stats['races_found'] += len(races)
@@ -331,15 +365,23 @@ def crawl_entries(target_date=None, tracks=None):
                             stats['races_inserted'] += 1
                 else:
                     logger.info(f"No parseable races found for {track}")
-            else:
-                logger.warning(f"Failed to fetch {url}: {resp.status_code}")
+                    
+                time.sleep(2) # Politeness
                 
-            time.sleep(2) # Politeness
-            
-        except Exception as e:
-            logger.error(f"Error processing {track}: {e}")
+            except Exception as e:
+                logger.error(f"Error processing {track}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Selenium Driver Init failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
             
     return stats
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    crawl_entries()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
