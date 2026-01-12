@@ -16,3 +16,4 @@ requests==2.31.0
 # Security
 werkzeug==3.0.1
 pytz
+cloudscraper
