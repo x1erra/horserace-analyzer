@@ -311,16 +311,37 @@ def crawl_entries(target_date=None, tracks=None):
         logger.info(f"Home Title: {driver.title}")
         
         try:
+            # Handle potential "Unic Modal" / Privacy popup
+            try:
+                # Close button is usually an 'X' or 'Close' inside the modal
+                # Brute force: try to remove the modal from DOM via JS
+                logger.info("Checking for blocking modals...")
+                driver.execute_script("""
+                    var modals = document.querySelectorAll('.unic-modal');
+                    modals.forEach(m => m.remove());
+                    var backdrops = document.querySelectorAll('.unic-backdrop');
+                    backdrops.forEach(b => b.remove());
+                """)
+                time.sleep(1)
+            except:
+                pass
+
             # Click "Entries" from nav
-            # Usually in nav bar, text "Entries"
             logger.info("Looking for 'Entries' link to click...")
-            entries_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Entries")
-            entries_link.click()
-            logger.info("Clicked 'Entries', waiting for load...")
+            entries_link = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Entries"))
+            )
+            
+            # Use JS Click to avoid "Element Click Intercepted" error
+            driver.execute_script("arguments[0].click();", entries_link)
+            
+            logger.info("Clicked 'Entries' via JS, waiting for load...")
             time.sleep(5)
+            
         except Exception as e:
             logger.warning(f"Could not click Entries link: {e}. Trying direct URL fallback.")
-            driver.get("https://www.equibase.com/entries")
+            # Use the URL seen in the error log which is likely the correct one
+            driver.get("https://www.equibase.com/static/entry/index.html")
             time.sleep(5)
 
         logger.info(f"Current Page Title: {driver.title}")
