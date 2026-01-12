@@ -31,9 +31,10 @@ export default function Races() {
                 console.error("Error fetching filter options:", err);
             } finally {
                 setMetaLoading(false);
-            };
-            fetchMetadata();
-        }, []);
+            }
+        };
+        fetchMetadata();
+    }, []);
 
     // Reset state when tab changes
     const handleTabChange = (tab) => {
