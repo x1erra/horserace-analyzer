@@ -60,14 +60,6 @@ def get_driver():
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
-def get_entries_url(track_code, race_date):
-    """
-    Construct Equibase Entries URL
-    Format: https://www.equibase.com/static/entry/GP011126USA-EQB.html
-    """
-    date_str = race_date.strftime('%m%d%y')
-    return f"https://www.equibase.com/static/entry/{track_code}{date_str}USA-EQB.html"
-
 def parse_entries_html(html_content, track_code, race_date):
     """
     Parse the Equibase Entries HTML page
@@ -76,17 +68,6 @@ def parse_entries_html(html_content, track_code, race_date):
     soup = BeautifulSoup(html_content, 'html.parser')
     races = []
     
-    # Equibase entries pages usually list multiple races
-    # They often use anchor tags like <a name="race1"></a>
-    
-    # Implementation strategy:
-    # 1. Find all race tables or sections
-    # 2. Extract Race Number, Post Time, Distance, Surface, Conditions
-    # 3. Extract Horses table
-    
-    # This is a bit tricky because the layout isn't always semantic tables
-    # But usually "Race 1 - ..." is a header
-    
     # Try finding headers like "Race X"
     race_headers = soup.find_all(string=re.compile(r'Race\s+\d+', re.IGNORECASE))
     
@@ -94,10 +75,6 @@ def parse_entries_html(html_content, track_code, race_date):
 
     for header in race_headers:
         try:
-            # Navigate up to find the container
-            # Header text is usually in a <strong> or <span> or just text node
-            # Example: "Race 1 - Post Time ..." or just "Race 1"
-            
             header_text = header.strip()
             # Check if this is a header we care about
             match = re.search(r'Race\s+(\d+)', header_text, re.IGNORECASE)
@@ -109,10 +86,7 @@ def parse_entries_html(html_content, track_code, race_date):
                 continue
                 
             # Now try to extract race details relative to this header
-            # We look for the "next" table which should be the participants
-            
-            # Context search: limit scope
-            container = header.find_parent('table') # Usually race header is inside a table or div
+            container = header.find_parent('table') 
             if not container:
                 container = header.find_parent('div')
             
@@ -120,7 +94,6 @@ def parse_entries_html(html_content, track_code, race_date):
                 continue
                 
             # Extract Post Time
-            # Often in text "Post Time: 12:10 PM"
             post_time = None
             pt_match = re.search(r'Post Time[:\s]+(\d{1,2}:\d{2}\s*(?:AM|PM)?)', container.get_text(), re.IGNORECASE)
             if pt_match:
@@ -146,20 +119,8 @@ def parse_entries_html(html_content, track_code, race_date):
                 purse = f"${purse_match.group(1)}"
             
             # Find the entries table
-            # It usually follows the header container
-            # Look for table with "Program" or "Pgm" in header
-            
-            # Important: find the MAIN container for the WHOLE PAGE content if possible to iterate linearly
-            # Alternative: find next table sibling
-            
             entries = []
-            
-            # Go down the DOM or next siblings to find the table
-            # Sometimes the header is IN the table row 1
-            
             entry_table = None
-            # Heuristic: Find all tables, check if they are "near" the header
-            # OR check if container IS the table
             
             tables_in_container = container.find_all('table')
             for tbl in tables_in_container:
@@ -167,10 +128,9 @@ def parse_entries_html(html_content, track_code, race_date):
                     entry_table = tbl
                     break
             
-            # If not in container, look at next siblings of container
             if not entry_table:
                 curr = container
-                for _ in range(5): # Look ahead 5 siblings
+                for _ in range(5): 
                     curr = curr.find_next_sibling()
                     if curr and curr.name == 'table':
                         if 'Program' in curr.get_text() or 'Pgm' in curr.get_text():
@@ -183,10 +143,6 @@ def parse_entries_html(html_content, track_code, race_date):
                 # Skip header
                 start_row = 1 
                 
-                # Check header to map cols? 
-                # Doing a naive mapping for now: Pgm, Horse, Jockey, Trainer, Odds
-                # Common cols: Pgm, Horse, Jockey, Wgt, Trainer, M/L
-                
                 for row in rows[start_row:]:
                     cols = row.find_all(['td', 'th'])
                     if len(cols) < 5:
@@ -195,10 +151,6 @@ def parse_entries_html(html_content, track_code, race_date):
                     try:
                         # Clean text
                         col_texts = [c.get_text(strip=True) for c in cols]
-                        
-                        # Heuristic col mapping based on typical Equibase layout
-                        # Usually: Pgm (0), Horse (1), Jockey (2), Wgt (3), Trainer (4), M/L (5)
-                        # Sometimes Horse Name includes meds/equip like "Horse (L)"
                         
                         pgm = col_texts[0]
                         horse_name = col_texts[1]
@@ -233,7 +185,7 @@ def parse_entries_html(html_content, track_code, race_date):
                     'distance': distance,
                     'surface': surface,
                     'purse': purse,
-                    'race_type': 'Unknown', # Hard to parse from header reliably without complexity
+                    'race_type': 'Unknown', 
                     'entries': entries
                 })
                 
@@ -351,22 +303,38 @@ def crawl_entries(target_date=None, tracks=None):
         logger.info("Starting Selenium Driver...")
         driver = get_driver()
         
-        # 1. Harvest valid URLs from the main entries page
-        logger.info("Navigating to entries page to find valid links...")
-        driver.get("https://www.equibase.com/entries")
-        time.sleep(5) # Wait for table to load
+        # 1. Start at Homepage and Navigate to Entries (User Flow)
+        logger.info("Navigating to Homepage https://www.equibase.com")
+        driver.get("https://www.equibase.com")
+        time.sleep(5)
+        
+        logger.info(f"Home Title: {driver.title}")
+        
+        try:
+            # Click "Entries" from nav
+            # Usually in nav bar, text "Entries"
+            logger.info("Looking for 'Entries' link to click...")
+            entries_link = driver.find_element(By.PARTIAL_LINK_TEXT, "Entries")
+            entries_link.click()
+            logger.info("Clicked 'Entries', waiting for load...")
+            time.sleep(5)
+        except Exception as e:
+            logger.warning(f"Could not click Entries link: {e}. Trying direct URL fallback.")
+            driver.get("https://www.equibase.com/entries")
+            time.sleep(5)
+
+        logger.info(f"Current Page Title: {driver.title}")
+        logger.info(f"Current URL: {driver.current_url}")
         
         # Map track_code -> url
         valid_urls = {}
         
-        # We need to find the link matching the target day
         target_day = str(target_date.day)
         logger.info(f"Looking for links with text '{target_day}' for date {target_date}")
         
-        # Find all track rows
-        # Heuristic: iterate through known tracks, look for their name in the page
-        # The page lists tracks by name (e.g. "Gulfstream Park"), but we have codes (e.g. "GP")
-        # We need a mapping or just fuzzy search
+        # DEBUG: Dump all rows to see what we are working with
+        rows = driver.find_elements(By.TAG_NAME, "tr")
+        logger.info(f"Found {len(rows)} rows in page")
         
         track_name_map = {
             'GP': 'Gulfstream Park',
@@ -387,14 +355,7 @@ def crawl_entries(target_date=None, tracks=None):
             'GG': 'Golden Gate',
             'WO': 'Woodbine'
         }
-        
-        target_day = str(target_date.day)
-        logger.info(f"Looking for links with text '{target_day}' for date {target_date}")
-        
-        # DEBUG: Dump all rows to see what we are working with
-        rows = driver.find_elements(By.TAG_NAME, "tr")
-        logger.info(f"Found {len(rows)} rows in page")
-        
+
         for row in rows:
             try:
                 row_text = row.text
@@ -473,10 +434,6 @@ def crawl_entries(target_date=None, tracks=None):
             driver.quit()
             
     return stats
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    crawl_entries()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
