@@ -3,6 +3,60 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RecentUploads from '../components/RecentUploads';
 
+// Helper component for Countdown
+const Countdown = ({ targetIso, originalTime }) => {
+    const [timeLeft, setTimeLeft] = useState('');
+    const [isUrgent, setIsUrgent] = useState(false);
+
+    useEffect(() => {
+        if (!targetIso) return;
+
+        const calculateTime = () => {
+            const now = new Date();
+            const target = new Date(targetIso);
+            const diff = target - now;
+
+            if (diff <= 0) {
+                // Post time has passed
+                setTimeLeft('Post Time');
+                setIsUrgent(true);
+                return;
+            }
+
+            // Calculate hours, minutes, seconds
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            if (hours > 0) {
+                setTimeLeft(`${hours}h ${minutes}m`);
+                setIsUrgent(false);
+            } else {
+                // Less than an hour, show MM:SS
+                setTimeLeft(`${minutes}m ${seconds}s`);
+                // Urgent if less than 5 mins
+                setIsUrgent(minutes < 5);
+            }
+        };
+
+        calculateTime();
+        const timer = setInterval(calculateTime, 1000);
+
+        return () => clearInterval(timer);
+    }, [targetIso]);
+
+    if (!targetIso) return <span className="text-white font-medium">-</span>;
+
+    return (
+        <div className="flex flex-col">
+            <span className={`font-mono font-bold ${isUrgent ? 'text-red-400 animate-pulse' : 'text-green-400'}`}>
+                {timeLeft}
+            </span>
+            <span className="text-[10px] text-gray-500">{originalTime}</span>
+        </div>
+    );
+};
+
 export default function Dashboard() {
     const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'results'
     const [todaySummary, setTodaySummary] = useState([]);
@@ -158,26 +212,47 @@ export default function Dashboard() {
                                     setSelectedTrack(track.track_name);
                                     // Optional: Auto-load? Let's just select for now as users prefer manual verify
                                 }}>
-                                    <div className="flex justify-between items-start mb-4">
-                                        <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
-                                        <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
-                                            {track.track_code}
-                                        </span>
+                                    <div>
+                                        <div className="flex justify-between items-start mb-4">
+                                            <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
+                                            <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
+                                                {track.track_code}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-gray-400">Total Races</span>
+                                                <span className="text-white font-medium">{track.total}</span>
+                                            </div>
+                                            <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                                                <div
+                                                    className="bg-green-500 h-full"
+                                                    style={{ width: `${(track.completed / track.total) * 100}%` }}
+                                                ></div>
+                                            </div>
+                                            <div className="flex justify-between text-xs text-gray-500 pt-1">
+                                                <span>{track.completed} Completed</span>
+                                                <span>{track.upcoming} Upcoming</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-400">Total Races</span>
-                                            <span className="text-white font-medium">{track.total}</span>
+
+                                    {/* Additional Info: Next / Last */}
+                                    <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-gray-800">
+                                        <div>
+                                            <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Last Winner</span>
+                                            {track.last_race_winner ? (
+                                                <div className="truncate" title={track.last_race_winner}>
+                                                    <span className="text-sm font-bold text-white block truncate">{track.last_race_winner}</span>
+                                                    <span className="text-[10px] text-purple-400">Race {track.last_race_number}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-600 text-xs italic">-</span>
+                                            )}
                                         </div>
-                                        <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                                            <div
-                                                className="bg-green-500 h-full"
-                                                style={{ width: `${(track.completed / track.total) * 100}%` }}
-                                            ></div>
-                                        </div>
-                                        <div className="flex justify-between text-xs text-gray-500 pt-1">
-                                            <span>{track.completed} Completed</span>
-                                            <span>{track.upcoming} Upcoming</span>
+                                        <div>
+                                            <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Next Post</span>
+                                            <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                                         </div>
                                     </div>
                                 </div>

@@ -11,6 +11,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from supabase_client import get_supabase_client
 import traceback
+import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -322,11 +323,14 @@ def get_filter_options():
 
         # 3. Get detailed summary for TODAY
         today_response = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name)')\
+            .select('*, hranalyzer_tracks(track_name, timezone), hranalyzer_race_entries(finish_position, hranalyzer_horses(horse_name))')\
             .eq('race_date', today)\
+            .order('race_number')\
             .execute()
             
         summary_map = {}
+        
+        # Helper to parse post time for sorting/comparison if needed (optional, here we trust race_number order)
         
         for r in today_response.data:
             name = r.get('hranalyzer_tracks', {}).get('track_name', r['track_code'])
@@ -336,14 +340,55 @@ def get_filter_options():
                     'track_code': r['track_code'],
                     'total': 0,
                     'upcoming': 0,
-                    'completed': 0
+                    'completed': 0,
+                    'next_race_time': None,
+                    'last_race_winner': None,
+                    'last_race_number': 0
                 }
             
             summary_map[name]['total'] += 1
+            
             if r['race_status'] == 'completed':
                 summary_map[name]['completed'] += 1
+                # Update last race winner (assuming races ordered by race_number)
+                # Ensure we are actually looking at the latest race number processed
+                if r['race_number'] > summary_map[name]['last_race_number']:
+                    summary_map[name]['last_race_number'] = r['race_number']
+                    # Find winner
+                    winner_entry = next((e for e in r.get('hranalyzer_race_entries', []) if e['finish_position'] == 1), None)
+                    if winner_entry and winner_entry.get('hranalyzer_horses'):
+                        summary_map[name]['last_race_winner'] = winner_entry['hranalyzer_horses']['horse_name']
+                    else:
+                        summary_map[name]['last_race_winner'] = "Unknown"
+                        
             else:
                 summary_map[name]['upcoming'] += 1
+                # Update next race time (first one we encounter that is upcoming, since we ordered by race_number)
+                if summary_map[name]['next_race_time'] is None:
+                    post_time_str = r.get('post_time')
+                    if post_time_str:
+                         try:
+                             # Parse TIME (HH:MM:SS) and combine with today to get ISO string
+                             # Handle cases where post_time_str might be HH:MM:SS or HH:MM
+                             if len(post_time_str.split(':')) == 2:
+                                 pt = datetime.strptime(post_time_str, "%H:%M").time()
+                             else:
+                                 pt = datetime.strptime(post_time_str, "%H:%M:%S").time()
+                                 
+                             today_dt = datetime.strptime(today, "%Y-%m-%d").date()
+                             dt = datetime.combine(today_dt, pt)
+                             
+                             tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
+                             if not tz_name: tz_name = 'America/New_York'
+                             
+                             local_tz = pytz.timezone(tz_name)
+                             localized = local_tz.localize(dt)
+                             
+                             summary_map[name]['next_race_iso'] = localized.isoformat()
+                             summary_map[name]['next_race_time'] = localized.strftime("%I:%M %p").lstrip('0')
+                         except Exception as e:
+                             print(f"Error parsing time {post_time_str}: {e}")
+                             summary_map[name]['next_race_time'] = post_time_str
                 
         today_summary = sorted(list(summary_map.values()), key=lambda x: x['track_name'])
 
