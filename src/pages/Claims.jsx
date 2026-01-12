@@ -9,7 +9,7 @@ export default function Claims() {
     const [error, setError] = useState(null);
     const [selectedTrack, setSelectedTrack] = useState('All Tracks');
     const [selectedDate, setSelectedDate] = useState('All Dates');
-    const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
     useEffect(() => {
         const fetchClaims = async () => {
@@ -64,6 +64,10 @@ export default function Claims() {
                 } else if (sortConfig.key === 'new_trainer') {
                     aValue = (a.new_trainer_name || '').toLowerCase();
                     bValue = (b.new_trainer_name || '').toLowerCase();
+                } else if (sortConfig.key === 'created_at') {
+                    // String date comparison works for ISO dates
+                    aValue = (aValue || '').toString();
+                    bValue = (bValue || '').toString();
                 } else {
                     // Strings (date, track, horse)
                     aValue = (aValue || '').toString().toLowerCase();
