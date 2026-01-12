@@ -21,8 +21,8 @@ logger = logging.getLogger("LiveCrawler")
 
 # Constants
 EST = zoneinfo.ZoneInfo("America/New_York")
-START_HOUR = 12
-END_HOUR = 23 # Run up to and including 11 PM hour
+START_HOUR = 0
+END_HOUR = 23 # Run 24/7 to ensure morning races are captured
 
 def run_crawler():
     logger.info("Starting live crawler service...")
@@ -38,72 +38,49 @@ def run_crawler():
             logger.info(f"Current time (EST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
             if START_HOUR <= current_hour <= END_HOUR:
-                logger.info("Within operating hours. Initiating crawl...")
+                logger.info("Within operating hours. Checking tasks...")
                 
                 start_time = time.time()
                 try:
-                    # Crawl today's races
-                    stats = crawl_historical_races(date.today(), COMMON_TRACKS)
+                    # 1. Crawl Results (Hourly, only during racing hours)
+                    # Typical racing is 12 PM - 11 PM, lets be safe and say 11 AM - 11:59 PM
+                    # Since START_HOUR is 0 now, we need an inner check
+                    RACING_START_HOUR = 11
+                    stats = {}
                     
-                    # Crawl upcoming entries for today (ONLY once per day to avoid bans)
-                    # We retry if we haven't succeeded for today yet
+                    if current_hour >= RACING_START_HOUR:
+                         logger.info("Racing hours active. Crawling results...")
+                         stats = crawl_historical_races(date.today(), COMMON_TRACKS)
+                    else:
+                         logger.info("Too early for racing results. Skipping result crawl.")
+
+                    # 2. Crawl Upcoming Entries (Once per day, ANY time)
+                    # This ensures data is populated early morning (e.g. 1 AM)
                     today_date = date.today()
                     entry_stats = {'races_found': 0}
                     
                     if last_entries_crawl_date != today_date:
-                        logger.info("First run of the day (or retry) for Entries. Fetching...")
+                        logger.info("First run of the day for Entries. Fetching upcoming races...")
                         entry_stats = crawl_entries(today_date, COMMON_TRACKS)
-                        
-                        # If we found races, mark as done for today
-                        # If 0 races found, we might want to retry next hour (or it might just be a dark day)
-                        # For safety, let's assume if we ran without crashing, we're good for the day 
-                        # unless we want to be aggressive about retrying empty results.
-                        # Given WAF fears, let's mark it as done if it runs.
                         last_entries_crawl_date = today_date
                     else:
-                        logger.info("Entries already crawled today. Skipping to stay safe.")
+                        logger.info("Entries already crawled today. Skipping.")
 
                     duration = time.time() - start_time
                     logger.info(f"Crawl finished in {duration:.1f}s. "
-                                f"Results (Historical) found: {stats.get('races_found', 0)}, "
-                                f"Entries (Upcoming) found: {entry_stats.get('races_found', 0)}")
+                                f"Results found: {stats.get('races_found', 0)}, "
+                                f"Entries found: {entry_stats.get('races_found', 0)}")
                                 
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")
-                    # Don't crash the loop, just log and wait
                 
                 # Sleep for 1 hour
                 logger.info("Sleeping for 1 hour...")
                 time.sleep(3600)
-                
             else:
+                # Should not happen if START=0, END=23, but kept for safety if config changes
                 logger.info("Outside operating hours.")
-                
-                # Calculate time until next start time
-                next_start = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
-                
-                if current_hour > END_HOUR:
-                    # It's late (e.g. midnight or 1AM), schedule for later today (if today is new day) 
-                    # OR if we are past end hour (e.g. 23), next start is tomorrow.
-                    # Actually, if Hour is 0, 1... 11, we are before START_HOUR.
-                    # If Hour is 23, we are in operating hours (handled above).
-                    # So this logic covers hours < 12 and > 23 (if any, e.g. 24? no).
-                    next_start += timedelta(days=1)
-                elif current_hour < START_HOUR:
-                    # It's morning, next start is today
-                    pass
-                
-                # Double check we are in future
-                if next_start <= now:
-                    next_start += timedelta(days=1)
-                    
-                sleep_seconds = (next_start - now).total_seconds()
-                hours_sleep = sleep_seconds / 3600
-                logger.info(f"Sleeping until {next_start.strftime('%Y-%m-%d %H:%M:%S')} ({hours_sleep:.1f} hours)")
-                
-                # Sleep in smaller chunks to be responsive to interrupts? 
-                # For now simple sleep
-                time.sleep(sleep_seconds)
+                time.sleep(3600)
 
         except Exception as e:
             logger.error(f"Unexpected error in main loop: {e}")
