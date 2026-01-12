@@ -176,7 +176,12 @@ export default function Races() {
             {error && <div className="text-red-400 text-center p-4 bg-red-900/20 rounded-lg">{error}</div>}
 
             {/* Results */}
-            {!hasSearched ? (
+            {loading ? (
+                <div className="text-center p-20">
+                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+                    <p className="mt-4 text-gray-400">Loading races...</p>
+                </div>
+            ) : !hasSearched ? (
                 <div className="text-center p-20 bg-black rounded-xl border border-purple-900/30 border-dashed">
                     <p className="text-gray-500">Select filters and click Search to view races</p>
                 </div>

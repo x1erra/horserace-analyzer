@@ -350,7 +350,7 @@ def get_past_races():
                 winner_entry:hranalyzer_race_entries(finish_position, horse:hranalyzer_horses(horse_name)),
                 all_entries:hranalyzer_race_entries(id)
             ''')\
-            .lt('race_date', today)\
+            .lte('race_date', today)\
             .order('race_date', desc=True)\
             .order('race_number', desc=False)\
             .in_('race_status', ['completed', 'past_drf_only'])

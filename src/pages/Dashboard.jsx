@@ -114,7 +114,7 @@ export default function Dashboard() {
                 <button
                     onClick={handleLoadRaces}
                     disabled={loading}
-                    className="w-full md:w-auto bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-lg flex items-center justify-center gap-2 h-[42px]"
+                    className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-lg flex items-center justify-center gap-2 h-[42px]"
                 >
                     {loading ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -200,7 +200,12 @@ export default function Dashboard() {
                         </button>
                     </div>
 
-                    {races.length === 0 ? (
+                    {loading ? (
+                        <div className="text-center py-20">
+                            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+                            <p className="mt-4 text-gray-400">Loading races...</p>
+                        </div>
+                    ) : races.length === 0 ? (
                         <div className="text-center py-20 bg-black rounded-xl border border-purple-900/20 border-dashed">
                             <p className="text-gray-400">No races found matching your filters.</p>
                             <button onClick={() => setViewMode('overview')} className="text-purple-500 mt-2 hover:underline">Clear filters</button>

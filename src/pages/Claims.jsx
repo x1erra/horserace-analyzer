@@ -188,7 +188,14 @@ export default function Claims() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-purple-900/20">
-                            {filteredClaims.length === 0 ? (
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="7" className="p-8 text-center text-gray-500">
+                                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+                                        <p>Loading claims...</p>
+                                    </td>
+                                </tr>
+                            ) : filteredClaims.length === 0 ? (
                                 <tr>
                                     <td colSpan="7" className="p-8 text-center text-gray-500">
                                         No claims found matching your filters.
