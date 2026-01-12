@@ -29,14 +29,10 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--window-size=375,812") # Mobile dimensions
     
-    # Stealth arguments to avoid detection
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    
-    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+    # Use Mobile User Agent (often bypasses desktop WAF)
+    options.add_argument("--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1")
     
     service = None
     
@@ -64,16 +60,6 @@ def get_driver():
         logger.warning("Could not find system chromedriver, relying on Selenium Manager...")
         
     driver = webdriver.Chrome(service=service, options=options)
-    
-    # Execute CDP command to clear webdriver flag
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            })
-        """
-    })
-    
     return driver
 
 def parse_entries_html(html_content, track_code, race_date):
@@ -319,46 +305,73 @@ def crawl_entries(target_date=None, tracks=None):
         logger.info("Starting Selenium Driver...")
         driver = get_driver()
         
-        # 1. Start at Homepage and Navigate to Entries (User Flow)
-        logger.info("Navigating to Homepage https://www.equibase.com")
-        driver.get("https://www.equibase.com")
-        time.sleep(5)
+        # 1. Start at Homepage with Retry Logic
+        url = "https://www.equibase.com"
+        success = False
         
-        logger.info(f"Home Title: {driver.title}")
-        
-        try:
-            # Handle potential "Unic Modal" / Privacy popup
+        for attempt in range(3):
             try:
-                # Close button is usually an 'X' or 'Close' inside the modal
-                # Brute force: try to remove the modal from DOM via JS
-                logger.info("Checking for blocking modals...")
-                driver.execute_script("""
-                    var modals = document.querySelectorAll('.unic-modal');
-                    modals.forEach(m => m.remove());
-                    var backdrops = document.querySelectorAll('.unic-backdrop');
-                    backdrops.forEach(b => b.remove());
-                """)
-                time.sleep(1)
-            except:
-                pass
-
-            # Click "Entries" from nav
-            logger.info("Looking for 'Entries' link to click...")
-            entries_link = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Entries"))
-            )
-            
-            # Use JS Click to avoid "Element Click Intercepted" error
-            driver.execute_script("arguments[0].click();", entries_link)
-            
-            logger.info("Clicked 'Entries' via JS, waiting for load...")
-            time.sleep(5)
-            
-        except Exception as e:
-            logger.warning(f"Could not click Entries link: {e}. Trying direct URL fallback.")
-            # Use the URL seen in the error log which is likely the correct one
+                logger.info(f"Navigating to Homepage {url} (Attempt {attempt+1}/3)")
+                driver.get(url)
+                time.sleep(5)
+                
+                title = driver.title
+                logger.info(f"Home Title: {title}")
+                
+                if title and "Just a moment" not in title and title.strip() != "":
+                    success = True
+                    break
+                else:
+                    logger.warning("Blocked or Empty Page. Retrying...")
+                    time.sleep(10)
+            except Exception as e:
+                logger.error(f"Nav Error: {e}")
+                
+        if not success:
+            logger.error("Failed to load Homepage after 3 attempts.")
+            # Try direct fallback as last resort
             driver.get("https://www.equibase.com/static/entry/index.html")
-            time.sleep(5)
+        else:
+            try:
+                # Handle potential "Unic Modal" / Privacy popup
+                try:
+                    logger.info("Checking for blocking modals...")
+                    driver.execute_script("""
+                        var modals = document.querySelectorAll('.unic-modal');
+                        modals.forEach(m => m.remove());
+                        var backdrops = document.querySelectorAll('.unic-backdrop');
+                        backdrops.forEach(b => b.remove());
+                    """)
+                    time.sleep(1)
+                except:
+                    pass
+
+                # Click "Entries" from nav
+                logger.info("Looking for 'Entries' link...")
+                # Mobile menu might hide it? PROBE LINKS if mobile
+                # On mobile, Equibase often lists "Entries" directly or in hamburger
+                # Let's search for ANY link containing 'Entries'
+                
+                links = driver.find_elements(By.TAG_NAME, "a")
+                entries_link = None
+                for l in links:
+                    if "entries" in l.text.lower() or "entries" in l.get_attribute("href") or "Entries" in l.text:
+                         if l.is_displayed():
+                             entries_link = l
+                             break
+                
+                if entries_link:
+                    logger.info(f"Clicking Entries link: {entries_link.text}")
+                    driver.execute_script("arguments[0].click();", entries_link)
+                    time.sleep(5)
+                else:
+                    logger.warning("Could not find visible Entries link in Mobile view. Trying direct URL.")
+                    driver.get("https://www.equibase.com/entries")
+                    time.sleep(5)
+                
+            except Exception as e:
+                logger.warning(f"Nav Error: {e}")
+                driver.get("https://www.equibase.com/entries")
 
         logger.info(f"Current Page Title: {driver.title}")
         logger.info(f"Current URL: {driver.current_url}")
