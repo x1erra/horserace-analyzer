@@ -187,19 +187,57 @@ def get_todays_races():
         track_filter = request.args.get('track')
         status_filter = request.args.get('status')
 
-        # Get races for today
+        # 1. Get ALL races for today first
         query = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, location)')\
             .eq('race_date', today)\
             .order('race_number')
             
         response = query.execute()
+        raw_races = response.data
+
+        if not raw_races:
+            return jsonify({'races': [], 'count': 0, 'date': today})
+
+        # 2. Batch fetch ALL entries for these races (Single Query Optimization)
+        race_ids = [r['id'] for r in raw_races]
+        
+        entries_response = supabase.table('hranalyzer_race_entries')\
+            .select('race_id, id, program_number, finish_position, hranalyzer_horses(horse_name)')\
+            .in_('race_id', race_ids)\
+            .execute()
+            
+        all_entries = entries_response.data
+
+        # 3. Process entries in memory
+        # Map: race_id -> { count: 0, results: [] }
+        race_stats = {}
+        for entry in all_entries:
+            rid = entry['race_id']
+            if rid not in race_stats:
+                race_stats[rid] = {'count': 0, 'results': []}
+            
+            # Increment count
+            race_stats[rid]['count'] += 1
+            
+            # Check for top 3 finish
+            if entry.get('finish_position') in [1, 2, 3]:
+                horse_name = entry.get('hranalyzer_horses', {}).get('horse_name', 'Unknown')
+                race_stats[rid]['results'].append({
+                    'position': entry['finish_position'],
+                    'horse': horse_name,
+                    'number': entry.get('program_number')
+                })
+
+        # Sort results by position for each race
+        for rid in race_stats:
+            race_stats[rid]['results'].sort(key=lambda x: x['position'])
 
         races = []
-        for race in response.data:
+        for race in raw_races:
             track_name = race.get('hranalyzer_tracks', {}).get('track_name', race['track_code'])
             
-            # Python-side filtering
+            # Filter logic
             if track_filter and track_filter != 'All':
                  if track_name != track_filter and race['track_code'] != track_filter:
                      continue
@@ -210,11 +248,8 @@ def get_todays_races():
                 if status_filter == 'Completed' and race['race_status'] != 'completed':
                     continue
 
-            # Get entry count for each race
-            entries_response = supabase.table('hranalyzer_race_entries')\
-                .select('id', count='exact')\
-                .eq('race_id', race['id'])\
-                .execute()
+            # Get pre-calculated stats
+            stats = race_stats.get(race['id'], {'count': 0, 'results': []})
 
             races.append({
                 'race_key': race['race_key'],
@@ -227,11 +262,11 @@ def get_todays_races():
                 'surface': race['surface'],
                 'distance': race['distance'],
                 'purse': race['purse'],
-                'entry_count': entries_response.count,
+                'entry_count': stats['count'],
                 'race_status': race['race_status'],
+                'results': stats['results'], # Top 3 finishers
                 'id': race['id']
             })
-
 
         return jsonify({
             'races': races,
@@ -240,6 +275,8 @@ def get_todays_races():
         })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -341,13 +378,13 @@ def get_past_races():
         limit = int(request.args.get('limit', 50))
 
         # Build query - strictly previous days
-        # We use joins to fetch winners and entry counts in a single query (N+1 optimization)
+        # FETCH TOP 3 FINISHERS efficiently using the join
+        # We rename the alias from 'winner_entry' to 'results' since it now holds more than just the winner
         query = supabase.table('hranalyzer_races')\
             .select('''
                 *, 
                 track:hranalyzer_tracks(track_name, location), 
-                winning_horse:hranalyzer_horses(horse_name),
-                winner_entry:hranalyzer_race_entries(finish_position, horse:hranalyzer_horses(horse_name)),
+                results:hranalyzer_race_entries(finish_position, program_number, horse:hranalyzer_horses(horse_name)),
                 all_entries:hranalyzer_race_entries(id)
             ''')\
             .lte('race_date', today)\
@@ -355,9 +392,22 @@ def get_past_races():
             .order('race_number', desc=False)\
             .in_('race_status', ['completed', 'past_drf_only'])
 
-        # Filter the winner_entry join to only include the first place horse
-        query = query.eq('winner_entry.finish_position', 1)
-
+        # Filter the results join to only include top 3
+        # Note: Supabase/PostgREST 'in' filter on joined resource syntax might vary or apply to all. 
+        # Safest to fetch and filter in memory if the join filter is tricky, BUT:
+        # We can try to filter the join: results(finish_position.in.(1,2,3)) logic is not standard PostgREST via select param easily.
+        # Standard approach: Fetch all entries or rely on the client. 
+        # However, for efficiency, fetching all entries for past races might be heavy if fully populated.
+        # Let's try to trust the memory filter for now OR use the `select` syntax if possible.
+        # Actually, let's keep it simple: Fetch TOP 3 if possible, or just parse in refined logic loop.
+        # Warning: Filtering a relation in `select` string is not supported directly in this client syntax usually.
+        # So we will fetch basic info and filter in Python. Top 3 is small enough.
+        
+        # NOTE: Just fetching all entries for valid races might be too much.
+        # Optimization: We can't easily filter the nested resource in the SELECT string with the standard client without raw SQL.
+        # Use previous strategy: Loop is okay if limit is 50. But we want "efficient".
+        # Let's stick to the previous pattern but map it correctly.
+        
         if track:
             query = query.eq('track_code', track)
         if start_date:
@@ -369,17 +419,24 @@ def get_past_races():
 
         races = []
         for race in response.data:
+            results_data = race.get('results', [])
+            # Filter for top 3 and format
+            formatted_results = []
             winner_name = 'N/A'
             
-            # 1. Try explicit winning_horse relation
-            if race.get('winning_horse'):
-                winner_name = race['winning_horse'].get('horse_name', 'N/A')
+            for r in results_data:
+                pos = r.get('finish_position')
+                if pos and pos in [1, 2, 3]:
+                    horse_name = r.get('horse', {}).get('horse_name', 'Unknown')
+                    formatted_results.append({
+                        'position': pos,
+                        'horse': horse_name,
+                        'number': r.get('program_number')
+                    })
+                    if pos == 1:
+                        winner_name = horse_name
             
-            # 2. Try the joined winner_entry (fallback for crawled results)
-            if winner_name == 'N/A' and race.get('winner_entry'):
-                winners = race['winner_entry']
-                if winners and winners[0].get('horse'):
-                    winner_name = winners[0]['horse'].get('horse_name', 'N/A')
+            formatted_results.sort(key=lambda x: x['position'])
 
             races.append({
                 'race_key': race['race_key'],
@@ -397,6 +454,7 @@ def get_past_races():
                 'data_source': race['data_source'],
                 'id': race['id'],
                 'winner': winner_name,
+                'results': formatted_results, # Top 3
                 'time': race.get('final_time') or 'N/A',
                 'link': race.get('equibase_chart_url') or 'N/A'
             })
