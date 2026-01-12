@@ -32,11 +32,32 @@ def get_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    # Try to find chromium executable if on Pi/Linux
+    service = None
+    
+    # Check for Chromium binary
     if os.path.exists("/usr/bin/chromium"):
         options.binary_location = "/usr/bin/chromium"
+        logger.info(f"Found Chromium binary at /usr/bin/chromium")
+    elif os.path.exists("/usr/bin/chromium-browser"):
+        options.binary_location = "/usr/bin/chromium-browser"
+        logger.info(f"Found Chromium binary at /usr/bin/chromium-browser")
+
+    # Check for ChromeDriver binary
+    driver_paths = ["/usr/bin/chromedriver", "/usr/lib/chromium-browser/chromedriver", "/usr/bin/chromium-driver"]
+    found_driver = None
+    
+    for path in driver_paths:
+        if os.path.exists(path):
+            found_driver = path
+            logger.info(f"Found ChromeDriver at {path}")
+            break
+            
+    if found_driver:
+        service = Service(executable_path=found_driver)
+    else:
+        logger.warning("Could not find system chromedriver, relying on Selenium Manager...")
         
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(service=service, options=options)
     return driver
 
 def get_entries_url(track_code, race_date):
