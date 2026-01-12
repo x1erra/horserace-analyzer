@@ -28,6 +28,8 @@ def run_crawler():
     logger.info("Starting live crawler service...")
     logger.info(f"Operating hours: {START_HOUR}:00 - {END_HOUR}:59 EST")
     
+    last_entries_crawl_date = None
+    
     while True:
         try:
             now = datetime.now(EST)
@@ -43,13 +45,28 @@ def run_crawler():
                     # Crawl today's races
                     stats = crawl_historical_races(date.today(), COMMON_TRACKS)
                     
-                    # Also crawl upcoming entries for today
-                    entry_stats = crawl_entries(date.today(), COMMON_TRACKS)
+                    # Crawl upcoming entries for today (ONLY once per day to avoid bans)
+                    # We retry if we haven't succeeded for today yet
+                    today_date = date.today()
+                    entry_stats = {'races_found': 0}
                     
+                    if last_entries_crawl_date != today_date:
+                        logger.info("First run of the day (or retry) for Entries. Fetching...")
+                        entry_stats = crawl_entries(today_date, COMMON_TRACKS)
+                        
+                        # If we found races, mark as done for today
+                        # If 0 races found, we might want to retry next hour (or it might just be a dark day)
+                        # For safety, let's assume if we ran without crashing, we're good for the day 
+                        # unless we want to be aggressive about retrying empty results.
+                        # Given WAF fears, let's mark it as done if it runs.
+                        last_entries_crawl_date = today_date
+                    else:
+                        logger.info("Entries already crawled today. Skipping to stay safe.")
+
                     duration = time.time() - start_time
                     logger.info(f"Crawl finished in {duration:.1f}s. "
-                                f"Results found: {stats.get('races_found', 0)}, "
-                                f"Entries found: {entry_stats.get('races_found', 0)}")
+                                f"Results (Historical) found: {stats.get('races_found', 0)}, "
+                                f"Entries (Upcoming) found: {entry_stats.get('races_found', 0)}")
                                 
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")
