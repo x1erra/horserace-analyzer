@@ -594,10 +594,20 @@ def insert_race_to_db(supabase, race_data: Dict, track_id: str, track_code: str,
         race_key = f"{track_code}-{race_date.replace('-', '')}-{race_data['race_number']}"
 
         # Check if race already exists
-        existing = supabase.table('hranalyzer_races').select('id').eq('race_key', race_key).execute()
+        # Check if race already exists
+        existing = supabase.table('hranalyzer_races').select('*').eq('race_key', race_key).execute()
         if existing.data and len(existing.data) > 0:
-            logger.info(f"Race {race_key} already exists, skipping")
-            return existing.data[0]['id']
+            existing_race = existing.data[0]
+            logger.info(f"Race {race_key} already exists.")
+            
+            # Update post_time if it's missing in DB but present in DRF data
+            if not existing_race.get('post_time') and race_data.get('post_time'):
+                logger.info(f"Updating missing post_time for {race_key}: {race_data.get('post_time')}")
+                supabase.table('hranalyzer_races').update({
+                    'post_time': race_data.get('post_time')
+                }).eq('id', existing_race['id']).execute()
+
+            return existing_race['id']
 
         # Determine race status based on date
         # If race date is in the past, mark as 'past_drf_only' (has DRF data but no results yet)
