@@ -351,6 +351,41 @@ def crawl_entries(target_date=None, tracks=None):
         logger.info("Starting Selenium Driver...")
         driver = get_driver()
         
+        # PROBE: Check main entries page for link patterns
+        logger.info("PROBING: Fetching main entries page https://www.equibase.com")
+        driver.get("https://www.equibase.com")
+        time.sleep(5)
+        
+        logger.info(f"Main Page Title: {driver.title}")
+        
+        # Find links with common codes
+        links = driver.find_elements(By.TAG_NAME, 'a')
+        logger.info(f"Found {len(links)} links on main page")
+        for link in links:
+            try:
+                href = link.get_attribute('href')
+                text = link.text
+                if href and ("GP" in href or "entries" in href.lower()):
+                    logger.info(f"Potential Entry Link: Text='{text}' Href='{href}'")
+            except:
+                pass
+
+        # Try specific entries page
+        logger.info("PROBING: Fetching entries page https://www.equibase.com/entries")
+        driver.get("https://www.equibase.com/entries")
+        time.sleep(5)
+        
+        links = driver.find_elements(By.TAG_NAME, 'a')
+        for link in links:
+            try:
+                href = link.get_attribute('href')
+                text = link.text
+                if href and ("GP" in href or "Gulfstream" in text):
+                    logger.info(f"Entries Page Link: Text='{text}' Href='{href}'")
+            except:
+                pass
+                
+        # Fallback to old logic (which will likely fail but keep it for now)
         for track in tracks:
             url = get_entries_url(track, target_date)
             logger.info(f"Fetching {url}")
@@ -369,13 +404,18 @@ def crawl_entries(target_date=None, tracks=None):
                     continue
                     
                 # Basic verification of load by checking title or critical element
+                logger.info(f"Page Title: {driver.title}")
+                
                 if "Pardon Our Interruption" in driver.title:
                     logger.warning(f"Access Denied for {track} - WAF block triggered. Retrying...")
                     time.sleep(5)
                     driver.get(url) # Retry once
                     time.sleep(5)
                     content = driver.page_source
-                    
+                
+                debug_race_text = "Race 1" in content or "RACE 1" in content
+                logger.info(f"Content length: {len(content)}, 'Race 1' found: {debug_race_text}")
+
                 races = parse_entries_html(content, track, target_date)
                 if races:
                     logger.info(f"Found {len(races)} races for {track}")
