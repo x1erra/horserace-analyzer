@@ -101,7 +101,7 @@ export default function Upload() {
                         id="file-upload"
                         disabled={uploading}
                     />
-                    <label htmlFor="file-upload" className={`${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition duration-200`}>
+                    <label htmlFor="file-upload" className={`${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.2)]`}>
                         Select PDF
                     </label>
                     {selectedFile && (
@@ -114,7 +114,7 @@ export default function Upload() {
                 <button
                     type="submit"
                     disabled={!selectedFile || uploading}
-                    className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white py-3 rounded-md transition duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-3 rounded-md transition duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(147,51,234,0.3)]"
                 >
                     {uploading ? 'Uploading & Parsing...' : 'Upload & Parse'}
                 </button>
@@ -155,7 +155,7 @@ export default function Upload() {
                     <div className="flex gap-4 mt-6">
                         <button
                             onClick={() => navigate('/dashboard')}
-                            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition"
+                            className="flex-1 bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-2 rounded-md transition shadow-[0_0_10px_rgba(147,51,234,0.2)]"
                         >
                             View Dashboard
                         </button>

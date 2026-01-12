@@ -74,7 +74,7 @@ const PasswordGate = ({ children }) => {
 
                     <button
                         type="submit"
-                        className="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-purple-900/20"
+                        className="w-full py-3 bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white font-semibold rounded-lg transition-colors shadow-[0_0_20px_rgba(147,51,234,0.3)]"
                     >
                         Unlock Application
                     </button>

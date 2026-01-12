@@ -144,7 +144,7 @@ export default function Betting() {
                 <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
                 <button
                     onClick={handleResolveBets}
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md transition duration-200"
+                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.2)]"
                 >
                     Check for Results / Resolve Bets
                 </button>
@@ -230,7 +230,7 @@ export default function Betting() {
                     </div>
                 </div>
 
-                <button type="submit" className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white py-3 rounded-md transition duration-200 font-medium">
+                <button type="submit" className="w-full bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-3 rounded-md transition duration-200 font-medium shadow-[0_0_15px_rgba(147,51,234,0.3)]">
                     Place Bet
                 </button>
             </form>
@@ -266,8 +266,8 @@ export default function Betting() {
                                     <td className="p-4">${ticket.bet_amount} {ticket.bet_type}</td>
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
-                                                ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
-                                                    'bg-yellow-900 text-yellow-200'
+                                            ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
+                                                'bg-yellow-900 text-yellow-200'
                                             }`}>
                                             {ticket.status}
                                         </span>

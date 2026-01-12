@@ -74,7 +74,7 @@ export default function Dashboard() {
                 </div>
                 <Link
                     to="/upload"
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg transition text-sm font-medium flex items-center gap-2 shadow-lg shadow-purple-900/20"
+                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-5 py-2.5 rounded-lg transition text-sm font-medium flex items-center gap-2 shadow-[0_0_15px_rgba(147,51,234,0.3)]"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -117,7 +117,7 @@ export default function Dashboard() {
                 <button
                     onClick={handleLoadRaces}
                     disabled={loading}
-                    className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-lg flex items-center justify-center gap-2 h-[42px]"
+                    className="w-full md:w-auto bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-[0_0_15px_rgba(147,51,234,0.3)] flex items-center justify-center gap-2 h-[42px]"
                 >
                     {loading ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -290,7 +290,7 @@ export default function Dashboard() {
 
                                     <Link
                                         to={`/race/${race.race_key}`}
-                                        className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
+                                        className="w-full block bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-2 rounded-md transition text-center mt-auto shadow-[0_0_10px_rgba(147,51,234,0.2)]"
                                     >
                                         View Details
                                     </Link>
