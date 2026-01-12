@@ -151,7 +151,7 @@ export default function Dashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                             {/* Summary Cards per Track */}
                             {todaySummary.map(track => (
-                                <div key={track.track_code} className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer" onClick={() => {
+                                <div key={track.track_code} className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between" onClick={() => {
                                     setSelectedTrack(track.track_name);
                                     // Optional: Auto-load? Let's just select for now as users prefer manual verify
                                 }}>
@@ -215,7 +215,7 @@ export default function Dashboard() {
                             {races.map((race, index) => (
                                 <div
                                     key={race.race_key}
-                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col"
+                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full"
                                 >
                                     <div className="flex justify-between items-start mb-2">
                                         <h4 className="text-xl font-bold text-white">

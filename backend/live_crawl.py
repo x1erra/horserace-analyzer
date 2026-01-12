@@ -6,6 +6,7 @@ import os
 from datetime import datetime, date, timedelta
 import zoneinfo
 from crawl_equibase import crawl_historical_races, COMMON_TRACKS
+from crawl_entries import crawl_entries
 
 # Configure logging
 logging.basicConfig(
@@ -42,10 +43,13 @@ def run_crawler():
                     # Crawl today's races
                     stats = crawl_historical_races(date.today(), COMMON_TRACKS)
                     
+                    # Also crawl upcoming entries for today
+                    entry_stats = crawl_entries(date.today(), COMMON_TRACKS)
+                    
                     duration = time.time() - start_time
                     logger.info(f"Crawl finished in {duration:.1f}s. "
-                                f"Races found: {stats.get('races_found', 0)}, "
-                                f"Inserted: {stats.get('races_inserted', 0)}")
+                                f"Results found: {stats.get('races_found', 0)}, "
+                                f"Entries found: {entry_stats.get('races_found', 0)}")
                                 
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")

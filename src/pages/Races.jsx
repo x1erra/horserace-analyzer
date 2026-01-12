@@ -206,7 +206,7 @@ export default function Races() {
                             allRaces.map((race, index) => (
                                 <div
                                     key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
-                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col"
+                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full"
                                 >
                                     <div className="flex justify-between items-start mb-2">
                                         <h4 className="text-xl font-bold text-white">
