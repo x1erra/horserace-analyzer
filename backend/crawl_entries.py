@@ -351,43 +351,64 @@ def crawl_entries(target_date=None, tracks=None):
         logger.info("Starting Selenium Driver...")
         driver = get_driver()
         
-        # PROBE: Check main entries page for link patterns
-        logger.info("PROBING: Fetching main entries page https://www.equibase.com")
-        driver.get("https://www.equibase.com")
-        time.sleep(5)
-        
-        logger.info(f"Main Page Title: {driver.title}")
-        
-        # Find links with common codes
-        links = driver.find_elements(By.TAG_NAME, 'a')
-        logger.info(f"Found {len(links)} links on main page")
-        for link in links:
-            try:
-                href = link.get_attribute('href')
-                text = link.text
-                if href and ("GP" in href or "entries" in href.lower()):
-                    logger.info(f"Potential Entry Link: Text='{text}' Href='{href}'")
-            except:
-                pass
-
-        # Try specific entries page
-        logger.info("PROBING: Fetching entries page https://www.equibase.com/entries")
+        # 1. Harvest valid URLs from the main entries page
+        logger.info("Navigating to entries page to find valid links...")
         driver.get("https://www.equibase.com/entries")
-        time.sleep(5)
+        time.sleep(5) # Wait for table to load
         
-        links = driver.find_elements(By.TAG_NAME, 'a')
-        for link in links:
+        # Map track_code -> url
+        valid_urls = {}
+        
+        # We need to find the link matching the target day
+        target_day = str(target_date.day)
+        logger.info(f"Looking for links with text '{target_day}' for date {target_date}")
+        
+        # Find all track rows
+        # Heuristic: iterate through known tracks, look for their name in the page
+        # The page lists tracks by name (e.g. "Gulfstream Park"), but we have codes (e.g. "GP")
+        # We need a mapping or just fuzzy search
+        
+        track_name_map = {
+            'GP': 'Gulfstream Park',
+            'AQU': 'Aqueduct',
+            'FG': 'Fair Grounds',
+            'SA': 'Santa Anita',
+            'TAM': 'Tampa Bay',
+            'OP': 'Oaklawn Park',
+            'PRX': 'Parx Racing',
+            'LRL': 'Laurel Park',
+            'TP': 'Turfway Park',
+            'MVR': 'Mahoning Valley',
+            'CT': 'Charles Town',
+            'PEN': 'Penn National',
+            'DED': 'Delta Downs',
+            'HOU': 'Sam Houston',
+            'TUP': 'Turf Paradise',
+            'GG': 'Golden Gate',
+            'WO': 'Woodbine'
+        }
+        
+        for track_code in tracks:
+            # 1. Get readable name
+            name = track_name_map.get(track_code, track_code)
+            
             try:
-                href = link.get_attribute('href')
-                text = link.text
-                if href and ("GP" in href or "Gulfstream" in text):
-                    logger.info(f"Entries Page Link: Text='{text}' Href='{href}'")
-            except:
-                pass
+                # Find valid link element for this track and day
+                # XPath: //tr[contains(., 'Track Name')]//a[normalize-space()='day']
+                xpath = f"//tr[contains(., '{name}')]//a[normalize-space()='{target_day}']"
+                links = driver.find_elements(By.XPATH, xpath)
                 
-        # Fallback to old logic (which will likely fail but keep it for now)
-        for track in tracks:
-            url = get_entries_url(track, target_date)
+                if links:
+                    url = links[0].get_attribute('href')
+                    logger.info(f"Found URL for {track_code} ({name}): {url}")
+                    valid_urls[track_code] = url
+                else:
+                    logger.info(f"No link found for {track_code} on day {target_day}")
+            except Exception as e:
+                logger.warning(f"Error searching for {track_code}: {e}")
+
+        # 2. Crawl the found URLs
+        for track_code, url in valid_urls.items():
             logger.info(f"Fetching {url}")
             
             try:
@@ -395,42 +416,31 @@ def crawl_entries(target_date=None, tracks=None):
                 # Wait for potential challenge or content
                 time.sleep(3) 
                 
-                # Check for Race Headers which indicates content load
-                # Or wait until "Race" text appears
                 content = driver.page_source
                 
-                if "No entries found" in content:
-                    logger.info(f"No entries found for {track}")
-                    continue
-                    
-                # Basic verification of load by checking title or critical element
-                logger.info(f"Page Title: {driver.title}")
-                
+                # Basic verification
                 if "Pardon Our Interruption" in driver.title:
-                    logger.warning(f"Access Denied for {track} - WAF block triggered. Retrying...")
+                    logger.warning(f"Access Denied for {track_code}. Retrying...")
                     time.sleep(5)
-                    driver.get(url) # Retry once
+                    driver.get(url) 
                     time.sleep(5)
                     content = driver.page_source
                 
-                debug_race_text = "Race 1" in content or "RACE 1" in content
-                logger.info(f"Content length: {len(content)}, 'Race 1' found: {debug_race_text}")
-
-                races = parse_entries_html(content, track, target_date)
+                races = parse_entries_html(content, track_code, target_date)
                 if races:
-                    logger.info(f"Found {len(races)} races for {track}")
+                    logger.info(f"Found {len(races)} races for {track_code}")
                     stats['races_found'] += len(races)
                     
                     for race in races:
-                        if insert_upcoming_race(supabase, track, target_date, race):
+                        if insert_upcoming_race(supabase, track_code, target_date, race):
                             stats['races_inserted'] += 1
                 else:
-                    logger.info(f"No parseable races found for {track}")
-                    
-                time.sleep(2) # Politeness
+                    logger.info(f"No parseable races found for {track_code}")
+                
+                time.sleep(2) 
                 
             except Exception as e:
-                logger.error(f"Error processing {track}: {e}")
+                logger.error(f"Error processing {track_code}: {e}")
                 
     except Exception as e:
         logger.error(f"Selenium Driver Init failed: {e}")
