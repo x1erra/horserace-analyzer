@@ -308,9 +308,10 @@ def extract_race_header_from_page(page_text: str, race_number: int) -> Dict:
     if purse_match:
         race_data['purse'] = f"${purse_match.group(1)}"
 
-    # Extract post time - format: "Posttime:12:50ET" or "Posttime:1:20ET"
-    time_pattern = r'Posttime:(\d{1,2}:\d{2})\s*ET'
-    time_match = re.search(time_pattern, full_text)
+    # Extract post time - flexible format: "Posttime:12:50ET", "Post Time: 1:20 PM", "Post Time 12:00"
+    # Capture HH:MM and optional AM/PM/Timezone
+    time_pattern = r'Post\s*time[:\s]*(\d{1,2}:\d{2})\s*(?:[AP]M)?\s*(?:ET|PT|CT|MT)?'
+    time_match = re.search(time_pattern, full_text, re.IGNORECASE)
     if time_match:
         race_data['post_time'] = time_match.group(1)
 
