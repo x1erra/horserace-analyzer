@@ -1,28 +1,35 @@
-from supabase_client import get_supabase_client
-from datetime import date
+import requests
+import json
 
 try:
-    client = get_supabase_client()
+    # URL might be localhost:5001 based on previous context, verify port from backend.py or trial
+    # backend.py usually runs on 5001 or 5000. standard flask is 5000 but vite proxy often points to 5001. 
+    # Let's try 5001 first as seen in frontend code.
+    url = 'http://localhost:5001/api/todays-races'
+    params = {'track': 'Fair Grounds', 'status': 'Completed'}
     
-    # Check races with results (where winning_horse_id OR final_time is NOT NULL)
-    res = client.table('hranalyzer_races').select('id, race_key, race_status, winning_horse_id, final_time')\
-        .or_('winning_horse_id.not.is.null,final_time.not.is.null')\
-        .limit(10).execute()
+    print(f"Fetching {url} with params {params}...")
+    response = requests.get(url, params=params)
+    
+    if response.status_code == 200:
+        data = response.json()
+        races = data.get('races', [])
+        print(f"Found {len(races)} races.")
         
-    print(f"Races with some result data: {len(res.data)}")
-    for r in res.data:
-        print(f"- {r['race_key']}: status={r['race_status']}, winner_id={r['winning_horse_id']}, time={r['final_time']}")
-
-    # Check race entries for a completed race to see if finish_position is set
-    sample_race_key = 'GP-20260111-2'
-    race_id_res = client.table('hranalyzer_races').select('id').eq('race_key', sample_race_key).single().execute()
-    if race_id_res.data:
-        race_id = race_id_res.data['id']
-        entries = client.table('hranalyzer_race_entries').select('program_number, finish_position, horse_id')\
-            .eq('race_id', race_id).order('finish_position').execute()
-        print(f"\nEntries for {sample_race_key}:")
-        for e in entries.data:
-            print(f"  PN {e['program_number']}: Finish={e['finish_position']}, HorseID={e['horse_id']}")
+        if races:
+            first_race = races[0]
+            print("\n--- First Race Debug ---")
+            print(f"ID: {first_race.get('id')}")
+            print(f"Status: {first_race.get('race_status')}")
+            print(f"Entry Count: {first_race.get('entry_count')}")
+            print("Results Field:")
+            print(json.dumps(first_race.get('results'), indent=2))
+            
+            if not first_race.get('results'):
+                print("\nWARNING: 'results' field is empty!")
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
 
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"Exception: {e}")

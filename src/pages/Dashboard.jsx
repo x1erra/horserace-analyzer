@@ -45,6 +45,9 @@ export default function Dashboard() {
             if (selectedTrack !== 'All') params.track = selectedTrack;
             if (selectedStatus !== 'All') params.status = selectedStatus;
 
+            // Add cache buster
+            params._t = Date.now();
+
             const response = await axios.get(`${baseUrl}/api/todays-races`, { params });
             setRaces(response.data.races || []);
             setViewMode('results');

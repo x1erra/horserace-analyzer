@@ -72,222 +72,227 @@ export default function Races() {
                 }
             }
 
-            const response = await axios.get(endpoint, { params });
-            const raceData = response.data.races || [];
-            setAllRaces(raceData);
-
-        } catch (err) {
-            console.error("Error fetching races:", err);
-            setError("Failed to load race data. Is the backend running?");
-        } finally {
-            setLoading(false);
         }
-    };
 
-    if (metaLoading) {
-        return (
-            <div className="text-white text-center p-20">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-                <p className="mt-4">Loading options...</p>
-            </div>
-        );
+            // Add cache buster
+            params._t = Date.now();
+
+        const response = await axios.get(endpoint, { params });
+        const raceData = response.data.races || [];
+        setAllRaces(raceData);
+
+    } catch (err) {
+        console.error("Error fetching races:", err);
+        setError("Failed to load race data. Is the backend running?");
+    } finally {
+        setLoading(false);
     }
+};
 
+if (metaLoading) {
     return (
-        <div className="space-y-8">
-            <h3 className="text-3xl font-bold text-white">All Races</h3>
-            <p className="text-sm text-gray-400 mb-4">Browse upcoming races and historical results.</p>
+        <div className="text-white text-center p-20">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+            <p className="mt-4">Loading options...</p>
+        </div>
+    );
+}
 
-            {/* Tab selector */}
-            <div className="flex gap-4 border-b border-purple-900/50">
-                <button
-                    onClick={() => handleTabChange('today')}
-                    className={`px-6 py-3 font-medium transition ${activeTab === 'today'
-                        ? 'text-purple-400 border-b-2 border-purple-400'
-                        : 'text-gray-400 hover:text-white'
-                        }`}
-                >
-                    Today's Races
-                </button>
-                <button
-                    onClick={() => handleTabChange('past')}
-                    className={`px-6 py-3 font-medium transition ${activeTab === 'past'
-                        ? 'text-purple-400 border-b-2 border-purple-400'
-                        : 'text-gray-400 hover:text-white'
-                        }`}
-                >
-                    Past Races
-                </button>
-            </div>
+return (
+    <div className="space-y-8">
+        <h3 className="text-3xl font-bold text-white">All Races</h3>
+        <p className="text-sm text-gray-400 mb-4">Browse upcoming races and historical results.</p>
 
-            {/* Filter bar */}
-            <div className="bg-black/50 p-4 rounded-xl border border-purple-900/20 flex flex-col md:flex-row gap-4 items-end">
-                <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Tab selector */}
+        <div className="flex gap-4 border-b border-purple-900/50">
+            <button
+                onClick={() => handleTabChange('today')}
+                className={`px-6 py-3 font-medium transition ${activeTab === 'today'
+                    ? 'text-purple-400 border-b-2 border-purple-400'
+                    : 'text-gray-400 hover:text-white'
+                    }`}
+            >
+                Today's Races
+            </button>
+            <button
+                onClick={() => handleTabChange('past')}
+                className={`px-6 py-3 font-medium transition ${activeTab === 'past'
+                    ? 'text-purple-400 border-b-2 border-purple-400'
+                    : 'text-gray-400 hover:text-white'
+                    }`}
+            >
+                Past Races
+            </button>
+        </div>
+
+        {/* Filter bar */}
+        <div className="bg-black/50 p-4 rounded-xl border border-purple-900/20 flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase">Track</label>
+                    <select
+                        value={selectedTrack}
+                        onChange={(e) => setSelectedTrack(e.target.value)}
+                        className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
+                    >
+                        {availableTracks.map(track => (
+                            <option key={track.code} value={track.code}>{track.name}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {activeTab === 'past' && (
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase">Track</label>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase">Date</label>
                         <select
-                            value={selectedTrack}
-                            onChange={(e) => setSelectedTrack(e.target.value)}
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
                             className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
                         >
-                            {availableTracks.map(track => (
-                                <option key={track.code} value={track.code}>{track.name}</option>
+                            {availableDates.map(date => (
+                                <option key={date} value={date}>{date}</option>
                             ))}
                         </select>
                     </div>
-
-                    {activeTab === 'past' && (
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase">Date</label>
-                            <select
-                                value={selectedDate}
-                                onChange={(e) => setSelectedDate(e.target.value)}
-                                className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
-                            >
-                                {availableDates.map(date => (
-                                    <option key={date} value={date}>{date}</option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                </div>
-
-                <button
-                    onClick={handleSearch}
-                    disabled={loading}
-                    className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold flex items-center justify-center gap-2 h-[42px]"
-                >
-                    {loading ? (
-                        <>
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                            Loading...
-                        </>
-                    ) : (
-                        <>
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            Search
-                        </>
-                    )}
-                </button>
+                )}
             </div>
 
-            {error && <div className="text-red-400 text-center p-4 bg-red-900/20 rounded-lg">{error}</div>}
+            <button
+                onClick={handleSearch}
+                disabled={loading}
+                className="w-full md:w-auto bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold flex items-center justify-center gap-2 h-[42px]"
+            >
+                {loading ? (
+                    <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Loading...
+                    </>
+                ) : (
+                    <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        Search
+                    </>
+                )}
+            </button>
+        </div>
 
-            {/* Results */}
-            {loading ? (
-                <div className="text-center p-20">
-                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-                    <p className="mt-4 text-gray-400">Loading races...</p>
-                </div>
-            ) : !hasSearched ? (
-                <div className="text-center p-20 bg-black rounded-xl border border-purple-900/30 border-dashed">
-                    <p className="text-gray-500">Select filters and click Search to view races</p>
-                </div>
-            ) : (
-                <>
-                    {/* Results count */}
-                    <p className="text-sm text-gray-400 mb-4">
-                        Found {allRaces.length} {activeTab === 'today' ? "today's" : 'past'} races
-                    </p>
+        {error && <div className="text-red-400 text-center p-4 bg-red-900/20 rounded-lg">{error}</div>}
 
-                    {/* Grid of race cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
-                        {allRaces.length === 0 ? (
-                            <div className="col-span-full text-center p-12 bg-black rounded-xl border border-purple-900/50">
-                                <p className="text-gray-400 mb-4">
-                                    {activeTab === 'today'
-                                        ? "No races found matching your criteria."
-                                        : "No past races found matching your criteria."}
-                                </p>
-                            </div>
-                        ) : (
-                            allRaces.map((race, index) => (
-                                <div
-                                    key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
-                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full"
-                                >
-                                    <div className="flex justify-between items-start mb-2">
-                                        <h4 className="text-xl font-bold text-white">
-                                            Race {race.race_number} - {race.track_name || race.track_code}
-                                        </h4>
-                                        {race.race_status && (
-                                            <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
-                                                ? 'bg-green-900/30 text-green-400'
-                                                : race.race_status === 'upcoming'
-                                                    ? 'bg-blue-900/30 text-blue-400'
-                                                    : 'bg-gray-900/30 text-gray-400'
-                                                }`}>
-                                                {race.race_status === 'completed' ? 'Complete' :
-                                                    race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
-                                            </span>
-                                        )}
-                                    </div>
+        {/* Results */}
+        {loading ? (
+            <div className="text-center p-20">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
+                <p className="mt-4 text-gray-400">Loading races...</p>
+            </div>
+        ) : !hasSearched ? (
+            <div className="text-center p-20 bg-black rounded-xl border border-purple-900/30 border-dashed">
+                <p className="text-gray-500">Select filters and click Search to view races</p>
+            </div>
+        ) : (
+            <>
+                {/* Results count */}
+                <p className="text-sm text-gray-400 mb-4">
+                    Found {allRaces.length} {activeTab === 'today' ? "today's" : 'past'} races
+                </p>
 
-                                    <div className="mb-4 space-y-1">
-                                        <p className="text-sm text-gray-400 flex items-center gap-2">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                            {race.race_date}
+                {/* Grid of race cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
+                    {allRaces.length === 0 ? (
+                        <div className="col-span-full text-center p-12 bg-black rounded-xl border border-purple-900/50">
+                            <p className="text-gray-400 mb-4">
+                                {activeTab === 'today'
+                                    ? "No races found matching your criteria."
+                                    : "No past races found matching your criteria."}
+                            </p>
+                        </div>
+                    ) : (
+                        allRaces.map((race, index) => (
+                            <div
+                                key={race.race_key || `${race.track_code}-${race.race_number}-${index}`}
+                                className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full"
+                            >
+                                <div className="flex justify-between items-start mb-2">
+                                    <h4 className="text-xl font-bold text-white">
+                                        Race {race.race_number} - {race.track_name || race.track_code}
+                                    </h4>
+                                    {race.race_status && (
+                                        <span className={`text-xs px-2 py-1 rounded ${race.race_status === 'completed'
+                                            ? 'bg-green-900/30 text-green-400'
+                                            : race.race_status === 'upcoming'
+                                                ? 'bg-blue-900/30 text-blue-400'
+                                                : 'bg-gray-900/30 text-gray-400'
+                                            }`}>
+                                            {race.race_status === 'completed' ? 'Complete' :
+                                                race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="mb-4 space-y-1">
+                                    <p className="text-sm text-gray-400 flex items-center gap-2">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                        {race.race_date}
+                                    </p>
+                                    <p className="text-sm text-white font-bold flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded w-fit">
+                                        <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                        Post Time: {race.post_time || 'TBD'}
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2 mb-4 flex-1">
+                                    {race.race_type && (
+                                        <p className="text-sm text-purple-300">
+                                            {race.race_type} • {race.surface}
                                         </p>
-                                        <p className="text-sm text-white font-bold flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded w-fit">
-                                            <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                            Post Time: {race.post_time || 'TBD'}
+                                    )}
+                                    {race.purse && (
+                                        <p className="text-sm text-green-400">
+                                            Purse: {race.purse} • {race.distance}
                                         </p>
-                                    </div>
+                                    )}
+                                    <p className="text-sm text-gray-400">
+                                        {race.entry_count} entries
+                                    </p>
 
-                                    <div className="space-y-2 mb-4 flex-1">
-                                        {race.race_type && (
-                                            <p className="text-sm text-purple-300">
-                                                {race.race_type} • {race.surface}
-                                            </p>
-                                        )}
-                                        {race.purse && (
-                                            <p className="text-sm text-green-400">
-                                                Purse: {race.purse} • {race.distance}
-                                            </p>
-                                        )}
-                                        <p className="text-sm text-gray-400">
-                                            {race.entry_count} entries
-                                        </p>
-
-                                        {/* Results Display */}
-                                        {race.results && race.results.length > 0 && (
-                                            <div className="mt-3 pt-3 border-t border-gray-800">
-                                                <p className="text-xs font-bold text-gray-500 uppercase mb-2">Top 3 Finishers</p>
-                                                <div className="space-y-1">
-                                                    {race.results.map((result) => (
-                                                        <div key={result.position} className="flex justify-between items-center text-sm">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={`
+                                    {/* Results Display */}
+                                    {race.results && race.results.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-gray-800">
+                                            <p className="text-xs font-bold text-gray-500 uppercase mb-2">Top 3 Finishers</p>
+                                            <div className="space-y-1">
+                                                {race.results.map((result) => (
+                                                    <div key={result.position} className="flex justify-between items-center text-sm">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`
                                                                     w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold text-black
                                                                     ${result.position === 1 ? 'bg-yellow-400' :
-                                                                        result.position === 2 ? 'bg-gray-300' :
-                                                                            'bg-orange-400'}
+                                                                    result.position === 2 ? 'bg-gray-300' :
+                                                                        'bg-orange-400'}
                                                                 `}>
-                                                                    {result.position}
-                                                                </span>
-                                                                <span className="text-white font-medium">#{result.number} {result.horse}</span>
-                                                            </div>
+                                                                {result.position}
+                                                            </span>
+                                                            <span className="text-white font-medium">#{result.number} {result.horse}</span>
                                                         </div>
-                                                    ))}
-                                                </div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        )}
-                                    </div>
-
-                                    <Link
-                                        to={`/race/${race.race_key}`}
-                                        className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
-                                    >
-                                        {activeTab === 'today' ? 'View Details' : 'View Results'}
-                                    </Link>
+                                        </div>
+                                    )}
                                 </div>
-                            ))
-                        )}
-                    </div>
-                </>
-            )}
-        </div>
-    );
+
+                                <Link
+                                    to={`/race/${race.race_key}`}
+                                    className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center mt-auto"
+                                >
+                                    {activeTab === 'today' ? 'View Details' : 'View Results'}
+                                </Link>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </>
+        )}
+    </div>
+);
 }
