@@ -529,7 +529,7 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'track_code': track_code,
             'race_date': race_date.strftime('%Y-%m-%d'),
             'race_number': race_number,
-            'post_time': race_data.get('post_time'),
+            # 'post_time': race_data.get('post_time'), # Handle conditionally below
             'surface': race_data.get('surface'),
             'distance': race_data.get('distance'),
             'race_type': race_data.get('race_type'),
@@ -542,6 +542,10 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'equibase_pdf_url': build_equibase_url(track_code, race_date, race_number),
             'equibase_chart_url': f"https://www.equibase.com/static/chart/pdf/{track_code}{race_date.strftime('%m%d%y')}USA{race_number}.pdf"
         }
+
+        # Only update post_time if we actually found one
+        if race_data.get('post_time'):
+            race_insert['post_time'] = race_data.get('post_time')
 
         # Insert or update race
         if update_mode:
