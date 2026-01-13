@@ -97,7 +97,8 @@ def parse_entries_html(html_content, track_code, race_date):
                 
             # Extract Post Time
             post_time = None
-            pt_match = re.search(r'Post Time[:\s]+(\d{1,2}:\d{2}\s*(?:AM|PM)?)', container.get_text(), re.IGNORECASE)
+            # more flexible regex
+            pt_match = re.search(r'Post\s*Time[:\s]*(\d{1,2}:\d{2}\s*(?:AM|PM)?)', container.get_text(), re.IGNORECASE)
             if pt_match:
                 post_time = pt_match.group(1)
             
@@ -234,11 +235,16 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data):
             'race_number': race_num,
             'race_status': 'upcoming',
             'data_source': 'equibase_entries',
-            'post_time': race_data.get('post_time'),
+            # 'post_time': race_data.get('post_time'), # Handle conditionally
             'distance': race_data.get('distance'),
             'surface': race_data.get('surface'),
             'purse': race_data.get('purse')
         }
+
+        # Only include post_time in update if it is NOT None
+        # Use explicit None check so we don't skip actual data
+        if race_data.get('post_time'):
+            race_obj['post_time'] = race_data.get('post_time')
         
         if race_id:
             supabase.table('hranalyzer_races').update(race_obj).eq('id', race_id).execute()

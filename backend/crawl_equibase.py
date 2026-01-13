@@ -112,7 +112,19 @@ def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
                 logger.info("No horses found in tables, attempting text fallback parsing")
                 horses = parse_horses_from_text(text)
                 
+                
             if horses:
+                # Merge WPS Payouts if available
+                wps_payouts = race_data.get('wps_payouts', {})
+                if wps_payouts:
+                    for horse in horses:
+                        pgm = horse.get('program_number')
+                        if pgm and pgm in wps_payouts:
+                            payout = wps_payouts[pgm]
+                            horse['win_payout'] = payout.get('win')
+                            horse['place_payout'] = payout.get('place')
+                            horse['show_payout'] = payout.get('show')
+                            
                 race_data['horses'] = horses
 
             return race_data
@@ -140,6 +152,7 @@ def parse_race_chart_text(text: str) -> Dict:
         'fractional_times': [],
         'horses': [],
         'exotic_payouts': [],
+        'wps_payouts': parse_wps_payouts(text),
         'claims': []
     }
 
@@ -198,7 +211,8 @@ def parse_race_chart_text(text: str) -> Dict:
 
     # Extract final time
     # More flexible regex to catch cases without colons, different separators, or missing spaces
-    time_match = re.search(r'FINAL\s*TIME:\s*([\d:.]+)', text, re.IGNORECASE)
+    # Fix for cases like "Final Time : 1:44.23" or "Final Time: 1:44.23"
+    time_match = re.search(r'FINAL\s*TIME\s*:?\s*([\d:.]+)', text, re.IGNORECASE)
     if time_match:
         data['final_time'] = time_match.group(1).strip()
 
@@ -255,6 +269,14 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
                 'place_payout': None,
                 'show_payout': None
             }
+            
+            # Helper to merge WPS if available
+            # Note: We can't access race_data here directly easily unless we pass it or pass payouts map
+            # TODO: We need to refactor parse_horse_table signature or do the merge later.
+            # Actually, let's fix the call site, but for now we need to enable "payouts" arg in this function?
+            # Or we can do it after this function returns in parse_equibase_pdf
+            # Let's check parse_equibase_pdf again.
+
 
             # Clean up horse name
             if horse_data['horse_name']:
@@ -356,6 +378,186 @@ def parse_exotic_payouts(text: str) -> List[Dict]:
                 'winning_combination': None  # Would need more parsing
             })
 
+    return payouts
+
+
+def parse_wps_payouts(text: str) -> Dict[str, Dict[str, float]]:
+    """
+    Parse Win/Place/Show payouts from the 'Mutuel Prices' or 'Payoffs' section
+    Returns: Dict mapping Program Number -> {'win': float, 'place': float, 'show': float}
+    """
+    payouts = {}
+    
+    # 1. Find the start of the section
+    # Usually "Total WPS Pool" or headers "Pgm Horse Win Place Show"
+    lines = text.split('\n')
+    start_idx = -1
+    
+    header_pattern = re.compile(r'Pgm\s+Horse\s+Win\s+Place\s+Show', re.IGNORECASE)
+    
+    for i, line in enumerate(lines):
+        if header_pattern.search(line):
+            start_idx = i + 1
+            break
+            
+    if start_idx == -1:
+        # Try finding "Total WPS Pool" then look ahead a line or two
+        pool_pattern = re.compile(r'Total\s+WPS\s+Pool', re.IGNORECASE)
+        for i, line in enumerate(lines):
+            if pool_pattern.search(line):
+                # Header usually follows or is nearby
+                # Scan next few lines for header? Or assuming next lines are data if header is missing/implicit
+                # Let's try to assume data follows immediately after header row found by context
+                pass # Logic difficult without consistent header, but header is standard on Equibase
+    
+    if start_idx == -1:
+        logger.debug("Could not find WPS Payouts section header")
+        return payouts
+        
+    # 2. Parse the rows following the header
+    # We expect rows roughly ordered by finish position:
+    # Row 1 (Winner): Pgm Name Win Place Show
+    # Row 2 (Place): Pgm Name Place Show
+    # Row 3 (Show): Pgm Name Show
+    
+    # Regex to extract: Pgm (digits/char), Horse Name (text), Floats...
+    # The complexity is that Horse Name can contain spaces.
+    # But Pgm is at start, and floats are at end (sort of, WagerType might follow).
+    
+    # Strategy: Find all prices (Pattern: \d+\.\d{2})
+    # Then everything before the first price is Pgm + Horse Name
+    
+    current_row_idx = 0 # 0=Win/Place/Show, 1=Place/Show, 2=Show
+    
+    for line in lines[start_idx:]:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Stop condition: Section end? 
+        # Usually followed by "Past Performance" or "Footnotes" or empty lines
+        if "Past Performance" in line or "Footnotes" in line or "Trainers:" in line:
+            break
+            
+        # Stop if we hit Exotics (sometimes on same line, sometimes next)
+        # Actually in the screenshot, "Wager Type" is on the SAME LINE as the first horse
+        # But `extract_text` might separate them or keep them.
+        # We process the line assuming it effectively starts with Pgm ... Prices
+        
+        # Regex for prices: look for numbers like "15.60"
+        # Note: sometimes they are just "4.20"
+        prices = re.findall(r'(\d+\.\d{2})', line)
+        
+        if not prices:
+            continue
+            
+        # Pgm is usually the first token
+        parts = line.split()
+        if not parts:
+            continue
+            
+        pgm = parts[0]
+        
+        # Validate Pgm is somewhat short (e.g. "1", "1A", "10")
+        if len(pgm) > 4: 
+            continue
+            
+        # Map prices based on row index logic
+        # Note: This is a heuristics based on standard Finish Order sorting in the table
+        
+        win_val = None
+        place_val = None
+        show_val = None
+        
+        # Extract potential prices. 
+        # We need to distinguish "Prices" from "Pools" or "Payoffs" of exotics if they appear on the same line.
+        # In the screenshot: 
+        # Line 1: 3 Daylan 15.60 8.00 5.00 $1.00 Exacta...
+        # Prices are 15.60, 8.00, 5.00, 1.00 (wager), 125.80 (payoff)
+        # We must take the FIRST 1, 2, or 3 prices that appear textually before "Wager Type" or end of line.
+        
+        # Refined regex: Split line by the first occurrence of known Wager Types? 
+        # Or just take the first N floats found?
+        # Usually Pgm Name P1 P2 P3 ...
+        
+        # Let's try to isolate the "WPS" part.
+        # It ends before "Wager Type" column start.
+        # But we don't know column positions in raw text.
+        
+        # Heuristic: 
+        # - Row 0 (Winner): Expect 3 prices (Win, Place, Show). If fewer, maybe dead heat or missing data.
+        # - Row 1 (Place): Expect 2 prices (Place, Show).
+        # - Row 2 (Show): Expect 1 price (Show).
+        
+        # Filter prices to only those that look like WPS prices? No distinguishing feature.
+        # Take the first k valid floats found in the line.
+        
+        try:
+            # We assume the first found prices correspond to Win/Place/Show columns depending on row
+            
+            valid_prices = []
+            # We iterate matches. We stop if we hit something that looks like an exotic bet amount (usually prefixed by $) or Wager Name
+            # Actually, raw text might imply spatial separation.
+            
+            # Let's iterate tokens to be safer?
+            # "3", "Daylan", "15.60", "8.00", "5.00", "$1.00", "Exacta"...
+            
+            # Find the index where prices start
+            price_start_idx = -1
+            found_prices = []
+            
+            tokens = line.split()
+            for idx, token in enumerate(tokens):
+                # skip pgm
+                if idx == 0: continue
+                
+                # Check if price
+                # handling "$15.60" or "15.60"
+                clean_token = token.replace('$', '')
+                if re.match(r'^\d+\.\d{2}$', clean_token):
+                     found_prices.append(float(clean_token))
+                elif token.startswith('$'): 
+                     # Should be start of Wager Type section e.g. $1.00 Exacta
+                     # Stop collecting prices
+                     break
+                elif re.match(r'Exacta|Trifecta|Superfecta|Daily|Pick', token, re.IGNORECASE):
+                     break
+            
+            row_payouts = {'win': None, 'place': None, 'show': None}
+            
+            if current_row_idx == 0: # Winner row
+                # Expect Win, Place, Show
+                if len(found_prices) >= 3:
+                    row_payouts['win'] = found_prices[0]
+                    row_payouts['place'] = found_prices[1]
+                    row_payouts['show'] = found_prices[2]
+                elif len(found_prices) == 2: # Maybe no show betting? Or Dead Heat?
+                    row_payouts['win'] = found_prices[0]
+                    row_payouts['place'] = found_prices[1]
+                elif len(found_prices) == 1:
+                    row_payouts['win'] = found_prices[0]
+                    
+            elif current_row_idx == 1: # Place row
+                # Expect Place, Show
+                if len(found_prices) >= 2:
+                    row_payouts['place'] = found_prices[0]
+                    row_payouts['show'] = found_prices[1]
+                elif len(found_prices) == 1:
+                    row_payouts['place'] = found_prices[0]
+                    
+            elif current_row_idx >= 2: # Show row(s)
+                # Expect Show
+                if len(found_prices) >= 1:
+                    row_payouts['show'] = found_prices[0]
+                    # Note: if there's a dead heat for 3rd, there might be multiple lines here
+            
+            if any(row_payouts.values()):
+                payouts[pgm] = row_payouts
+                current_row_idx += 1
+                
+        except Exception as e:
+            logger.debug(f"Error parsing WPS line '{line}': {e}")
+            continue
     return payouts
 
 

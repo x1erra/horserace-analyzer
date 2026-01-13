@@ -538,25 +538,38 @@ def get_race_details(race_key):
         race = race_response.data
 
         # Get all entries for this race
+        # Join with horses, jockeys, and trainers
         entries_response = supabase.table('hranalyzer_race_entries')\
-            .select('*, hranalyzer_horses(horse_name, sire, dam, color, sex)')\
+            .select('''
+                *, 
+                hranalyzer_horses(horse_name, sire, dam, color, sex),
+                hranalyzer_jockeys(jockey_name),
+                hranalyzer_trainers(trainer_name)
+            ''')\
             .eq('race_id', race['id'])\
             .order('program_number')\
             .execute()
 
         entries = []
         for entry in entries_response.data:
+            # Safely get nested data
+            horse_data = entry.get('hranalyzer_horses') or {}
+            jockey_data = entry.get('hranalyzer_jockeys') or {}
+            trainer_data = entry.get('hranalyzer_trainers') or {}
+
             entries.append({
                 'program_number': entry['program_number'],
-                'horse_name': entry['hranalyzer_horses']['horse_name'],
+                'horse_name': horse_data.get('horse_name', 'Unknown'),
                 'horse_info': {
-                    'sire': entry['hranalyzer_horses'].get('sire'),
-                    'dam': entry['hranalyzer_horses'].get('dam'),
-                    'color': entry['hranalyzer_horses'].get('color'),
-                    'sex': entry['hranalyzer_horses'].get('sex')
+                    'sire': horse_data.get('sire'),
+                    'dam': horse_data.get('dam'),
+                    'color': horse_data.get('color'),
+                    'sex': horse_data.get('sex')
                 },
                 'jockey_id': entry['jockey_id'],
+                'jockey_name': jockey_data.get('jockey_name', 'N/A'),
                 'trainer_id': entry['trainer_id'],
+                'trainer_name': trainer_data.get('trainer_name', 'N/A'),
                 'morning_line_odds': entry['morning_line_odds'],
                 'weight': entry['weight'],
                 'medication': entry['medication'],
