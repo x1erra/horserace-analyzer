@@ -7,8 +7,8 @@
 # Run daily at 1:00 AM (adjust timezone as needed)
 0 1 * * * cd /app && /usr/local/bin/python3 /app/backend/daily_crawl.py >> /var/log/horse-racing-crawler.log 2>&1
 
-# Run Upcoming Entries Crawler at 6:00 AM and 9:00 AM
-0 6,9 * * * cd /app && /usr/local/bin/python3 /app/backend/crawl_entries.py >> /var/log/horse-racing-crawler.log 2>&1
+# Run Upcoming Entries Crawler at 4:00 AM and 9:00 AM
+0 4,9 * * * cd /app && /usr/local/bin/python3 /app/backend/crawl_entries.py >> /var/log/horse-racing-crawler.log 2>&1
 
 # Run Live Results Crawler every 30 mins from 11 AM to 11 PM (for TODAY's races)
 */30 11-23 * * * cd /app && /usr/local/bin/python3 /app/backend/crawl_equibase.py $(date +\%Y-\%m-\%d) >> /var/log/horse-racing-crawler.log 2>&1
