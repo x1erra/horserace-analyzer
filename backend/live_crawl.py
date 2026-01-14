@@ -60,9 +60,9 @@ def run_crawler():
                     entry_stats = {'races_found': 0}
                     
                     if last_entries_crawl_date != today_date:
-                        logger.info("Entry crawler paused per user request.")
-                        # logger.info("First run of the day for Entries. Fetching upcoming races...")
-                        # entry_stats = crawl_entries(today_date, COMMON_TRACKS)
+                        logger.info("Entry crawler paused per user request - Enabling for backup.")
+                        logger.info("First run of the day for Entries. Fetching upcoming races...")
+                        entry_stats = crawl_entries(today_date, COMMON_TRACKS)
                         last_entries_crawl_date = today_date
                     else:
                         logger.info("Entries already crawled today (or paused). Skipping.")
