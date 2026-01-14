@@ -84,7 +84,9 @@ def parse_entries_html(html_content, track_code, race_date):
                 continue
                 
             race_num = int(match.group(1))
+            # logger.info(f"Processing Header: {header_text[:20]}... Race {race_num}")
             if race_num in processed_race_nums:
+                # logger.info(f"Skipping Race {race_num}, already processed")
                 continue
                 
             # Now try to extract race details relative to this header
@@ -92,13 +94,13 @@ def parse_entries_html(html_content, track_code, race_date):
             if not container:
                 container = header.find_parent('div')
             
+            # Static page fallback: header might be in a div, but table is in parent's sibling or parent's parent
             if not container:
                 continue
                 
             # Extract Post Time
             post_time = None
-            # more flexible regex
-            pt_match = re.search(r'Post\s*Time[:\s]*(\d{1,2}:\d{2}\s*(?:AM|PM)?)', container.get_text(), re.IGNORECASE)
+            pt_match = re.search(r'Post\s*Time.*?(\d{1,2}:\d{2}\s*(?:AM|PM)?)', container.get_text(), re.IGNORECASE)
             if pt_match:
                 post_time = pt_match.group(1)
             
@@ -125,20 +127,41 @@ def parse_entries_html(html_content, track_code, race_date):
             entries = []
             entry_table = None
             
+            def is_entry_table(t):
+                txt = t.get_text()
+                return 'Program' in txt or 'Pgm' in txt or 'Horse' in txt or 'P#' in txt
+
             tables_in_container = container.find_all('table')
+            
+            # If no tables in header's container, check the PARENT container (likely for static pages)
+            if not tables_in_container:
+                logger.info(f"Race {race_num}: No tables in header container, checking parent...") # Debug
+                if container.parent:
+                    container = container.parent
+                    tables_in_container = container.find_all('table')
+
             for tbl in tables_in_container:
-                if 'Program' in tbl.get_text() or 'Pgm' in tbl.get_text() or 'Horse' in tbl.get_text():
+                if is_entry_table(tbl):
                     entry_table = tbl
                     break
             
             if not entry_table:
+                # Try siblings of the container
                 curr = container
                 for _ in range(5): 
                     curr = curr.find_next_sibling()
-                    if curr and curr.name == 'table':
-                        if 'Program' in curr.get_text() or 'Pgm' in curr.get_text():
+                    if curr:
+                        if curr.name == 'table' and is_entry_table(curr):
                             entry_table = curr
                             break
+                        # Check tables inside the sibling div/etc
+                        elif curr.name == 'div':
+                            sub_tables = curr.find_all('table')
+                            for st in sub_tables:
+                                if is_entry_table(st):
+                                    entry_table = st
+                                    break
+                        if entry_table: break
             
             if entry_table:
                 # Parse Rows
@@ -361,7 +384,8 @@ def crawl_entries(target_date=None, tracks=None):
                 links = driver.find_elements(By.TAG_NAME, "a")
                 entries_link = None
                 for l in links:
-                    if "entries" in l.text.lower() or "entries" in l.get_attribute("href") or "Entries" in l.text:
+                    href = l.get_attribute("href")
+                    if "entries" in l.text.lower() or (href and "entries" in href) or "Entries" in l.text:
                          if l.is_displayed():
                              entries_link = l
                              break
@@ -371,13 +395,13 @@ def crawl_entries(target_date=None, tracks=None):
                     driver.execute_script("arguments[0].click();", entries_link)
                     time.sleep(5)
                 else:
-                    logger.warning("Could not find visible Entries link in Mobile view. Trying direct URL.")
-                    driver.get("https://www.equibase.com/entries")
+                    logger.warning("Could not find visible Entries link. Using direct static URL.")
+                    driver.get("https://www.equibase.com/static/entry/index.html")
                     time.sleep(5)
                 
             except Exception as e:
                 logger.warning(f"Nav Error: {e}")
-                driver.get("https://www.equibase.com/entries")
+                driver.get("https://www.equibase.com/static/entry/index.html")
 
         logger.info(f"Current Page Title: {driver.title}")
         logger.info(f"Current URL: {driver.current_url}")
@@ -433,12 +457,22 @@ def crawl_entries(target_date=None, tracks=None):
                     for link in links:
                         link_text = link.text.strip()
                         link_href = link.get_attribute('href')
-                        logger.info(f"  - Link: '{link_text}' -> {link_href}")
                         
-                        # Check match
+                        # Match logic for Static Page:
+                        # Link text is just the day number (e.g. "13")
+                        # OR if regex match for date
+                        
+                        is_match = False
                         if link_text == target_day:
+                            is_match = True
+                        elif f"/{track_code}{target_date.strftime('%m%d')}" in (link_href or ""):
+                             # Fallback: check if href contains track + MMDD (ignoring year/suffix)
+                             is_match = True
+
+                        if is_match and link_href:
                             logger.info(f"    !!! MATCH FOUND for {track_code} !!!")
                             valid_urls[track_code] = link_href
+                            break # Found the link for this track
                             
             except Exception as e:
                 pass # Stale element etc
