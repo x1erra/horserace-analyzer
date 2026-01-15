@@ -14,7 +14,17 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    wget \
+    ca-certificates \
+    libicu-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/microsoft/powershell/7 \
+    && wget -q https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/powershell-7.4.1-linux-arm64.tar.gz \
+    && tar -zxf powershell-7.4.1-linux-arm64.tar.gz -C /opt/microsoft/powershell/7 \
+    && chmod +x /opt/microsoft/powershell/7/pwsh \
+    && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh \
+    && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/powershell \
+    && rm powershell-7.4.1-linux-arm64.tar.gz
 
 # Copy requirements first for better caching
 COPY requirements.txt .

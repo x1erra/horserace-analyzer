@@ -63,32 +63,42 @@ def run_crawler():
                 start_time = time.time()
                 try:
                     # 1. Crawl Results (Hourly, only during racing hours)
-                    # Typical racing is 12 PM - 11 PM, lets be safe and say 11 AM - 11:59 PM
-                    RACING_START_HOUR = 11
-                    stats = {}
+                    # Typical racing is 12 PM - 11 PM
+                    # We check Today and Yesterday to catch late-night results or missed races from downtime
+                    stats_today = {}
+                    stats_yesterday = {}
                     
-                    if current_hour >= RACING_START_HOUR:
-                         logger.info("Racing hours active. Crawling results...")
-                         stats = crawl_historical_races(date.today(), COMMON_TRACKS)
+                    # Result crawling is most relevant after 11 AM EST
+                    if current_hour >= 11 or current_hour < 2: # 11 AM to 2 AM next day
+                         logger.info("Racing hours (or late night check) active. Crawling results...")
+                         stats_today = crawl_historical_races(today_date, COMMON_TRACKS)
+                         stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
                     else:
-                         logger.info("Too early for racing results. Skipping result crawl.")
+                         logger.info("Slow hours. Performing maintenance check on yesterday's results...")
+                         stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
 
                     # 2. Crawl Upcoming Entries (Once per day)
-                    today_date = date.today()
                     entry_stats = {'races_found': 0}
                     
                     if last_entries_crawl_date != today_date:
-                        logger.info("Entry crawler paused per user request - Enabling for backup.")
-                        logger.info("First run of the day for Entries. Fetching upcoming races...")
-                        entry_stats = crawl_entries(today_date, COMMON_TRACKS)
+                        logger.info("First run of the day for Entries. Fetching upcoming races for Today, Tomorrow, and Day After...")
+                        
+                        # Crawl today (in case of changes)
+                        s1 = crawl_entries(today_date, COMMON_TRACKS)
+                        # Crawl tomorrow (primary advance data)
+                        s2 = crawl_entries(today_date + timedelta(days=1), COMMON_TRACKS)
+                        # Crawl day after (bonus advance data)
+                        s3 = crawl_entries(today_date + timedelta(days=2), COMMON_TRACKS)
+                        
+                        entry_stats['races_found'] = s1.get('races_found', 0) + s2.get('races_found', 0) + s3.get('races_found', 0)
                         last_entries_crawl_date = today_date
                     else:
                         logger.info("Entries already crawled today. Skipping.")
 
                     duration = time.time() - start_time
                     logger.info(f"Crawl finished in {duration:.1f}s. "
-                                f"Results found: {stats.get('races_found', 0)}, "
-                                f"Entries found: {entry_stats.get('races_found', 0)}")
+                                f"Results (Y/T): {stats_yesterday.get('races_found', 0)}/{stats_today.get('races_found', 0)}, "
+                                f"Entries: {entry_stats.get('races_found', 0)}")
                                 
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")
