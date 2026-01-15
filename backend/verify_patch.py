@@ -4,37 +4,38 @@ from crawl_entries import crawl_entries
 from supabase_client import get_supabase_client
 from datetime import date
 
+
 def verify_fix():
-    print("Running crawl for Fair Grounds (FG)...")
-    # Force crawl for today
-    crawl_entries(tracks=['FG'])
+    print("Running crawl for ALL tracks to fix stale data...")
+    # Force crawl for today for ALL tracks
+    crawl_entries()
     
-    print("\nChecking DB for resolved race types...")
+    print("\nChecking DB for resolved race types across ALL tracks...")
     supabase = get_supabase_client()
     today = date.today().isoformat()
     
-    # Check race types for today's FG races
+    # Check race types for today's races
     res = supabase.table('hranalyzer_races')\
-        .select('race_number, race_type, distance, surface')\
-        .eq('track_code', 'FG')\
+        .select('track_code, race_number, race_type, distance, surface')\
         .eq('race_date', today)\
-        .order('race_number')\
+        .order('track_code, race_number')\
         .execute()
         
     if not res.data:
-        print("No races found for FG today.")
+        print("No races found for today.")
         return
 
-    print(f"Found {len(res.data)} races:")
-    for race in res.data:
-        print(f"Race {race['race_number']}: Type='{race['race_type']}' (Dist={race['distance']}, Surf={race['surface']})")
-        
+    print(f"Found {len(res.data)} total races.")
+    
     # Validation
     unknowns = [r for r in res.data if r['race_type'] == 'Unknown']
     if len(unknowns) == 0:
-        print("\nSUCCESS: No 'Unknown' race types found!")
+        print("\nSUCCESS: No 'Unknown' race types found across any tracks!")
     else:
         print(f"\nWARNING: {len(unknowns)} races still have 'Unknown' race type.")
+        for u in unknowns:
+            print(f"UNKNOWN: {u['track_code']} Race {u['race_number']}")
 
 if __name__ == "__main__":
     verify_fix()
+

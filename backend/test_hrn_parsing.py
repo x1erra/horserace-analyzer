@@ -4,7 +4,7 @@ import re
 import os
 
 def test_parsing():
-    file_path = 'hrn_debug.html'
+    file_path = 'hrn_gp_debug.html'
     if not os.path.exists(file_path):
         print(f"File {file_path} not found.")
         return
