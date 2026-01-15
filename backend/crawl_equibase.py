@@ -1104,6 +1104,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
 
         track_had_races = False
         race_num = 1
+        missing_consecutive = 0
 
         # Try up to 12 races per track
         while race_num <= 12:
@@ -1135,11 +1136,20 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
             race_data = extract_race_from_pdf(pdf_url, max_retries=2)
 
             if not race_data or not race_data.get('horses'):
-                if race_num == 1:
-                    logger.info(f"No race 1 found at {track_code}, moving to next track")
+                missing_consecutive += 1
+                if missing_consecutive >= 3:
+                    if race_num == 1:
+                        logger.info(f"No race 1 found at {track_code}, moving to next track")
+                    else:
+                        logger.info(f"Stop searching {track_code} after {missing_consecutive} consecutive misses.")
+                    break
                 else:
-                    logger.info(f"No more races found at {track_code} after race {race_num-1}")
-                break
+                    logger.info(f"Race {race_num} at {track_code} not found. Skipping to check next (miss {missing_consecutive}/3)")
+                    race_num += 1
+                    continue
+            
+            # Reset missing count if we found a race
+            missing_consecutive = 0
 
             # Mark that this track had races
             if not track_had_races:
