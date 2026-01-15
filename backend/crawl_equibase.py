@@ -917,18 +917,14 @@ def insert_claim(supabase, race_id: int, claim_data: Dict):
             'claim_price': claim_data.get('claim_price')
         }
         
-        # Try to match program number if possible, but for now we rely on horse_name
+        # Use upsert to update existing claims (e.g. if price was missing)
+        # Unique constraint is (race_id, horse_name)
+        supabase.table('hranalyzer_claims').upsert(claim_insert, on_conflict='race_id, horse_name').execute()
         
-        supabase.table('hranalyzer_claims').insert(claim_insert).execute()
-        logger.info(f"Inserted claim for {claim_data.get('horse_name')} with price {claim_insert['claim_price']}")
+        logger.info(f"Upserted claim for {claim_data.get('horse_name')} with price {claim_insert['claim_price']}")
         
     except Exception as e:
-        # Ignore duplicate errors if re-running
-        if 'unique' in str(e) or 'duplicate' in str(e):
-             logger.debug(f"Claim for {claim_data.get('horse_name')} already exists, skipping insert.")
-             pass
-        else:
-             logger.error(f"Error inserting claim: {e}")
+        logger.error(f"Error inserting/updating claim: {e}")
 
 
 def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
