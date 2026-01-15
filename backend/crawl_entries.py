@@ -17,6 +17,27 @@ from crawl_equibase import get_or_create_track, get_or_create_participant, COMMO
 
 logger = logging.getLogger(__name__)
 
+# Map Equibase codes to HRN slugs
+HRN_TRACK_MAP = {
+    'GP': 'gulfstream-park',
+    'AQU': 'aqueduct',
+    'FG': 'fair-grounds',
+    'SA': 'santa-anita',
+    'TAM': 'tampa-bay-downs',
+    'OP': 'oaklawn-park',
+    'PRX': 'parx-racing',
+    'LRL': 'laurel-park',
+    'TP': 'turfway-park',
+    'MVR': 'mahoning-valley', 
+    'CT': 'charles-town',
+    'PEN': 'penn-national',
+    'DED': 'delta-downs',
+    'HOU': 'sam-houston-race-park',
+    'TUP': 'turf-paradise',
+    'GG': 'golden-gate-fields',
+    'WO': 'woodbine'
+}
+
 def get_static_entry_url(track_code, race_date):
     """
     Construct the static URL for a track's entries
@@ -269,6 +290,175 @@ def parse_entries_html(html_content, track_code, race_date):
             
     return races
 
+def fetch_hrn_entries(track_code, race_date):
+    """
+    Fallback: Fetch entries from HorseRacingNation
+    """
+    slug = HRN_TRACK_MAP.get(track_code)
+    if not slug:
+        return []
+        
+    url = f"https://entries.horseracingnation.com/entries-results/{slug}/{race_date.strftime('%Y-%m-%d')}"
+    logger.info(f"Fallback: Fetching HRN {url}")
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        r = requests.get(url, headers=headers, timeout=20)
+        
+        if r.status_code != 200:
+            logger.warning(f"HRN status {r.status_code}")
+            return []
+            
+        soup = BeautifulSoup(r.text, 'html.parser')
+        races = []
+        
+        # HRN Structure: Race headers often "Race X" text or markers
+        # Tables follow.
+        
+        # Find all race containers if possible, or split by "Race X"
+        # Strategy: Find all tables, and assume they correspond to races in order.
+        # usually 1 table per race for entries.
+        
+        tables = soup.find_all('table')
+        if not tables:
+            return []
+            
+        for idx, table in enumerate(tables):
+            race_num = idx + 1
+            entries = []
+            
+            # Extract header info (Post Time, etc)?
+            # HRN listing puts Post Time in a container before the table
+            post_time = None
+            distance = None
+            surface = None
+            purse = None
+            
+            # Look at preceding siblings for "Race X" header
+            # and details like "Post Time: 1:10 PM"
+            
+            # Simple approach: Search previous siblings for text
+            prev = table.find_previous_sibling()
+            for _ in range(5):
+                if not prev: break
+                txt = prev.get_text(" ", strip=True)
+                
+                # Check Post Time (e.g. "Post time: 12:10 PM ET")
+                pt_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
+                if pt_match:
+                    post_time = pt_match.group(1)
+                
+                # Check Metadata Like "5 f, Turf, $50,000"
+                # Distance
+                dist_match = re.search(r'(\d+\s*(?:f|furlongs|miles|yards))', txt, re.IGNORECASE)
+                if dist_match and not distance:
+                    distance = dist_match.group(1)
+                
+                # Surface
+                surf_match = re.search(r'(Dirt|Turf|Synthetic|All Weather|Inner Turf|Main Track)', txt, re.IGNORECASE)
+                if surf_match and not surface:
+                    surface = surf_match.group(1)
+                
+                # Purse
+                purse_match = re.search(r'Purse\s*[:\s]*(\$\d{1,3}(?:,\d{3})*)', txt, re.IGNORECASE)
+                if purse_match and not purse:
+                    purse = purse_match.group(1)
+                elif '$' in txt and not purse:
+                    # Fallback for purse if label missing
+                    pm = re.search(r'(\$\d{1,3}(?:,\d{3})*)', txt)
+                    if pm: purse = pm.group(1)
+                    
+                prev = prev.find_previous_sibling()
+
+            # Parse Rows
+            rows = table.find_all('tr')
+            # Check header row
+            if not rows: continue
+            
+            # Identify columns
+            headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+            # Expected: ['#', 'pp', 'horse', 'trainer / jockey', 'ml']
+            
+            # Map columns
+            idx_pgm = -1
+            idx_horse = -1
+            idx_tj = -1
+            idx_ml = -1
+            
+            for i, h in enumerate(headers):
+                if '#' in h: idx_pgm = i
+                elif 'horse' in h: idx_horse = i
+                elif 'trainer' in h or 'jockey' in h: idx_tj = i
+                elif 'ml' in h: idx_ml = i
+            
+            # Fallback indices if header detection fails
+            if idx_pgm == -1: idx_pgm = 0
+            if idx_horse == -1: idx_horse = 2
+            if idx_tj == -1: idx_tj = 3
+            if idx_ml == -1: idx_ml = 4
+            
+            for row in rows:
+                cols = row.find_all('td')
+                if not cols: continue # header
+                
+                try:
+                    pgm = cols[idx_pgm].get_text(strip=True) if len(cols) > idx_pgm else "0"
+                    
+                    # Horse Name 
+                    horse_part = cols[idx_horse] if len(cols) > idx_horse else None
+                    horse_name = horse_part.get_text(strip=True) if horse_part else "Unknown"
+                    # HRN puts sire info in same cell usually? 2 | Horse Name | (Sire) ...
+                    # Let's clean it up.
+                    # Usually "Horse Name\n(Score)\nSire"
+                    # Just take first line or bold part?
+                    if horse_part and horse_part.find('strong'): # bold name
+                         horse_name = horse_part.find('strong').get_text(strip=True)
+                    elif horse_part and horse_part.find('a'):
+                         horse_name = horse_part.find('a').get_text(strip=True)
+                    else:
+                         horse_name = horse_name.split('|')[0].strip()
+
+                    # Trainer / Jockey
+                    tj_part = cols[idx_tj] if len(cols) > idx_tj else None
+                    trainer = None
+                    jockey = None
+                    if tj_part:
+                        # "Trainer Name | Jockey Name"
+                        txt = tj_part.get_text("|", strip=True) 
+                        parts = txt.split('|')
+                        if len(parts) >= 1: trainer = parts[0].strip()
+                        if len(parts) >= 2: jockey = parts[1].strip()
+                        
+                    # Odds
+                    odds = cols[idx_ml].get_text(strip=True) if len(cols) > idx_ml else None
+                    
+                    entries.append({
+                        'program_number': pgm,
+                        'horse_name': horse_name,
+                        'jockey': jockey,
+                        'trainer': trainer,
+                        'morning_line_odds': odds
+                    })
+                except:
+                    continue
+            
+            if entries:
+                races.append({
+                    'race_number': race_num,
+                    'post_time': post_time,
+                    'distance': distance,
+                    'surface': surface,
+                    'purse': purse,
+                    'race_type': 'Unknown',
+                    'entries': entries
+                })
+                
+        return races
+
+    except Exception as e:
+        logger.error(f"HRN Fetch Error: {e}")
+        return []
+
 def insert_upcoming_race(supabase, track_code, race_date, race_data):
     """
     Insert upcoming race into DB
@@ -378,14 +568,16 @@ def crawl_entries(target_date=None, tracks=None):
     
     for track_code in tracks:
         try:
-            url = get_static_entry_url(track_code, target_date)
-            html = fetch_static_page(url)
+            # 1. TRY HRN PRIMARY
+            races = fetch_hrn_entries(track_code, target_date)
             
-            if not html:
-                # logger.info(f"No entry data found for {track_code} (404 or missing)")
-                continue
-                
-            races = parse_entries_html(html, track_code, target_date)
+            if not races:
+                logger.info(f"HRN empty/failed for {track_code}. Trying Fallback (Equibase)...")
+                # 2. TRY EQUIBASE FALLBACK
+                url = get_static_entry_url(track_code, target_date)
+                html = fetch_static_page(url)
+                if html:
+                    races = parse_entries_html(html, track_code, target_date)
             
             if races:
                 logger.info(f"Found {len(races)} races for {track_code}")
@@ -395,11 +587,11 @@ def crawl_entries(target_date=None, tracks=None):
                     if insert_upcoming_race(supabase, track_code, target_date, race):
                         stats['races_inserted'] += 1
             else:
-                logger.info(f"Entry page found for {track_code} but no races parsed (Check parser?)")
+                logger.info(f"All sources empty for {track_code}")
                 
             
-            # Sleep to avoid WAF blocking
-            time.sleep(10)
+            # Sleep slightly to be polite to HRN/Equibase
+            time.sleep(5)
             
         except Exception as e:
             logger.error(f"Error processing {track_code}: {e}")
