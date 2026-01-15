@@ -56,9 +56,9 @@ def build_equibase_url(track_code: str, race_date: date, race_number: int) -> st
     return url
 
 
-def download_pdf(pdf_url: str, timeout: int = 30) -> Optional[bytes]:
+def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
     """
-    Download PDF from Equibase using PowerShell to bypass WAF
+    Download PDF from Equibase using PowerShell with robust browser masquerading to bypass WAF
     Returns: PDF bytes or None if download fails
     """
     temp_file = f"temp_pdf_{int(time.time())}_{os.getpid()}.pdf"
@@ -66,23 +66,58 @@ def download_pdf(pdf_url: str, timeout: int = 30) -> Optional[bytes]:
     try:
         logger.info(f"Downloading PDF from {pdf_url} via PowerShell")
         
-        # PowerShell command with browser-like User-Agent
+        # Comprehensive headers to mimic Chrome on Windows exactly
+        # Note: PowerShell escaping with backticks ` or using a Headers hash
+        
+        ps_script = f"""
+        $headers = @{{
+            "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+            "Accept-Language" = "en-US,en;q=0.9"
+            "Referer" = "https://www.equibase.com/"
+            "Sec-Ch-Ua" = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"'
+            "Sec-Ch-Ua-Mobile" = "?0"
+            "Sec-Ch-Ua-Platform" = '"Windows"'
+            "Sec-Fetch-Dest" = "document"
+            "Sec-Fetch-Mode" = "navigate"
+            "Sec-Fetch-Site" = "same-origin"
+            "Sec-Fetch-User" = "?1"
+            "Upgrade-Insecure-Requests" = "1"
+        }}
+        
+        try {{
+            Invoke-WebRequest -Uri '{pdf_url}' -OutFile '{temp_file}' -Headers $headers -TimeoutSec {timeout} -ErrorAction Stop
+        }} catch {{
+            Write-Host "Error: $($_.Exception.Message)"
+            exit 1
+        }}
+        """
+        
+        # Execute PowerShell
+        # -NoProfile -NonInteractive -ExecutionPolicy Bypass
         cmd = [
             "powershell", 
+            "-NoProfile",
+            "-NonInteractive", 
+            "-ExecutionPolicy", "Bypass", 
             "-Command", 
-            f"Invoke-WebRequest -Uri '{pdf_url}' -OutFile '{temp_file}' -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'"
+            ps_script
         ]
         
-        # Execute
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
         
-        if result.returncode == 0 and os.path.exists(temp_file):
+        # Check if file exists and has size
+        if os.path.exists(temp_file):
             size = os.path.getsize(temp_file)
             if size < 2000: # 2KB is too small for a PDF chart
-                logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked/empty.")
-                # Try to read it anyway just in case, or discard?
-                # If it's HTML, pdfplumber will fail later, which is handled.
-                # But let's log it.
+                logger.warning(f"Downloaded file too small ({size} bytes). Content might be WAF block page.")
+                
+                # Validation: check first bytes
+                with open(temp_file, 'rb') as f:
+                    head = f.read(4)
+                if head != b'%PDF':
+                    logger.warning("File header is not %PDF. Discarding.")
+                    return None
             
             with open(temp_file, 'rb') as f:
                 content = f.read()
@@ -90,7 +125,9 @@ def download_pdf(pdf_url: str, timeout: int = 30) -> Optional[bytes]:
             logger.info(f"Successfully downloaded PDF ({len(content)} bytes)")
             return content
         else:
-            logger.warning(f"PowerShell download failed: {result.stderr}")
+            logger.warning(f"PowerShell download failed or file not created.")
+            logger.warning(f"Stdout: {result.stdout}")
+            logger.warning(f"Stderr: {result.stderr}")
             return None
 
     except Exception as e:
