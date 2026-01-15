@@ -107,17 +107,29 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
         
         # Check if file exists and has size
+        # Check if file exists and has size
         if os.path.exists(temp_file):
             size = os.path.getsize(temp_file)
             if size < 2000: # 2KB is too small for a PDF chart
-                logger.warning(f"Downloaded file too small ({size} bytes). Content might be WAF block page.")
-                
-                # Validation: check first bytes
+                # Read content to see if it's a 404 or Block
                 with open(temp_file, 'rb') as f:
-                    head = f.read(4)
-                if head != b'%PDF':
-                    logger.warning("File header is not %PDF. Discarding.")
-                    return None
+                    content_head = f.read(1000)
+                
+                check_str = content_head.decode('utf-8', errors='ignore').lower()
+                
+                if "404" in check_str or "not found" in check_str or "unavailable" in check_str:
+                     logger.warning(f"PDF not found (404) at {pdf_url}. Chart likely not generated yet.")
+                else:
+                     logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked by WAF.")
+
+                return None
+            
+            # Validation: check first bytes
+            with open(temp_file, 'rb') as f:
+                head = f.read(4)
+            if head != b'%PDF':
+                logger.warning("File header is not %PDF. Discarding.")
+                return None
             
             with open(temp_file, 'rb') as f:
                 content = f.read()
@@ -126,8 +138,6 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
             return content
         else:
             logger.warning(f"PowerShell download failed or file not created.")
-            logger.warning(f"Stdout: {result.stdout}")
-            logger.warning(f"Stderr: {result.stderr}")
             return None
 
     except Exception as e:
