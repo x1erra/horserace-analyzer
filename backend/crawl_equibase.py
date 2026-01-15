@@ -589,8 +589,8 @@ def parse_claims_text(text: str) -> List[Dict]:
     if price_match:
         price_text = price_match.group(1).strip()
         # Split by semicolon or just find all matches
-        # Pattern: number - Name: $price
-        price_items = re.findall(r'(\d+)\s*-\s*([^:]+):\s*\$([\d,]+)', price_text)
+        # Pattern: number - Name: $price (Allow space after $)
+        price_items = re.findall(r'(\d+)\s*-\s*([^:]+):\s*\$\s*([\d,]+)', price_text)
         for num, name, price in price_items:
             # Normalize name
             norm_name = normalize_name(name)
@@ -615,8 +615,9 @@ def parse_claims_text(text: str) -> List[Dict]:
                 content = re.sub(r'^\d*\s*Claimed\s*Horse\(s\)\s*:\s*', '', line.strip(), flags=re.IGNORECASE)
                 
                 # Check if price is directly in the line: e.g. "Growth Rate (Claimed for $25,000)"
+                # Allow space after $
                 direct_price = None
-                direct_price_match = re.search(r'\$([\d,]+)', line)
+                direct_price_match = re.search(r'\$\s*([\d,]+)', line)
                 if direct_price_match:
                     direct_price = float(direct_price_match.group(1).replace(',', ''))
 

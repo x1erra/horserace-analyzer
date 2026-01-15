@@ -94,6 +94,24 @@ export default function Results() {
         );
     }
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(30);
+
+    // Reset to first page when search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
+
+    // Calculate Pagination
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = sortedAndFilteredResults.slice(indexOfFirstItem, indexOfLastItem);
+    const totalPages = Math.ceil(sortedAndFilteredResults.length / itemsPerPage);
+
+    // Change page
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
     return (
         <div className="space-y-8">
             <h3 className="text-3xl font-bold text-white">Race Results</h3>
@@ -136,12 +154,12 @@ export default function Results() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedAndFilteredResults.length === 0 ? (
+                            {currentItems.length === 0 ? (
                                 <tr>
                                     <td colSpan="7" className="p-8 text-center text-gray-500 italic">No race results found.</td>
                                 </tr>
                             ) : (
-                                sortedAndFilteredResults.map((result, index) => (
+                                currentItems.map((result, index) => (
                                     <tr key={result.race_key || index} className="border-t border-purple-900/20 hover:bg-purple-900/10 transition duration-200">
                                         <td className="p-4">{result.race_date}</td>
                                         <td className="p-4">{result.track_name}</td>
@@ -174,6 +192,58 @@ export default function Results() {
                         </tbody>
                     </table>
                 </div>
+
+                {/* Pagination Controls */}
+                {sortedAndFilteredResults.length > 0 && (
+                    <div className="px-4 py-3 border-t border-purple-900/50 bg-black flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center text-sm text-gray-400">
+                            <span>Show</span>
+                            <select
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                                className="mx-2 bg-purple-900/20 border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
+                            >
+                                <option value={10}>10</option>
+                                <option value={20}>20</option>
+                                <option value={30}>30</option>
+                                <option value={50}>50</option>
+                                <option value={100}>100</option>
+                            </select>
+                            <span>results per page</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => paginate(currentPage - 1)}
+                                disabled={currentPage === 1}
+                                className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
+                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    }`}
+                            >
+                                Previous
+                            </button>
+
+                            <span className="text-sm text-gray-400">
+                                Page <span className="font-medium text-white">{currentPage}</span> of <span className="font-medium text-white">{totalPages}</span>
+                            </span>
+
+                            <button
+                                onClick={() => paginate(currentPage + 1)}
+                                disabled={currentPage === totalPages}
+                                className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
+                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    }`}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
