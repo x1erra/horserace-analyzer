@@ -62,6 +62,7 @@ def run_crawler():
                 
                 start_time = time.time()
                 try:
+                    today_date = now.date()
                     # 1. Crawl Results (Hourly, only during racing hours)
                     # Typical racing is 12 PM - 11 PM
                     # We check Today and Yesterday to catch late-night results or missed races from downtime
