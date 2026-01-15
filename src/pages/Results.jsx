@@ -9,6 +9,15 @@ export default function Results() {
     const [sortDirection, setSortDirection] = useState('desc');
     const [searchQuery, setSearchQuery] = useState('');
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(30);
+
+    // Reset to first page when search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
+
     useEffect(() => {
         const fetchResults = async () => {
             try {
@@ -77,6 +86,15 @@ export default function Results() {
     // Get arrow for a column
     const getArrow = (column) => sortColumn === column ? (sortDirection === 'asc' ? '▲' : '▼') : null;
 
+    // Calculate Pagination
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = sortedAndFilteredResults.slice(indexOfFirstItem, indexOfLastItem);
+    const totalPages = Math.ceil(sortedAndFilteredResults.length / itemsPerPage);
+
+    // Change page
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
     if (loading) {
         return (
             <div className="text-white text-center p-20">
@@ -93,24 +111,6 @@ export default function Results() {
             </div>
         );
     }
-
-    // Pagination State
-    const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(30);
-
-    // Reset to first page when search changes
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchQuery]);
-
-    // Calculate Pagination
-    const indexOfLastItem = currentPage * itemsPerPage;
-    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-    const currentItems = sortedAndFilteredResults.slice(indexOfFirstItem, indexOfLastItem);
-    const totalPages = Math.ceil(sortedAndFilteredResults.length / itemsPerPage);
-
-    // Change page
-    const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
     return (
         <div className="space-y-8">
@@ -220,8 +220,8 @@ export default function Results() {
                                 onClick={() => paginate(currentPage - 1)}
                                 disabled={currentPage === 1}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
-                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
                                 Previous
@@ -235,8 +235,8 @@ export default function Results() {
                                 onClick={() => paginate(currentPage + 1)}
                                 disabled={currentPage === totalPages}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
-                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
                                 Next

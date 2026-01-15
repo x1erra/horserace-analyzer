@@ -11,6 +11,15 @@ export default function Claims() {
     const [selectedDate, setSelectedDate] = useState('All Dates');
     const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(30);
+
+    // Reset to first page when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [selectedTrack, selectedDate, sortConfig]);
+
     useEffect(() => {
         const fetchClaims = async () => {
             try {
@@ -105,6 +114,15 @@ export default function Claims() {
         setSortConfig({ key, direction });
     };
 
+    // Calculate Pagination
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = filteredClaims.slice(indexOfFirstItem, indexOfLastItem);
+    const totalPages = Math.ceil(filteredClaims.length / itemsPerPage);
+
+    // Change page
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
     // Unique tracks and dates for filters
     const tracks = ['All Tracks', ...new Set(claims.map(c => c.track_name || c.track_code).filter(Boolean))].sort();
     const dates = ['All Dates', ...new Set(claims.map(c => c.race_date).filter(Boolean))].sort().reverse();
@@ -119,24 +137,6 @@ export default function Claims() {
     }
 
     if (error) return <div className="text-red-400 text-center p-20">{error}</div>;
-
-    // Pagination State
-    const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(30);
-
-    // Reset to first page when filters change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [selectedTrack, selectedDate, sortConfig]);
-
-    // Calculate Pagination
-    const indexOfLastItem = currentPage * itemsPerPage;
-    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-    const currentItems = filteredClaims.slice(indexOfFirstItem, indexOfLastItem);
-    const totalPages = Math.ceil(filteredClaims.length / itemsPerPage);
-
-    // Change page
-    const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
     return (
         <div className="space-y-8">
@@ -292,8 +292,8 @@ export default function Claims() {
                                 onClick={() => paginate(currentPage - 1)}
                                 disabled={currentPage === 1}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
-                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
                                 Previous
@@ -307,8 +307,8 @@ export default function Claims() {
                                 onClick={() => paginate(currentPage + 1)}
                                 disabled={currentPage === totalPages}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
-                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
                                 Next
