@@ -312,63 +312,102 @@ def fetch_hrn_entries(track_code, race_date):
         soup = BeautifulSoup(r.text, 'html.parser')
         races = []
         
-        # HRN Structure: Race headers often "Race X" text or markers
-        # Tables follow.
-        
-        # Find all race containers if possible, or split by "Race X"
-        # Strategy: Find all tables, and assume they correspond to races in order.
-        # usually 1 table per race for entries.
-        
-        tables = soup.find_all('table')
-        if not tables:
+        all_tables = soup.find_all('table')
+        if not all_tables:
             return []
             
-        for idx, table in enumerate(tables):
+        # Filter for tables that are actually entry tables
+        entry_tables = []
+        for table in all_tables:
+            headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+            # Look for indicators of an entry table
+            if any(h in headers for h in ['#', 'pp', 'horse', 'ml']):
+                entry_tables.append(table)
+        
+        if not entry_tables:
+            logger.info("No entry tables found on HRN page.")
+            return []
+            
+        for idx, table in enumerate(entry_tables):
             race_num = idx + 1
             entries = []
             
-            # Extract header info (Post Time, etc)?
-            # HRN listing puts Post Time in a container before the table
+            # Extract header info (Post Time, Purse, etc)
             post_time = None
             distance = None
             surface = None
             purse = None
             
-            # Look at preceding siblings for "Race X" header
-            # and details like "Post Time: 1:10 PM"
-            
-            # Simple approach: Search previous siblings for text
-            prev = table.find_previous_sibling()
-            for _ in range(5):
-                if not prev: break
-                txt = prev.get_text(" ", strip=True)
+            # 1. NEW: TRY CLASS-BASED DETECTION (RESULTS PAGE)
+            # Find the header element for this race
+            header_div = soup.find(id=f"race-{race_num}")
+            if header_div:
+                # Post Time
+                pt_tag = header_div.find('time', class_='race-time')
+                if pt_tag:
+                    post_time = pt_tag.get_text(strip=True)
                 
-                # Check Post Time (e.g. "Post time: 12:10 PM ET")
-                pt_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
-                if pt_match:
-                    post_time = pt_match.group(1)
-                
-                # Check Metadata Like "5 f, Turf, $50,000"
-                # Distance
-                dist_match = re.search(r'(\d+\s*(?:f|furlongs|miles|yards))', txt, re.IGNORECASE)
-                if dist_match and not distance:
-                    distance = dist_match.group(1)
-                
-                # Surface
-                surf_match = re.search(r'(Dirt|Turf|Synthetic|All Weather|Inner Turf|Main Track)', txt, re.IGNORECASE)
-                if surf_match and not surface:
-                    surface = surf_match.group(1)
-                
-                # Purse
-                purse_match = re.search(r'Purse\s*[:\s]*(\$\d{1,3}(?:,\d{3})*)', txt, re.IGNORECASE)
-                if purse_match and not purse:
-                    purse = purse_match.group(1)
-                elif '$' in txt and not purse:
-                    # Fallback for purse if label missing
-                    pm = re.search(r'(\$\d{1,3}(?:,\d{3})*)', txt)
-                    if pm: purse = pm.group(1)
+                # Metadata (Purse, Dist)
+                # It's usually in a row following the parent h2
+                parent_h2 = header_div.find_parent('h2')
+                if parent_h2:
+                    details_row = parent_h2.find_next_sibling('div', class_='row')
+                    if details_row:
+                        # Purse
+                        purse_tag = details_row.find(class_='race-purse')
+                        if purse_tag:
+                            purse = purse_tag.get_text(strip=True).replace('Purse:', '').strip()
+                        
+                        # Distance
+                        dist_tag = details_row.find(class_='race-distance')
+                        if dist_tag:
+                            distance_full = dist_tag.get_text(strip=True)
+                            distance = distance_full.split(',')[0].strip()
+                            # Often distance_full = "6 f, Dirt"
+                            if ',' in distance_full:
+                                surface = distance_full.split(',')[1].strip()
+                        
+                        # Fallback for surface
+                        if not surface:
+                            rest_tag = details_row.find(class_='race-restrictions')
+                            if rest_tag:
+                                txt = rest_tag.get_text(strip=True)
+                                surf_match = re.search(r'(Dirt|Turf|Synthetic|All Weather|Inner Turf|Main Track)', txt, re.IGNORECASE)
+                                if surf_match: surface = surf_match.group(1)
+
+            # 2. FALLBACK: SIBLING SEARCH (ENTRY PAGE)
+            if not post_time or not distance:
+                prev = table.find_previous_sibling()
+                for _ in range(5):
+                    if not prev: break
+                    txt = prev.get_text(" ", strip=True)
                     
-                prev = prev.find_previous_sibling()
+                    # Check Post Time (e.g. "Post time: 12:10 PM ET")
+                    if not post_time:
+                        pt_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
+                        if pt_match:
+                            post_time = pt_match.group(1)
+                    
+                    # Distance
+                    if not distance:
+                        dist_match = re.search(r'(\d+\s*(?:f|furlongs|miles|yards))', txt, re.IGNORECASE)
+                        if dist_match: distance = dist_match.group(1)
+                    
+                    # Surface
+                    if not surface:
+                        surf_match = re.search(r'(Dirt|Turf|Synthetic|All Weather|Inner Turf|Main Track)', txt, re.IGNORECASE)
+                        if surf_match: surface = surf_match.group(1)
+                    
+                    # Purse
+                    if not purse:
+                        purse_match = re.search(r'Purse\s*[:\s]*(\$\d{1,3}(?:,\d{3})*)', txt, re.IGNORECASE)
+                        if purse_match:
+                            purse = purse_match.group(1)
+                        elif '$' in txt:
+                            pm = re.search(r'(\$\d{1,3}(?:,\d{3})*)', txt)
+                            if pm: purse = pm.group(1)
+                            
+                    prev = prev.find_previous_sibling()
 
             # Parse Rows
             rows = table.find_all('tr')
@@ -450,7 +489,8 @@ def fetch_hrn_entries(track_code, race_date):
                     'surface': surface,
                     'purse': purse,
                     'race_type': 'Unknown',
-                    'entries': entries
+                    'entries': entries,
+                    'source': 'hrn_entries'
                 })
                 
         return races
@@ -459,10 +499,10 @@ def fetch_hrn_entries(track_code, race_date):
         logger.error(f"HRN Fetch Error: {e}")
         return []
 
-def insert_upcoming_race(supabase, track_code, race_date, race_data):
+def insert_upcoming_race(supabase, track_code, race_date, race_data, allow_completed_update=False):
     """
     Insert upcoming race into DB
-    CRITICAL: Do NOT overwrite if race exists and is 'completed'
+    CRITICAL: By default, do NOT overwrite if race exists and is 'completed'
     """
     try:
         # Get track ID
@@ -477,34 +517,42 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data):
         existing = supabase.table('hranalyzer_races').select('*').eq('race_key', race_key).execute()
         
         race_id = None
+        current_status = None
         
         if existing.data:
             rec = existing.data[0]
-            if rec['race_status'] == 'completed':
+            current_status = rec['race_status']
+            if current_status == 'completed' and not allow_completed_update:
                 logger.info(f"Skipping {race_key} (already completed)")
                 return True
             else:
                 race_id = rec['id']
                 # Update info if needed (e.g. changes)
         
-        # Prepare Race Object
+        # Prepare Race Object with only non-None values to avoid overwriting existing data
         race_obj = {
             'race_key': race_key,
             'track_id': track_id,
             'track_code': track_code,
             'race_date': race_date.strftime('%Y-%m-%d'),
-            'race_number': race_num,
-            'race_status': 'upcoming',
-            'data_source': 'equibase_entries',
-            'distance': race_data.get('distance'),
-            'surface': race_data.get('surface'),
-            'purse': race_data.get('purse')
+            'race_number': race_num
         }
+        
+        # Preserve status if updating, otherwise default to 'upcoming'
+        if not race_id:
+            race_obj['race_status'] = 'upcoming'
+        elif current_status:
+            race_obj['race_status'] = current_status
+        
+        if race_data.get('source'):
+            race_obj['data_source'] = race_data['source']
+        else:
+            race_obj['data_source'] = 'entries_crawler'
 
-        # Only include post_time in update if it is NOT None
-        # Use explicit None check so we don't skip actual data
-        if race_data.get('post_time'):
-            race_obj['post_time'] = race_data.get('post_time')
+        # Optional fields
+        for field in ['distance', 'surface', 'purse', 'post_time', 'race_type']:
+            if race_data.get(field):
+                race_obj[field] = race_data[field]
         
         if race_id:
             supabase.table('hranalyzer_races').update(race_obj).eq('id', race_id).execute()
@@ -536,10 +584,14 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data):
             jockey_id = get_or_create_participant(supabase, 'hranalyzer_jockeys', 'jockey_name', entry.get('jockey')) if entry.get('jockey') else None
             trainer_id = get_or_create_participant(supabase, 'hranalyzer_trainers', 'trainer_name', entry.get('trainer')) if entry.get('trainer') else None
             
+            pgm_val = entry.get('program_number', '0')
+            if pgm_val:
+                pgm_val = str(pgm_val)[:10]
+                
             entry_obj = {
                 'race_id': race_id,
                 'horse_id': horse_id,
-                'program_number': entry.get('program_number'),
+                'program_number': pgm_val,
                 'jockey_id': jockey_id,
                 'trainer_id': trainer_id,
                 'morning_line_odds': entry.get('morning_line_odds')
@@ -554,14 +606,14 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data):
         logger.error(f"Error inserting upcoming race {race_key}: {e}")
         return False
 
-def crawl_entries(target_date=None, tracks=None):
-    """Main function to crawl entries using Static Pages"""
+def crawl_entries(target_date=None, tracks=None, allow_completed_update=False):
+    """Main function to crawl entries using Static Pages (HRN Primary, Equibase Fallback)"""
     if not target_date:
         target_date = date.today()
     if not tracks:
         tracks = COMMON_TRACKS
         
-    logger.info(f"Crawling entries for {target_date} using Static Pages")
+    logger.info(f"Crawling entries for {target_date}")
     supabase = get_supabase_client()
     
     stats = {'races_found': 0, 'races_inserted': 0}
@@ -584,7 +636,7 @@ def crawl_entries(target_date=None, tracks=None):
                 stats['races_found'] += len(races)
                 
                 for race in races:
-                    if insert_upcoming_race(supabase, track_code, target_date, race):
+                    if insert_upcoming_race(supabase, track_code, target_date, race, allow_completed_update=allow_completed_update):
                         stats['races_inserted'] += 1
             else:
                 logger.info(f"All sources empty for {track_code}")
@@ -601,5 +653,28 @@ def crawl_entries(target_date=None, tracks=None):
     return stats
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # Robust logging setup
+    backend_dir = os.path.dirname(__file__)
+    log_file = os.path.join(backend_dir, 'crawler.log')
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Clear existing handlers if any
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+        
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ],
+        force=True
+    )
+    
+    logger.info(f"--- Crawler Manual Run Started: {datetime.now()} ---")
+    
     crawl_entries()
