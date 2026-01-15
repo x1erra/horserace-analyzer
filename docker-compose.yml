@@ -20,17 +20,17 @@ services:
     networks:
       - horse-racing-network
     healthcheck:
-      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:5001/api/health', timeout=5)"]
+      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://localhost:5001/api/health', timeout=5)" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
 
-  # Daily Crawler Scheduler
+  # Live Crawler Scheduler
   scheduler:
     build:
       context: .
-      dockerfile: Dockerfile.scheduler
+      dockerfile: backend/Dockerfile.scheduler
     container_name: horse-racing-scheduler
     restart: unless-stopped
     environment:
@@ -44,10 +44,10 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "pgrep", "cron"]
+      test: [ "CMD", "find", "/tmp/crawler_heartbeat", "-mmin", "-20" ]
       interval: 300s
       timeout: 10s
-      retries: 2
+      retries: 3
       start_period: 30s
 
 networks:
