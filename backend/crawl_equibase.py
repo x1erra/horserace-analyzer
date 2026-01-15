@@ -637,14 +637,12 @@ def parse_claims_text(text: str) -> List[Dict]:
     """
     Parse claimed horses information
     Example: 1 Claimed Horse(s): Coquito New Trainer: Linda Rice New Owner: Linda Rice
-    And prices: Claiming Prices: 1 - Coquito: $20,000; ...
+    Also handles multi-line claims and split labels.
     """
     claims = []
     lines = text.split('\n')
     
     # 1. Parse Claiming Prices first to get price map
-    # Example: Claiming Prices: 1 - Coquito: $20,000; 3 - Enigmatic: $20,000;
-    # (or without spaces: ClaimingPrices:...)
     price_map = {}
     
     # Flexible regex: Claiming\s*Prices\s*:
@@ -661,68 +659,141 @@ def parse_claims_text(text: str) -> List[Dict]:
             price_map[norm_name] = price_val
             logger.debug(f"Mapped '{name}' (norm: {norm_name}) to {price_val}")
 
-    # 2. Parse Claimed Horse lines
-    # Look for "Claimed Horse(s):" (with or without spaces)
+    # 2. Parse Claimed Horse lines using robust state machine
+    in_claims = False
+    current_claim = None
+    
+    # Patterns
+    # Note: (\s*) allows for no space if PDF extraction removed it
+    trainer_pat = re.compile(r'\s*(?:New\s*Trainer|NewTrainer)\s*:\s*', re.IGNORECASE)
+    owner_pat = re.compile(r'\s*(?:New\s*Owner|NewOwner)\s*:\s*', re.IGNORECASE)
     
     for line in lines:
-        # Flexible match for "Claimed Horse(s):"
+        line = line.strip()
+        if not line: continue
+        
+        # Start detection
         if re.search(r'Claimed\s*Horse\(s\)\s*:', line, re.IGNORECASE):
-            # Format often: "N Claimed Horse(s): Name New Trainer: Name New Owner: Name"
-            # Use regex to extract parts
+            in_claims = True
+            # Remove the prefix "N Claimed Horse(s):" to process the first line content
+            line = re.sub(r'^\d*\s*Claimed\s*Horse\(s\)\s*:\s*', '', line, flags=re.IGNORECASE).strip()
             
-            # Pattern to catch the specific format in the screenshot and debug text
-            # It seems to be: [Count] ClaimedHorse(s): [Name] NewTrainer:[Trainer] NewOwner:[Owner]
+        if not in_claims: continue
+        
+        # End detection
+        # Stop at ClaimingPrices, Scratched, Total, Fractional, Final Time, Run-Up match
+        if re.match(r'(Claiming\s*Prices|Scratched|Total|Fractional|Final|Run-Up)', line, re.IGNORECASE):
+            if current_claim: claims.append(current_claim)
+            in_claims = False
+            break
             
-            try:
-                # Remove the prefix "N Claimed Horse(s):"
-                content = re.sub(r'^\d*\s*Claimed\s*Horse\(s\)\s*:\s*', '', line.strip(), flags=re.IGNORECASE)
+        # Process Line Logic
+        # Check if line contains "New Trainer" -> Starts a new claim
+        trainer_match = trainer_pat.search(line)
+        
+        if trainer_match:
+            # Save previous claim if valid
+            if current_claim: claims.append(current_claim)
+            
+            # This line starts a new claim
+            # Format: "HorseName NewTrainer: TrainerName [NewOwner: OwnerName]"
+            
+            # Split at Trainer label
+            start_idx = trainer_match.start()
+            end_idx = trainer_match.end()
+            
+            horse_part = line[:start_idx].strip()
+            rest = line[end_idx:].strip()
+            
+            # Now search for Owner in 'rest'
+            owner_match = owner_pat.search(rest)
+            
+            if owner_match:
+                # "TrainerName NewOwner: OwnerName"
+                o_start = owner_match.start()
+                o_end = owner_match.end()
                 
-                # Check if price is directly in the line: e.g. "Growth Rate (Claimed for $25,000)"
-                # Allow space after $
-                direct_price = None
-                direct_price_match = re.search(r'\$\s*([\d,]+)', line)
-                if direct_price_match:
-                    direct_price = float(direct_price_match.group(1).replace(',', ''))
+                trainer_name = rest[:o_start].strip()
+                owner_name = rest[o_end:].strip()
+                
+                current_claim = {
+                    'horse_name': horse_part,
+                    'new_trainer': trainer_name,
+                    'new_owner': owner_name,
+                    'claim_price': None
+                }
+            else:
+                # "TrainerName [maybe crap]" or partial line
+                # Treat rest as trainer name provisionally
+                current_claim = {
+                    'horse_name': horse_part,
+                    'new_trainer': rest, 
+                    'new_owner': ""
+                }
+        else:
+            # No "New Trainer". Continuation line.
+            if current_claim:
+                # Identify if previous line ended with partial label like "NewOw"
+                prev_trainer = current_claim['new_trainer']
+                
+                # Check for "NewOwner" reconstruction from split label
+                if prev_trainer.endswith("NewOw") or prev_trainer.endswith("New"):
+                     # Attempt to combine and re-check owner pattern
+                     combined = prev_trainer + line
+                     om = owner_pat.search(combined)
+                     if om:
+                         o_start = om.start()
+                         o_end = om.end()
+                         
+                         real_trainer = combined[:o_start].strip()
+                         real_owner = combined[o_end:].strip()
+                         
+                         current_claim['new_trainer'] = real_trainer
+                         current_claim['new_owner'] = real_owner
+                     else:
+                         # Just append to owner if we already had one, or append to trainer?
+                         # If we didn't have an owner, and this doesn't match owner pattern, it might be trailing trainer name?
+                         if not current_claim['new_owner']:
+                             current_claim['new_trainer'] += " " + line
+                         else:
+                             current_claim['new_owner'] += " " + line
+                else:
+                    # Normal continuation
+                    if not current_claim['new_owner']:
+                        # Maybe we missed the owner label or it's coming
+                        # Or maybe the trainer name is long?
+                        # Usually "New Owner" follows trainer.
+                        # If we haven't seen New Owner label yet, and this line doesn't have it...
+                        # Check if this line IS the owner label?
+                        om = owner_pat.search(line)
+                        if om:
+                             o_end = om.end()
+                             owner_name = line[o_end:].strip()
+                             current_claim['new_owner'] = owner_name
+                        else:
+                             # Append to trainer
+                             current_claim['new_trainer'] += " " + line
+                    else:
+                        # Append to owner
+                        current_claim['new_owner'] += " " + line
+                        current_claim['new_owner'] = current_claim['new_owner'].strip()
 
-                # Split by labels "New Trainer:" and "New Owner:" (flexible spaces)
-                # Split using capturing group to keep delimiters if needed, but here just split
-                parts = re.split(r'\s*New\s*Trainer\s*:\s*|\s*New\s*Owner\s*:\s*', content, flags=re.IGNORECASE)
-                
-                if len(parts) >= 3:
-                    horse_name = parts[0].strip()
-                    trainer = parts[1].strip()
-                    owner = parts[2].strip()
-                    
-                    # Clean horse name (sometimes has program number prefix like "1 - Coquito" or just "Coquito")
-                    # Usage in price map might trigger finding simple name
-                    
-                    # Use improved normalization for lookup
-                    norm_horse_name = normalize_name(horse_name)
-                    price = price_map.get(norm_horse_name)
-                    
-                    if not price:
-                        # Fallback to fuzzy/partial matching
-                        for k, v in price_map.items():
-                            if k in norm_horse_name or norm_horse_name in k:
-                                price = v
-                                logger.debug(f"Fuzzy match found for claim: {norm_horse_name} -> {k}")
-                                break
-                    
-                    # Final fallback to direct price if found in line
-                    if not price and direct_price:
-                        price = direct_price
-                        logger.debug(f"Used direct price from claim line for {horse_name}: {price}")
-                    
-                    claims.append({
-                        'horse_name': horse_name,
-                        'new_trainer': trainer,
-                        'new_owner': owner,
-                        'claim_price': price
-                    })
-                
-            except Exception as e:
-                logger.debug(f"Error parsing claim line '{line}': {e}")
-                continue
+    # Final cleanup and pricing
+    for c in claims:
+        # Match price
+        hn = normalize_name(c['horse_name'])
+        price = price_map.get(hn)
+        if not price:
+            # Fuzzy match
+            for k, v in price_map.items():
+                if k in hn or hn in k:
+                    price = v
+                    break
+        c['claim_price'] = price
+        
+        # Clean specific artifacts
+        if c['new_owner']: c['new_owner'] = c['new_owner'].strip()
+        if c['new_trainer']: c['new_trainer'] = c['new_trainer'].strip()
 
     return claims
 

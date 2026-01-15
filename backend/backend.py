@@ -301,7 +301,9 @@ def get_filter_options():
             .order('race_date', desc=True)\
             .execute()
         
-        unique_dates = sorted(list(set(r['race_date'] for r in dates_response.data)), reverse=True)
+        # Filter out future dates (ensure no future forward-filled dates appear in past filters)
+        all_unique_dates = set(r['race_date'] for r in dates_response.data)
+        unique_dates = sorted([d for d in all_unique_dates if d <= today], reverse=True)
 
         # 2. Get all distinct tracks (for historical filter)
         tracks_response = supabase.table('hranalyzer_races')\
