@@ -204,13 +204,13 @@ export default function Results() {
                                     setItemsPerPage(Number(e.target.value));
                                     setCurrentPage(1);
                                 }}
-                                className="mx-2 bg-purple-900/20 border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
+                                className="mx-2 bg-black border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
                             >
-                                <option value={10}>10</option>
-                                <option value={20}>20</option>
-                                <option value={30}>30</option>
-                                <option value={50}>50</option>
-                                <option value={100}>100</option>
+                                <option value={10} className="bg-black">10</option>
+                                <option value={20} className="bg-black">20</option>
+                                <option value={30} className="bg-black">30</option>
+                                <option value={50} className="bg-black">50</option>
+                                <option value={100} className="bg-black">100</option>
                             </select>
                             <span>results per page</span>
                         </div>
