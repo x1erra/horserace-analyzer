@@ -29,7 +29,27 @@ export default function Betting() {
             const res = await fetch(`${API_BASE_URL}/bets`);
             const data = await res.json();
             if (data.bets) {
-                setTickets(data.bets);
+                // Sort by Date Desc, Track Asc, Race Number Asc
+                const sortedBets = data.bets.sort((a, b) => {
+                    // 1. Date (created_at)
+                    const dateA = new Date(a.created_at);
+                    const dateB = new Date(b.created_at);
+                    if (dateA > dateB) return -1;
+                    if (dateA < dateB) return 1;
+
+                    // 2. Track
+                    const trackA = (a.hranalyzer_races?.track_code || '').toLowerCase();
+                    const trackB = (b.hranalyzer_races?.track_code || '').toLowerCase();
+                    if (trackA < trackB) return -1;
+                    if (trackA > trackB) return 1;
+
+                    // 3. Race Number
+                    const raceA = Number(a.hranalyzer_races?.race_number || 0);
+                    const raceB = Number(b.hranalyzer_races?.race_number || 0);
+                    return raceA - raceB;
+                });
+
+                setTickets(sortedBets);
                 updateWinRate(data.bets);
             }
         } catch (error) {

@@ -40,13 +40,28 @@ export default function Results() {
             if (valA === undefined || valA === null) valA = '';
             if (valB === undefined || valB === null) valB = '';
 
-            if (typeof valA === 'string') {
+            // Numeric check for race_number
+            if (sortColumn === 'race_number') {
+                valA = Number(valA);
+                valB = Number(valB);
+            } else if (typeof valA === 'string') {
                 valA = valA.toLowerCase();
                 valB = valB.toLowerCase();
             }
+
             if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
             if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-            return 0;
+
+            // Secondary sort: Track Name (Alphabetic) - Only if primary sort is Date
+            if (sortColumn === 'race_date') {
+                const trackA = (a.track_name || '').toLowerCase();
+                const trackB = (b.track_name || '').toLowerCase();
+                if (trackA < trackB) return -1;
+                if (trackA > trackB) return 1;
+            }
+
+            // Tertiary sort: Race Number (Always Ascending)
+            return Number(a.race_number || 0) - Number(b.race_number || 0);
         });
 
     // Handle column sort click
@@ -135,8 +150,8 @@ export default function Results() {
                                         <td className="p-4 font-mono text-sm">{result.time || 'N/A'}</td>
                                         <td className="p-4">
                                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${result.race_status === 'completed'
-                                                    ? 'bg-green-900/40 text-green-400 border border-green-900/50'
-                                                    : 'bg-gray-900/40 text-gray-400 border border-gray-900/50'
+                                                ? 'bg-green-900/40 text-green-400 border border-green-900/50'
+                                                : 'bg-gray-900/40 text-gray-400 border border-gray-900/50'
                                                 }`}>
                                                 {result.race_status === 'completed' ? 'Completed' : 'Upcoming/No Data'}
                                             </span>

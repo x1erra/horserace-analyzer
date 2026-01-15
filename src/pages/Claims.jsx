@@ -9,7 +9,7 @@ export default function Claims() {
     const [error, setError] = useState(null);
     const [selectedTrack, setSelectedTrack] = useState('All Tracks');
     const [selectedDate, setSelectedDate] = useState('All Dates');
-    const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+    const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
 
     useEffect(() => {
         const fetchClaims = async () => {
@@ -81,7 +81,15 @@ export default function Claims() {
                     return sortConfig.direction === 'asc' ? 1 : -1;
                 }
 
-                // Secondary sort: Race Number (Always Ascending)
+                // Secondary sort: Track Name (Alphabetic) - Only if primary sort is Date
+                if (sortConfig.key === 'race_date') {
+                    const trackA = (a.track_name || a.track_code || '').toLowerCase();
+                    const trackB = (b.track_name || b.track_code || '').toLowerCase();
+                    if (trackA < trackB) return -1;
+                    if (trackA > trackB) return 1;
+                }
+
+                // Tertiary sort: Race Number (Always Ascending)
                 return Number(a.race_number) - Number(b.race_number);
             });
         }
