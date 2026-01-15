@@ -337,6 +337,7 @@ def fetch_hrn_entries(track_code, race_date):
             distance = None
             surface = None
             purse = None
+            race_type = None
             
             # 1. NEW: TRY CLASS-BASED DETECTION (RESULTS PAGE)
             # Find the header element for this race
@@ -358,22 +359,50 @@ def fetch_hrn_entries(track_code, race_date):
                         if purse_tag:
                             purse = purse_tag.get_text(strip=True).replace('Purse:', '').strip()
                         
-                        # Distance
-                        dist_tag = details_row.find(class_='race-distance')
-                        if dist_tag:
-                            distance_full = dist_tag.get_text(strip=True)
-                            distance = distance_full.split(',')[0].strip()
-                            # Often distance_full = "6 f, Dirt"
-                            if ',' in distance_full:
-                                surface = distance_full.split(',')[1].strip()
-                        
-                        # Fallback for surface
-                        if not surface:
-                            rest_tag = details_row.find(class_='race-restrictions')
-                            if rest_tag:
-                                txt = rest_tag.get_text(strip=True)
-                                surf_match = re.search(r'(Dirt|Turf|Synthetic|All Weather|Inner Turf|Main Track)', txt, re.IGNORECASE)
-                                if surf_match: surface = surf_match.group(1)
+                            # Improved Parsing Logic for HRN
+                            dist_tag = details_row.find(class_='race-distance')
+                            if dist_tag:
+                                # Use pipe to separate text nodes if possible, but get_text might not be perfect.
+                                text_content = dist_tag.get_text("|", strip=True) 
+                            # "6 f|Dirt|$15,000 Claiming"
+                            
+                            raw_parts = [p.strip() for p in text_content.split('|') if p.strip()]
+                            
+                            final_parts = []
+                            for p in raw_parts:
+                                clean_p = " ".join(p.split())
+                                # Split by comma but be smart about currency
+                                sub_parts = [sp.strip() for sp in clean_p.split(',')]
+                                for sp in sub_parts:
+                                    if not sp: continue
+                                    # Merge currency split (e.g. $5 and 000)
+                                    if final_parts and re.match(r'^\$\d{1,3}$', final_parts[-1]) and re.match(r'^\d{3}', sp):
+                                        final_parts[-1] += "," + sp
+                                    else:
+                                        final_parts.append(sp)
+
+                            # Parse final_parts
+                            for part in final_parts:
+                                part_lower = part.lower()
+                                
+                                # Distance Check: starts with digit, contains specific unit (relaxed regex)
+                                if not distance and re.match(r'^\d', part) and re.search(r'(m|f|y|mile|furlong|yds)', part_lower):
+                                     distance = part
+                                
+                                # Surface Check
+                                elif not surface and any(x in part_lower for x in ['dirt', 'turf', 'synthetic', 'all weather']):
+                                     surface = part
+                                     
+                                # Race Type: Not distance, not surface, not 'purse'
+                                else:
+                                     if 'purse:' in part_lower:
+                                         continue
+                                     # Append to race type (handles multi-part types if any)
+                                     if not race_type:
+                                         race_type = part
+                                     else:
+                                         race_type += f" {part}"
+
 
             # 2. FALLBACK: SIBLING SEARCH (ENTRY PAGE)
             if not post_time or not distance:
@@ -496,7 +525,7 @@ def fetch_hrn_entries(track_code, race_date):
                     'distance': distance,
                     'surface': surface,
                     'purse': purse,
-                    'race_type': 'Unknown',
+                    'race_type': race_type if race_type else 'Unknown',
                     'entries': entries,
                     'source': 'hrn_entries'
                 })
