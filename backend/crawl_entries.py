@@ -420,12 +420,14 @@ def fetch_hrn_entries(track_code, race_date):
             
             # Map columns
             idx_pgm = -1
+            idx_pp = -1
             idx_horse = -1
             idx_tj = -1
             idx_ml = -1
             
             for i, h in enumerate(headers):
                 if '#' in h: idx_pgm = i
+                elif 'pp' in h: idx_pp = i
                 elif 'horse' in h: idx_horse = i
                 elif 'trainer' in h or 'jockey' in h: idx_tj = i
                 elif 'ml' in h: idx_ml = i
@@ -441,7 +443,13 @@ def fetch_hrn_entries(track_code, race_date):
                 if not cols: continue # header
                 
                 try:
-                    pgm = cols[idx_pgm].get_text(strip=True) if len(cols) > idx_pgm else "0"
+                    pgm = cols[idx_pgm].get_text(strip=True) if (idx_pgm != -1 and len(cols) > idx_pgm) else ""
+                    
+                    # Fallback to PP if PGM is empty
+                    if not pgm and idx_pp != -1 and len(cols) > idx_pp:
+                         pgm = cols[idx_pp].get_text(strip=True)
+                         
+                    if not pgm: pgm = "0"
                     
                     # Horse Name 
                     horse_part = cols[idx_horse] if len(cols) > idx_horse else None
@@ -469,7 +477,7 @@ def fetch_hrn_entries(track_code, race_date):
                         if len(parts) >= 2: jockey = parts[1].strip()
                         
                     # Odds
-                    odds = cols[idx_ml].get_text(strip=True) if len(cols) > idx_ml else None
+                    odds = cols[idx_ml].get_text(strip=True) if (idx_ml != -1 and len(cols) > idx_ml) else None
                     
                     entries.append({
                         'program_number': pgm,
