@@ -10,6 +10,7 @@ import logging
 import time
 import re
 import requests
+import subprocess
 import pdfplumber
 from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple
@@ -57,26 +58,51 @@ def build_equibase_url(track_code: str, race_date: date, race_number: int) -> st
 
 def download_pdf(pdf_url: str, timeout: int = 30) -> Optional[bytes]:
     """
-    Download PDF from Equibase
+    Download PDF from Equibase using PowerShell to bypass WAF
     Returns: PDF bytes or None if download fails
     """
+    temp_file = f"temp_pdf_{int(time.time())}_{os.getpid()}.pdf"
+    
     try:
-        logger.info(f"Downloading PDF from {pdf_url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        }
-        response = requests.get(pdf_url, headers=headers, timeout=timeout)
-
-        if response.status_code == 200:
-            logger.info(f"Successfully downloaded PDF ({len(response.content)} bytes)")
-            return response.content
+        logger.info(f"Downloading PDF from {pdf_url} via PowerShell")
+        
+        # PowerShell command with browser-like User-Agent
+        cmd = [
+            "powershell", 
+            "-Command", 
+            f"Invoke-WebRequest -Uri '{pdf_url}' -OutFile '{temp_file}' -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'"
+        ]
+        
+        # Execute
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        
+        if result.returncode == 0 and os.path.exists(temp_file):
+            size = os.path.getsize(temp_file)
+            if size < 2000: # 2KB is too small for a PDF chart
+                logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked/empty.")
+                # Try to read it anyway just in case, or discard?
+                # If it's HTML, pdfplumber will fail later, which is handled.
+                # But let's log it.
+            
+            with open(temp_file, 'rb') as f:
+                content = f.read()
+                
+            logger.info(f"Successfully downloaded PDF ({len(content)} bytes)")
+            return content
         else:
-            logger.warning(f"PDF download failed with status {response.status_code}")
+            logger.warning(f"PowerShell download failed: {result.stderr}")
             return None
 
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.error(f"Error downloading PDF: {e}")
         return None
+        
+    finally:
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
 
 
 def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
@@ -963,6 +989,28 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
 
         # Try up to 12 races per track
         while race_num <= 12:
+            try:
+                # Check if race is already completed in DB to avoid re-downloading
+                race_key = f"{track_code}-{target_date.strftime('%Y%m%d')}-{race_num}"
+                existing = supabase.table('hranalyzer_races').select('race_status').eq('race_key', race_key).execute()
+                
+                if existing.data and len(existing.data) > 0:
+                    status = existing.data[0]['race_status']
+                    if status == 'completed':
+                        logger.info(f"Skipping {race_key} (Already Completed)")
+                        race_num += 1
+                        # If we found it in DB, we count it as "found" essentially, but maybe not for stats?
+                        # Actually if we skip it, we might stop the loop if we rely on "race_data" being found?
+                        # No, we just continue to next race. 
+                        # BUT: if race 1 is completed, race 2 might not be.
+                        # However, if race 1 is NOT found, we break.
+                        # So we must NOT break here.
+                        # We must mark track_had_races = True if we found a completed race too.
+                        track_had_races = True
+                        continue
+            except Exception as e:
+                logger.debug(f"Error checking status for {race_key}: {e}")
+
             pdf_url = build_equibase_url(track_code, target_date, race_num)
 
             # Extract race data

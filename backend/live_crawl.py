@@ -75,12 +75,12 @@ def run_crawler():
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")
                 
-                # Sleep for 1 hour
-                logger.info("Sleeping for 1 hour...")
-                time.sleep(3600)
+                # Sleep for 15 minutes to catch races as they finish (avg race gap is ~20-30m)
+                logger.info("Sleeping for 15 minutes...")
+                time.sleep(900)
             else:
-                # Should not happen if START=0, END=23, but kept for safety if config changes
-                logger.info("Outside operating hours.")
+                # Outside operating hours
+                logger.info("Outside operating hours (00:00 - 23:59). Sleeping 1 hour.")
                 time.sleep(3600)
 
         except Exception as e:
