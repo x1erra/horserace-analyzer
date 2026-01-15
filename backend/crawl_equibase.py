@@ -867,7 +867,7 @@ def get_or_create_track(supabase, track_code: str, track_name: str = None) -> Op
         return None
 
 
-def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dict) -> bool:
+def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dict, race_number: int = None) -> bool:
     """
     Insert crawled race data into Supabase
     Returns: True if successful, False otherwise
@@ -879,8 +879,10 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             logger.error(f"Could not get track_id for {track_code}")
             return False
 
-        # Build race key
-        race_number = race_data.get('race_number', 1)
+        # Build race key - Priority: 1. Passed race_number, 2. Data from PDF, 3. Default 1
+        if race_number is None:
+            race_number = race_data.get('race_number', 1)
+            
         race_key = f"{track_code}-{race_date.strftime('%Y%m%d')}-{race_number}"
 
         # Check if race already exists
@@ -1159,7 +1161,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
             stats['races_found'] += 1
 
             # Insert to database
-            success = insert_race_to_db(supabase, track_code, target_date, race_data)
+            success = insert_race_to_db(supabase, track_code, target_date, race_data, race_num)
             if success:
                 stats['races_inserted'] += 1
                 logger.info(f"✓ Successfully processed {track_code} Race {race_num}")

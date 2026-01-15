@@ -413,7 +413,7 @@ def fetch_hrn_entries(track_code, race_date):
                     
                     # Check Post Time (e.g. "Post time: 12:10 PM ET")
                     if not post_time:
-                        pt_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
+                        pt_match = re.search(r'(?:Post time:)?\s*(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
                         if pt_match:
                             post_time = pt_match.group(1)
                     

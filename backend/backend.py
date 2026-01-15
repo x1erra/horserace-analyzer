@@ -332,7 +332,8 @@ def get_filter_options():
             
         summary_map = {}
         
-        # Helper to parse post time for sorting/comparison if needed (optional, here we trust race_number order)
+        # Get current time for comparison
+        now_utc = datetime.now(pytz.utc)
         
         for r in today_response.data:
             name = r.get('hranalyzer_tracks', {}).get('track_name', r['track_code'])
@@ -344,6 +345,7 @@ def get_filter_options():
                     'upcoming': 0,
                     'completed': 0,
                     'next_race_time': None,
+                    'next_race_iso': None,
                     'last_race_winner': None,
                     'last_race_number': 0
                 }
@@ -353,7 +355,6 @@ def get_filter_options():
             if r['race_status'] == 'completed':
                 summary_map[name]['completed'] += 1
                 # Update last race winner (assuming races ordered by race_number)
-                # Ensure we are actually looking at the latest race number processed
                 if r['race_number'] > summary_map[name]['last_race_number']:
                     summary_map[name]['last_race_number'] = r['race_number']
                     # Find winner
@@ -365,18 +366,30 @@ def get_filter_options():
                         
             else:
                 summary_map[name]['upcoming'] += 1
-                # Update next race time (first one we encounter that is upcoming, since we ordered by race_number)
-                if summary_map[name]['next_race_time'] is None:
+                
+                # Update next race time (Find the FIRST upcoming race that is in the future)
+                # If we haven't found a valid next race yet...
+                if summary_map[name]['next_race_iso'] is None:
                     post_time_str = r.get('post_time')
                     if post_time_str:
                          try:
-                             # Parse TIME (HH:MM:SS) and combine with today to get ISO string
-                             # Handle cases where post_time_str might be HH:MM:SS or HH:MM
-                             if len(post_time_str.split(':')) == 2:
-                                 pt = datetime.strptime(post_time_str, "%H:%M").time()
-                             else:
-                                 pt = datetime.strptime(post_time_str, "%H:%M:%S").time()
-                                 
+                             # Clean "Post Time" text if present
+                             clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
+                             # Remove "ET" or other timezone suffixes if simple parse fails, but strptime handles strict format
+                             # Usually it's HH:MM AM/PM
+                             clean_time_str = clean_time_str.replace("ET", "").strip()
+                             
+                             # Parse TIME
+                             try:
+                                 pt = datetime.strptime(clean_time_str, "%I:%M %p").time()
+                             except ValueError:
+                                 # Try 24hr or other formats
+                                 try:
+                                     pt = datetime.strptime(clean_time_str, "%H:%M").time()
+                                 except:
+                                     # Last ditch: try parsing with dateutil or simple split
+                                      pt = datetime.strptime(clean_time_str, "%H:%M:%S").time()
+
                              today_dt = datetime.strptime(today, "%Y-%m-%d").date()
                              dt = datetime.combine(today_dt, pt)
                              
@@ -386,12 +399,23 @@ def get_filter_options():
                              local_tz = pytz.timezone(tz_name)
                              localized = local_tz.localize(dt)
                              
+                             # Check if in future (with small buffer, e.g. -10 mins to allow for delay)
+                             # actually dashboard countdown handles negative, so valid string is fine.
+                             # BUT user wants "Next Post" to not be a past race.
+                             # If race is 'upcoming' but time is past, it's late. We still show it.
+                             # But we want the EARLIEST upcoming race.
+                             # Since list is ordered by race_number, the first 'upcoming' race IS the next race,
+                             # even if it's late.
+                             
                              summary_map[name]['next_race_iso'] = localized.isoformat()
                              summary_map[name]['next_race_time'] = localized.strftime("%I:%M %p").lstrip('0')
+                             
                          except Exception as e:
-                             print(f"Error parsing time {post_time_str}: {e}")
-                             summary_map[name]['next_race_time'] = post_time_str
-                
+                             # print(f"Error parsing time {post_time_str}: {e}")
+                             # If we can't parse it, we can't use it for countdown, but display text
+                             if not summary_map[name]['next_race_time']:
+                                 summary_map[name]['next_race_time'] = post_time_str
+
         today_summary = sorted(list(summary_map.values()), key=lambda x: x['track_name'])
 
         return jsonify({

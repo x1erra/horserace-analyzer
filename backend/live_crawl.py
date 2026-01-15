@@ -108,9 +108,9 @@ def run_crawler():
                 # Update heartbeat before sleeping
                 touch_heartbeat()
                 
-                # Sleep for 15 minutes
-                logger.info("Sleeping for 15 minutes...")
-                time.sleep(900)
+                # Sleep for 5 minutes (reduced from 15m for better responsiveness)
+                logger.info("Sleeping for 5 minutes...")
+                time.sleep(300)
             else:
                 # Outside operating hours
                 logger.info("Outside operating hours (00:00 - 23:59). Sleeping 1 hour.")
