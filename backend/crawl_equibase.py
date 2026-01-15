@@ -31,6 +31,15 @@ COMMON_TRACKS = [
 ]
 
 
+def normalize_name(name: str) -> str:
+    """
+    Normalize name for more reliable mapping (strip non-alphanumeric, lowercase)
+    """
+    if not name:
+        return ""
+    return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
+
+
 def build_equibase_url(track_code: str, race_date: date, race_number: int) -> str:
     """
     Build Equibase PDF URL for a specific race
@@ -526,7 +535,7 @@ def parse_wps_payouts(text: str) -> Dict[str, Dict[str, float]]:
             row_payouts = {'win': None, 'place': None, 'show': None}
             
             if current_row_idx == 0: # Winner row
-                # Expect Win, Place, Show
+                # Expect 3 prices (Win, Place, Show)
                 if len(found_prices) >= 3:
                     row_payouts['win'] = found_prices[0]
                     row_payouts['place'] = found_prices[1]
@@ -584,9 +593,10 @@ def parse_claims_text(text: str) -> List[Dict]:
         price_items = re.findall(r'(\d+)\s*-\s*([^:]+):\s*\$([\d,]+)', price_text)
         for num, name, price in price_items:
             # Normalize name
-            clean_name = re.sub(r'[^\w\s]', '', name).strip()
+            norm_name = normalize_name(name)
             price_val = float(price.replace(',', ''))
-            price_map[clean_name] = price_val
+            price_map[norm_name] = price_val
+            logger.debug(f"Mapped '{name}' (norm: {norm_name}) to {price_val}")
 
     # 2. Parse Claimed Horse lines
     # Look for "Claimed Horse(s):" (with or without spaces)
@@ -604,6 +614,12 @@ def parse_claims_text(text: str) -> List[Dict]:
                 # Remove the prefix "N Claimed Horse(s):"
                 content = re.sub(r'^\d*\s*Claimed\s*Horse\(s\)\s*:\s*', '', line.strip(), flags=re.IGNORECASE)
                 
+                # Check if price is directly in the line: e.g. "Growth Rate (Claimed for $25,000)"
+                direct_price = None
+                direct_price_match = re.search(r'\$([\d,]+)', line)
+                if direct_price_match:
+                    direct_price = float(direct_price_match.group(1).replace(',', ''))
+
                 # Split by labels "New Trainer:" and "New Owner:" (flexible spaces)
                 # Split using capturing group to keep delimiters if needed, but here just split
                 parts = re.split(r'\s*New\s*Trainer\s*:\s*|\s*New\s*Owner\s*:\s*', content, flags=re.IGNORECASE)
@@ -616,15 +632,22 @@ def parse_claims_text(text: str) -> List[Dict]:
                     # Clean horse name (sometimes has program number prefix like "1 - Coquito" or just "Coquito")
                     # Usage in price map might trigger finding simple name
                     
-                    clean_horse_name = re.sub(r'[^\w\s]', '', horse_name).strip()
+                    # Use improved normalization for lookup
+                    norm_horse_name = normalize_name(horse_name)
+                    price = price_map.get(norm_horse_name)
                     
-                    price = price_map.get(clean_horse_name)
-                    # If not found, try fuzzy match or partial
                     if not price:
+                        # Fallback to fuzzy/partial matching
                         for k, v in price_map.items():
-                            if k in clean_horse_name or clean_horse_name in k:
+                            if k in norm_horse_name or norm_horse_name in k:
                                 price = v
+                                logger.debug(f"Fuzzy match found for claim: {norm_horse_name} -> {k}")
                                 break
+                    
+                    # Final fallback to direct price if found in line
+                    if not price and direct_price:
+                        price = direct_price
+                        logger.debug(f"Used direct price from claim line for {horse_name}: {price}")
                     
                     claims.append({
                         'horse_name': horse_name,
@@ -896,11 +919,12 @@ def insert_claim(supabase, race_id: int, claim_data: Dict):
         # Try to match program number if possible, but for now we rely on horse_name
         
         supabase.table('hranalyzer_claims').insert(claim_insert).execute()
-        logger.debug(f"Inserted claim for {claim_data.get('horse_name')}")
+        logger.info(f"Inserted claim for {claim_data.get('horse_name')} with price {claim_insert['claim_price']}")
         
     except Exception as e:
         # Ignore duplicate errors if re-running
         if 'unique' in str(e) or 'duplicate' in str(e):
+             logger.debug(f"Claim for {claim_data.get('horse_name')} already exists, skipping insert.")
              pass
         else:
              logger.error(f"Error inserting claim: {e}")
