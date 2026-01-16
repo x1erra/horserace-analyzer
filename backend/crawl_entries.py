@@ -321,7 +321,11 @@ def fetch_hrn_entries(track_code, race_date):
         for table in all_tables:
             headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
             # Look for indicators of an entry table
-            if any(h in headers for h in ['#', 'pp', 'horse', 'ml']):
+            # Match count strategy to avoid generic tables (like 'Power Picks') which only have 'Horse'
+            # We need at least 2 matches from the entry-specific columns
+            matches = sum(1 for h in headers if any(k in h for k in ['#', 'pp', 'horse', 'ml', 'jockey', 'trainer', 'morning']))
+            
+            if matches >= 2:
                 entry_tables.append(table)
         
         if not entry_tables:

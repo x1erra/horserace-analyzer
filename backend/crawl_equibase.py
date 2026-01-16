@@ -919,7 +919,6 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
         if race_data.get('post_time'):
             race_insert['post_time'] = race_data.get('post_time')
 
-        # Insert or update race
         if update_mode:
             result = supabase.table('hranalyzer_races').update(race_insert).eq('id', race_id).execute()
         else:
