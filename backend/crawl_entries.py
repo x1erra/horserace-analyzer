@@ -413,13 +413,19 @@ def fetch_hrn_entries(track_code, race_date):
                     
                     # Check Post Time (e.g. "Post time: 12:10 PM ET")
                     if not post_time:
+                        # try strict first
                         pt_match = re.search(r'(?:Post time:)?\s*(\d{1,2}:\d{2}\s*(?:AM|PM))', txt, re.IGNORECASE)
                         if pt_match:
                             post_time = pt_match.group(1)
-                    
+                        else:
+                            # Try flexible: "12:30 PM" without prefix, or "1:00" if clear
+                            pt_strict = re.search(r'\b(\d{1,2}:\d{2}\s*(?:A\.?M\.?|P\.?M\.?))', txt, re.IGNORECASE)
+                            if pt_strict:
+                                post_time = pt_strict.group(1)
+
                     # Distance
                     if not distance:
-                        dist_match = re.search(r'(\d+\s*(?:f|furlongs|miles|yards))', txt, re.IGNORECASE)
+                        dist_match = re.search(r'(\d+(?:\.\d+)?\s*(?:f|furlongs|miles|yards|yds))', txt, re.IGNORECASE)
                         if dist_match: distance = dist_match.group(1)
                     
                     # Surface
@@ -433,7 +439,8 @@ def fetch_hrn_entries(track_code, race_date):
                         if purse_match:
                             purse = purse_match.group(1)
                         elif '$' in txt:
-                            pm = re.search(r'(\$\d{1,3}(?:,\d{3})*)', txt)
+                            # Look for isolated currency like $15,000
+                            pm = re.search(r'(\$\d{1,3}(?:,\d{3})+(?:\.\d{2})?)', txt)
                             if pm: purse = pm.group(1)
                             
                     prev = prev.find_previous_sibling()

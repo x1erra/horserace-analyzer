@@ -48,12 +48,9 @@ const Countdown = ({ targetIso, originalTime }) => {
     if (!targetIso) return <span className="text-white font-medium">-</span>;
 
     return (
-        <div className="flex flex-col">
-            <span className={`font-mono font-bold ${isUrgent ? 'text-red-400 animate-pulse' : 'text-green-400'}`}>
-                {timeLeft}
-            </span>
-            <span className="text-[10px] text-gray-500">{originalTime}</span>
-        </div>
+        <span className={`font-mono text-xs ${isUrgent ? 'text-red-400 animate-pulse' : 'text-green-400'}`}>
+            {timeLeft}
+        </span>
     );
 };
 
@@ -252,7 +249,16 @@ export default function Dashboard() {
                                         </div>
                                         <div>
                                             <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Next Post</span>
-                                            <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
+                                            {track.next_race_iso ? (
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-bold text-white">
+                                                        {new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                    </span>
+                                                    <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-400 text-sm">-</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

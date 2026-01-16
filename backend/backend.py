@@ -368,51 +368,49 @@ def get_filter_options():
                 summary_map[name]['upcoming'] += 1
                 
                 # Update next race time (Find the FIRST upcoming race that is in the future)
-                # If we haven't found a valid next race yet...
-                if summary_map[name]['next_race_iso'] is None:
+                if True: # Always try to parse time for better data
                     post_time_str = r.get('post_time')
                     if post_time_str:
                          try:
                              # Clean "Post Time" text if present
                              clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
-                             # Remove "ET" or other timezone suffixes if simple parse fails, but strptime handles strict format
-                             # Usually it's HH:MM AM/PM
-                             clean_time_str = clean_time_str.replace("ET", "").strip()
+                             clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
                              
                              # Parse TIME
-                             try:
-                                 pt = datetime.strptime(clean_time_str, "%I:%M %p").time()
-                             except ValueError:
-                                 # Try 24hr or other formats
+                             pt = None
+                             for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
                                  try:
-                                     pt = datetime.strptime(clean_time_str, "%H:%M").time()
-                                 except:
-                                     # Last ditch: try parsing with dateutil or simple split
-                                      pt = datetime.strptime(clean_time_str, "%H:%M:%S").time()
-
-                             today_dt = datetime.strptime(today, "%Y-%m-%d").date()
-                             dt = datetime.combine(today_dt, pt)
+                                     pt = datetime.strptime(clean_time_str, fmt).time()
+                                     break
+                                 except ValueError:
+                                     continue
                              
-                             tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
-                             if not tz_name: tz_name = 'America/New_York'
-                             
-                             local_tz = pytz.timezone(tz_name)
-                             localized = local_tz.localize(dt)
-                             
-                             # Check if in future (with small buffer, e.g. -10 mins to allow for delay)
-                             # actually dashboard countdown handles negative, so valid string is fine.
-                             # BUT user wants "Next Post" to not be a past race.
-                             # If race is 'upcoming' but time is past, it's late. We still show it.
-                             # But we want the EARLIEST upcoming race.
-                             # Since list is ordered by race_number, the first 'upcoming' race IS the next race,
-                             # even if it's late.
-                             
-                             summary_map[name]['next_race_iso'] = localized.isoformat()
-                             summary_map[name]['next_race_time'] = localized.strftime("%I:%M %p").lstrip('0')
-                             
+                             if pt:
+                                 today_dt = datetime.strptime(today, "%Y-%m-%d").date()
+                                 dt = datetime.combine(today_dt, pt)
+                                 
+                                 tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
+                                 if not tz_name: tz_name = 'America/New_York'
+                                 
+                                 local_tz = pytz.timezone(tz_name)
+                                 localized = local_tz.localize(dt)
+                                 
+                                 # Logic: We want the EARLIEST upcoming race
+                                 # Since the loop is ordered by race_number, we usually just take the first one we find
+                                 # However, if we already have a next_race_iso, check if this one is earlier?
+                                 # Actually, the user wants the "Next Post".
+                                 # If we have multiple upcoming races, which one is "Next"? The one with the lowest race number usually.
+                                 # But if Race 1 is technically "upcoming" (not resulted) but time is 1 PM and now it is 5 PM,
+                                 # showing Race 1 as "Next Post" with "Post Time" (past) is correct data-wise (it IS the next unresolved race).
+                                 # The crawler needs to fix the status. Ideally backend shows "Next *Scheduled* Post".
+                                 
+                                 if summary_map[name]['next_race_iso'] is None:
+                                     summary_map[name]['next_race_iso'] = localized.isoformat()
+                                     summary_map[name]['next_race_time'] = localized.strftime("%I:%M %p").lstrip('0')
+                                     summary_map[name]['timezone'] = tz_name
+                                 
                          except Exception as e:
                              # print(f"Error parsing time {post_time_str}: {e}")
-                             # If we can't parse it, we can't use it for countdown, but display text
                              if not summary_map[name]['next_race_time']:
                                  summary_map[name]['next_race_time'] = post_time_str
 
