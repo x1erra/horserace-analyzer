@@ -85,7 +85,7 @@ export default function Dashboard() {
         fetchSummary();
     }, []);
 
-    const handleLoadRaces = async () => {
+    const handleLoadRaces = async (trackOverride = null, statusOverride = null) => {
         try {
             setLoading(true);
             setError(null);
@@ -93,8 +93,12 @@ export default function Dashboard() {
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
             const params = {};
 
-            if (selectedTrack !== 'All') params.track = selectedTrack;
-            if (selectedStatus !== 'All') params.status = selectedStatus;
+            // Use override if provided, otherwise use state
+            const trackToUse = trackOverride !== null ? trackOverride : selectedTrack;
+            const statusToUse = statusOverride !== null ? statusOverride : selectedStatus;
+
+            if (trackToUse !== 'All') params.track = trackToUse;
+            if (statusToUse !== 'All') params.status = statusToUse;
 
             // Add cache buster
             params._t = Date.now();
@@ -166,7 +170,7 @@ export default function Dashboard() {
                     </div>
                 </div>
                 <button
-                    onClick={handleLoadRaces}
+                    onClick={() => handleLoadRaces()}
                     disabled={loading}
                     className="w-full md:w-auto bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-[0_0_15px_rgba(147,51,234,0.3)] flex items-center justify-center gap-2 h-[42px]"
                 >
@@ -207,7 +211,7 @@ export default function Dashboard() {
                             {todaySummary.map(track => (
                                 <div key={track.track_code} className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between" onClick={() => {
                                     setSelectedTrack(track.track_name);
-                                    // Optional: Auto-load? Let's just select for now as users prefer manual verify
+                                    handleLoadRaces(track.track_name);
                                 }}>
                                     <div>
                                         <div className="flex justify-between items-start mb-4">
