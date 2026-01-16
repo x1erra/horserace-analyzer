@@ -198,15 +198,25 @@ def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
             if horses:
                 # Merge WPS Payouts if available
                 wps_payouts = race_data.get('wps_payouts', {})
-                if wps_payouts:
-                    for horse in horses:
-                        pgm = horse.get('program_number')
-                        if pgm and pgm in wps_payouts:
-                            payout = wps_payouts[pgm]
-                            horse['win_payout'] = payout.get('win')
-                            horse['place_payout'] = payout.get('place')
-                            horse['show_payout'] = payout.get('show')
-                            
+                
+                # Merge Trainers from footer if missing (common in text fallback)
+                trainers_map = parse_trainers_section(text)
+                
+                for horse in horses:
+                    pgm = horse.get('program_number')
+                    
+                    # Merge WPS
+                    if pgm and pgm in wps_payouts:
+                        payout = wps_payouts[pgm]
+                        horse['win_payout'] = payout.get('win')
+                        horse['place_payout'] = payout.get('place')
+                        horse['show_payout'] = payout.get('show')
+                    
+                    # Merge Trainer if missing
+                    if not horse.get('trainer') and pgm and pgm in trainers_map:
+                         horse['trainer'] = trainers_map[pgm]
+                         logger.debug(f"Merged trainer {horse['trainer']} for horse {pgm}")
+
                 race_data['horses'] = horses
 
             return race_data
@@ -641,6 +651,43 @@ def parse_wps_payouts(text: str) -> Dict[str, Dict[str, float]]:
             logger.debug(f"Error parsing WPS line '{line}': {e}")
             continue
     return payouts
+
+
+
+def parse_trainers_section(text: str) -> Dict[str, str]:
+    """
+    Parse Trainers section from text
+    Example: Trainers: 3 - Handal, Raymond; 4 - Rice, Linda; ...
+    """
+    trainers = {}
+    
+    # Locate section
+    # Regex: Trainers:\s*(.*?)(?:\s+Owners:|\s+Footnotes|\s+Scratched|$)
+    match = re.search(r'Trainers:\s*(.*?)(?:\s+Owners:|\s+Footnotes|\s+Scratched|$)', text, re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        content = match.group(1).replace('\n', ' ').strip()
+        # Split by semicolon
+        # entry format: "Pgm - Name"
+        entries = content.split(';')
+        for entry in entries:
+            entry = entry.strip()
+            if not entry: continue
+            
+            # Split by " - " or just "-"
+            parts = entry.split('-', 1)
+            if len(parts) == 2:
+                pgm = parts[0].strip()
+                name = parts[1].strip()
+                trainers[pgm] = name
+            else:
+                # Fallback: maybe space separated? "3 Handal, Raymond"
+                # Check for first digit
+                m = re.match(r'^(\d+)\s+(.+)', entry)
+                if m:
+                    trainers[m.group(1)] = m.group(2).strip()
+                    
+    return trainers
 
 
 def parse_claims_text(text: str) -> List[Dict]:

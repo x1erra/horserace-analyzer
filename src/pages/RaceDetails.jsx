@@ -149,10 +149,10 @@ export default function RaceDetails() {
                                 <td className="p-4">{entry.program_number}</td>
                                 <td className="p-4 font-bold text-purple-300">{entry.horse_name}</td>
                                 {isCompleted && (
-                                    <td className="p-4">{entry.jockey_id || 'N/A'}</td>
+                                    <td className="p-4">{entry.jockey_name || 'N/A'}</td>
                                 )}
                                 {isCompleted && (
-                                    <td className="p-4">{entry.trainer_id || 'N/A'}</td>
+                                    <td className="p-4">{entry.trainer_name || 'N/A'}</td>
                                 )}
                                 {isUpcoming && (
                                     <td className="p-4">{entry.morning_line_odds || 'N/A'}</td>
