@@ -6,11 +6,25 @@ import RaceCard from '../components/RaceCard';
 export default function Races() {
     const [activeTab, setActiveTab] = useState('today'); // 'today' or 'past'
     const [selectedTrack, setSelectedTrack] = useState('All'); // Changed default to 'All'
-    const [selectedDate, setSelectedDate] = useState('All Dates');
+
+    // Default to current date YYYY-MM-DD
+    const getTodayDate = () => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const [selectedDate, setSelectedDate] = useState(getTodayDate());
     const [allRaces, setAllRaces] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [hasSearched, setHasSearched] = useState(false);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(30);
 
     // Metadata for filters
     const [availableTracks, setAvailableTracks] = useState([{ name: 'All Tracks', code: 'All' }]);
@@ -37,11 +51,25 @@ export default function Races() {
         fetchMetadata();
     }, []);
 
+    // Reset pagination when filters or data change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [activeTab, selectedTrack, selectedDate, allRaces]);
+
     // Reset state when tab changes
     const handleTabChange = (tab) => {
         setActiveTab(tab);
         setSelectedTrack('All');
-        setSelectedDate('All Dates');
+        // Keep selectedDate as today even when switching tabs, or reset to All Dates?
+        // User requested default is current date. Let's keep it as today or reset to today.
+        // If switching to Past, probably want to start with today (or All?).
+        // Let's reset to today to be safe and consistent with "default". 
+        // Or if the user changed it, maybe keep it? Detailed req: "default dropdown date is the current date".
+        // I will reset it to today when tab changes to ensure fresh start, or keep current implementation if it's cleaner.
+        // The previous code reset it to 'All Dates'. I'll reset to today.
+        if (tab === 'past') {
+            setSelectedDate(getTodayDate());
+        }
         setAllRaces([]);
         setHasSearched(false);
         setError(null);
@@ -52,6 +80,8 @@ export default function Races() {
             setLoading(true);
             setHasSearched(true);
             setError(null);
+            // Reset to page 1 on new search (handled by useEffect dependency on allRaces, but explicit here doesn't hurt)
+            setCurrentPage(1);
 
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
             const endpoint = activeTab === 'today'
@@ -65,7 +95,26 @@ export default function Races() {
                 if (selectedTrack !== 'All') params.track = selectedTrack;
             } else {
                 // Past races logic
-                params.limit = 100;
+                // If pagination is client side, we might want to fetch more or 'All' from backend?
+                // User said "lets not start with everything by default because it's a hefty load".
+                // But if we paginate client side, we MUST fetch everything first.
+                // UNLESS we implement server-side pagination.
+                // user said "control over how many results they load at once".
+                // backend param `limit` exists.
+                // However, the `Claims` page implementation was client-side pagination on a fetched list (limited by 200 in that case).
+                // `params.limit = 100` was there before.
+                // If I want to fetch "everything" for client side pagination, I might strictly need to remove limit or increase it.
+                // BUT user said "lets not start with everything by default ... hefty load".
+                // This implies they might WANT server side pagination or just a limit?
+                // "lets give the user control over how many results they load at once" -> usually means "Items per page".
+                // "lets not start with everything by default" -> implies initial fetch shouldn't be massive.
+                // If I keep `params.limit = 100` (or make it larger like 300) and paginate that, it fits "hefty load" concern.
+                // Let's bump it to 500 to get a good chunk of data, then paginate client side. 
+                // Truly "hefty" data usually warrants server-side pagination. 
+                // Given the context of "Claims" page which did client side, I will stick to client side but maybe increase the fetch limit slightly to ensure we get a good day's worth.
+                // For "today", we fetch all. For "past", we filter by date or track.
+
+                params.limit = 500; // Increased from 100 to allow more date range coverage if needed, but still limited.
                 if (selectedTrack !== 'All') params.track = selectedTrack;
                 if (selectedDate !== 'All Dates') {
                     params.start_date = selectedDate;
@@ -87,6 +136,14 @@ export default function Races() {
             setLoading(false);
         }
     };
+
+    // Calculate Pagination
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = allRaces.slice(indexOfFirstItem, indexOfLastItem);
+    const totalPages = Math.ceil(allRaces.length / itemsPerPage);
+
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
     if (metaLoading) {
         return (
@@ -148,7 +205,8 @@ export default function Races() {
                                 onChange={(e) => setSelectedDate(e.target.value)}
                                 className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
                             >
-                                {availableDates.map(date => (
+                                <option value="All Dates">All Dates</option>
+                                {availableDates.filter(d => d !== 'All Dates').map(date => (
                                     <option key={date} value={date}>{date}</option>
                                 ))}
                             </select>
@@ -198,7 +256,7 @@ export default function Races() {
 
                     {/* Grid of race cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
-                        {allRaces.length === 0 ? (
+                        {currentItems.length === 0 ? (
                             <div className="col-span-full text-center p-12 bg-black rounded-xl border border-purple-900/50">
                                 <p className="text-gray-400 mb-4">
                                     {activeTab === 'today'
@@ -207,11 +265,62 @@ export default function Races() {
                                 </p>
                             </div>
                         ) : (
-                            allRaces.map((race, index) => (
+                            currentItems.map((race, index) => (
                                 <RaceCard key={race.race_key || `${race.track_code}-${race.race_number}-${index}`} race={race} />
                             ))
                         )}
                     </div>
+
+                    {/* Pagination Controls */}
+                    {allRaces.length > 0 && (
+                        <div className="mt-8 px-4 py-3 border border-purple-900/50 bg-black rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center text-sm text-gray-400">
+                                <span>Show</span>
+                                <select
+                                    value={itemsPerPage}
+                                    onChange={(e) => {
+                                        setItemsPerPage(Number(e.target.value));
+                                        setCurrentPage(1);
+                                    }}
+                                    className="mx-2 bg-black border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
+                                >
+                                    <option value={15} className="bg-black">15</option>
+                                    <option value={30} className="bg-black">30</option>
+                                    <option value={50} className="bg-black">50</option>
+                                    <option value={100} className="bg-black">100</option>
+                                </select>
+                                <span>results per page</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => paginate(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                    className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
+                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                        }`}
+                                >
+                                    Previous
+                                </button>
+
+                                <span className="text-sm text-gray-400">
+                                    Page <span className="font-medium text-white">{currentPage}</span> of <span className="font-medium text-white">{totalPages}</span>
+                                </span>
+
+                                <button
+                                    onClick={() => paginate(currentPage + 1)}
+                                    disabled={currentPage === totalPages}
+                                    className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
+                                        ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                        : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                        }`}
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
         </div>

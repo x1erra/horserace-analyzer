@@ -5,12 +5,19 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
     const detailsLink = linkTo || `/race/${race.race_key}`;
 
     return (
-        <div className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full">
-            <div className="flex justify-between items-start mb-2">
-                <h4 className="text-xl font-bold text-white">
+        <Link
+            to={detailsLink}
+            className="group bg-black rounded-xl shadow-md p-6 hover:shadow-xl hover:border-purple-500 transition border border-purple-900/50 flex flex-col h-full relative overflow-hidden"
+        >
+            {/* Hover Effect Gradient */}
+            <div className="absolute inset-0 bg-gradient-to-t from-purple-900/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+            {/* Header Section - Fixed Height for alignment */}
+            <div className="flex justify-between items-start mb-4 h-[52px]">
+                <h4 className="text-xl font-bold text-white group-hover:text-purple-400 transition line-clamp-2">
                     Race {race.race_number} - {race.track_name || race.track_code}
                 </h4>
-                <div className="flex flex-col gap-1 items-end">
+                <div className="flex flex-col gap-1 items-end shrink-0 ml-2">
                     {race.race_status && (
                         <span className={`text-xs px-2 py-1 rounded text-center min-w-[70px] ${race.race_status === 'completed'
                             ? 'bg-green-900/30 text-green-400'
@@ -31,37 +38,42 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                 </div>
             </div>
 
-            <div className="mb-4 space-y-1">
+            {/* Date and Time Section - Fixed Height */}
+            <div className="mb-4 space-y-1 h-[48px] border-b border-gray-800/50 pb-2">
                 <p className="text-sm text-gray-400 flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                     {race.race_date}
                 </p>
                 <p className="text-sm text-white font-bold flex items-center gap-2">
-                    <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <svg className="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     Post Time: {race.post_time || 'TBD'}
                 </p>
             </div>
 
+            {/* Details Section */}
             <div className="space-y-2 mb-4 flex-1">
-                {race.race_type && (
-                    <p className="text-sm text-purple-300">
-                        {race.race_type} • {race.surface}
-                    </p>
-                )}
-                {race.purse && (
-                    <p className="text-sm text-green-400">
-                        Purse: {race.purse} • {race.distance}
-                    </p>
-                )}
-                {!minimal && (
-                    <p className="text-sm text-gray-400">
-                        {race.entry_count} entries
-                    </p>
-                )}
+                {/* Race Details Block - Fixed Height for alignment */}
+                <div className="h-[64px]">
+                    {race.race_type && (
+                        <p className="text-sm text-purple-300 truncate">
+                            {race.race_type} • {race.surface}
+                        </p>
+                    )}
+                    {race.purse && (
+                        <p className="text-sm text-green-400 truncate">
+                            Purse: {race.purse} • {race.distance}
+                        </p>
+                    )}
+                    {!minimal && (
+                        <p className="text-sm text-gray-400">
+                            {race.entry_count} entries
+                        </p>
+                    )}
+                </div>
 
-                {/* Results Display */}
+                {/* Results Display - Pushed to bottom via flex-1 of container if needed, but here it flows naturally */}
                 {race.results && race.results.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-800">
+                    <div className="mt-2 pt-3 border-t border-gray-800">
                         <p className="text-xs font-bold text-gray-500 uppercase mb-2">Top 3 Finishers</p>
                         <div className="space-y-1">
                             {race.results.map((result) => (
@@ -79,7 +91,7 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                                     </div>
                                     {/* Trainer Name Display - Right Side */}
                                     {result.trainer && result.trainer !== 'N/A' && (
-                                        <span className="text-xs text-gray-500 ml-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[100px] md:max-w-[120px]">
+                                        <span className="text-xs text-gray-500 ml-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px] md:max-w-[100px]">
                                             {result.trainer}
                                         </span>
                                     )}
@@ -90,12 +102,10 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                 )}
             </div>
 
-            <Link
-                to={detailsLink}
-                className="w-full block bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-2 rounded-md transition text-center mt-auto shadow-[0_0_10px_rgba(147,51,234,0.2)]"
-            >
-                View Details
-            </Link>
-        </div>
+            {/* View Details Indicator - Optional subtle text at bottom */}
+            <div className="mt-auto pt-2 text-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="text-xs text-purple-400 font-medium uppercase tracking-wider">View Race Details →</span>
+            </div>
+        </Link>
     );
 }
