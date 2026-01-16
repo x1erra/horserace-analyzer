@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
-const API_BASE_URL = 'http://localhost:5001/api';
+// Use environment variable for API URL (defaults to localhost if not set)
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 // Simple Tooltip Component
 const Tooltip = ({ text, children }) => {
