@@ -231,11 +231,28 @@ export default function Betting() {
                         required
                     >
                         <option value="">-- Select a Race --</option>
-                        {races.map(race => (
-                            <option key={race.id} value={race.id}>
-                                {race.track_code} Race {race.race_number} - Post: {race.post_time}
-                            </option>
-                        ))}
+                        {(() => {
+                            // Group races by track
+                            const grouped = races.reduce((acc, race) => {
+                                const track = race.track_code;
+                                if (!acc[track]) acc[track] = [];
+                                acc[track].push(race);
+                                return acc;
+                            }, {});
+
+                            // Sort tracks alphabetically
+                            return Object.keys(grouped).sort().map(trackCode => (
+                                <optgroup key={trackCode} label={trackCode}>
+                                    {grouped[trackCode]
+                                        .sort((a, b) => a.race_number - b.race_number)
+                                        .map(race => (
+                                            <option key={race.id} value={race.id}>
+                                                Race {race.race_number} - Post: {race.post_time}
+                                            </option>
+                                        ))}
+                                </optgroup>
+                            ));
+                        })()}
                     </select>
                 </div>
 
