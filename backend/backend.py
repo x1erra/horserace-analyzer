@@ -204,11 +204,19 @@ def get_todays_races():
         race_ids = [r['id'] for r in raw_races]
         
         entries_response = supabase.table('hranalyzer_race_entries')\
-            .select('race_id, id, program_number, finish_position, hranalyzer_horses(horse_name)')\
+            .select('race_id, id, program_number, finish_position, hranalyzer_horses(horse_name), hranalyzer_trainers(trainer_name)')\
             .in_('race_id', race_ids)\
             .execute()
             
         all_entries = entries_response.data
+
+        # 2.5 Get Claims for these races
+        claims_response = supabase.table('hranalyzer_claims')\
+            .select('race_id')\
+            .in_('race_id', race_ids)\
+            .execute()
+        
+        races_with_claims = set(c['race_id'] for c in claims_response.data)
 
         # 3. Process entries in memory
         # Map: race_id -> { count: 0, results: [] }
@@ -224,10 +232,12 @@ def get_todays_races():
             # Check for top 3 finish
             if entry.get('finish_position') in [1, 2, 3]:
                 horse_name = entry.get('hranalyzer_horses', {}).get('horse_name', 'Unknown')
+                trainer_name = entry.get('hranalyzer_trainers', {}).get('trainer_name', 'N/A')
                 race_stats[rid]['results'].append({
                     'position': entry['finish_position'],
                     'horse': horse_name,
-                    'number': entry.get('program_number')
+                    'number': entry.get('program_number'),
+                    'trainer': trainer_name
                 })
 
         # Sort results by position for each race
@@ -265,6 +275,8 @@ def get_todays_races():
                 'purse': race['purse'],
                 'entry_count': stats['count'],
                 'race_status': race['race_status'],
+                'race_status': race['race_status'],
+                'has_claims': race['id'] in races_with_claims,
                 'results': stats['results'], # Top 3 finishers
                 'id': race['id']
             })
@@ -453,7 +465,8 @@ def get_past_races():
             .select('''
                 *, 
                 track:hranalyzer_tracks(track_name, location), 
-                results:hranalyzer_race_entries(finish_position, program_number, horse:hranalyzer_horses(horse_name)),
+                results:hranalyzer_race_entries(finish_position, program_number, horse:hranalyzer_horses(horse_name), trainer:hranalyzer_trainers(trainer_name)),
+                claims:hranalyzer_claims(id),
                 all_entries:hranalyzer_race_entries(id)
             ''')\
             .lte('race_date', today)\
@@ -497,10 +510,12 @@ def get_past_races():
                 pos = r.get('finish_position')
                 if pos and pos in [1, 2, 3]:
                     horse_name = r.get('horse', {}).get('horse_name', 'Unknown')
+                    trainer_name = r.get('trainer', {}).get('trainer_name', 'N/A')
                     formatted_results.append({
                         'position': pos,
                         'horse': horse_name,
-                        'number': r.get('program_number')
+                        'number': r.get('program_number'),
+                        'trainer': trainer_name
                     })
                     if pos == 1:
                         winner_name = horse_name
@@ -520,6 +535,7 @@ def get_past_races():
                 'purse': race['purse'],
                 'entry_count': len(race.get('all_entries', [])),
                 'race_status': race['race_status'],
+                'has_claims': len(race.get('claims', [])) > 0,
                 'data_source': race['data_source'],
                 'id': race['id'],
                 'winner': winner_name,

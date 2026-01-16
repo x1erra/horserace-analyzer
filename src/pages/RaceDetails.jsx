@@ -1,9 +1,10 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
 export default function RaceDetails() {
     const { id } = useParams();
+    const navigate = useNavigate();
     const [raceData, setRaceData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -42,12 +43,30 @@ export default function RaceDetails() {
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
 
+    // Deduplicate entries by horse name and ensure valid data
+    const uniqueEntries = entries.reduce((acc, current) => {
+        const existingIndex = acc.findIndex(item => item.horse_name === current.horse_name);
+        if (existingIndex > -1) {
+            // Keep the one with more data (e.g., finish_position)
+            if (current.finish_position && !acc[existingIndex].finish_position) {
+                acc[existingIndex] = current;
+            }
+        } else {
+            acc.push(current);
+        }
+        return acc;
+    }, []);
+
     // Sort entries by finish position for completed races, program number for upcoming
-    const sortedEntries = [...entries].sort((a, b) => {
+    const sortedEntries = uniqueEntries.sort((a, b) => {
         if (isCompleted && a.finish_position && b.finish_position) {
             return a.finish_position - b.finish_position;
         }
-        return parseInt(a.program_number) - parseInt(b.program_number);
+        // Handle cases where finish_position might be null in a completed race (e.g. DNF) - push to bottom
+        if (isCompleted && a.finish_position && !b.finish_position) return -1;
+        if (isCompleted && !a.finish_position && b.finish_position) return 1;
+
+        return parseInt(a.program_number || 999) - parseInt(b.program_number || 999);
     });
 
     const raceConditions = [
@@ -70,59 +89,80 @@ export default function RaceDetails() {
 
     return (
         <div className="space-y-8">
-            <div className="flex justify-between items-center">
-                <h3 className="text-3xl font-bold text-white">
-                    Race {race.race_number} - {race.track_name}
-                </h3>
-                <span className={`px-4 py-2 rounded-md text-sm font-medium ${isCompleted
-                    ? 'bg-green-900/30 text-green-400'
-                    : isUpcoming
-                        ? 'bg-blue-900/30 text-blue-400'
-                        : 'bg-gray-900/30 text-gray-400'
-                    }`}>
-                    {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
-                </span>
+            <div className="flex flex-col gap-4">
+                <button
+                    onClick={() => navigate(-1)}
+                    className="self-start flex items-center gap-2 text-gray-400 hover:text-white transition group"
+                >
+                    <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Back to Track
+                </button>
+
+                <div className="flex justify-between items-center">
+                    <h3 className="text-3xl font-bold text-white">
+                        Race {race.race_number} - {race.track_name}
+                    </h3>
+                    <span className={`px-4 py-2 rounded-md text-sm font-medium ${isCompleted
+                        ? 'bg-green-900/30 text-green-400'
+                        : isUpcoming
+                            ? 'bg-blue-900/30 text-blue-400'
+                            : 'bg-gray-900/30 text-gray-400'
+                        }`}>
+                        {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
+                    </span>
+                </div>
+                <p className="text-sm text-gray-400">{race.race_date} • {race.post_time || 'TBD'}</p>
             </div>
 
-            <p className="text-sm text-gray-400 mb-4">{race.race_date} • {race.post_time || 'TBD'}</p>
-
-            {/* Race Conditions Table */}
-            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 overflow-hidden opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
-                <h4 className="text-xl font-semibold text-white mb-4">Race Summary</h4>
-                {race.conditions && (
-                    <p className="text-sm text-gray-400 mb-4 italic">{race.conditions}</p>
-                )}
-                <table className="w-full text-left text-gray-300">
-                    <tbody>
-                        {raceConditions.map((cond, index) => (
-                            <tr key={index} className="border-b border-purple-900/50 last:border-b-0">
-                                <td className="p-3 font-medium text-white">{cond.detail}</td>
-                                <td className="p-3 text-gray-300">{cond.value}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {race.equibase_chart_url && (
-                    <div className="mt-4">
-                        <a href={race.equibase_chart_url} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300 underline text-sm">
-                            View Official Chart (Equibase)
-                        </a>
+            {/* 1. Claims Section (First Priority) */}
+            {isCompleted && claims && claims.length > 0 && (
+                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
+                    <h4 className="text-xl font-semibold text-white mb-4">Claims</h4>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-gray-300">
+                            <thead className="bg-purple-900/50">
+                                <tr>
+                                    <th className="p-4">Horse</th>
+                                    <th className="p-4">New Trainer</th>
+                                    <th className="p-4">New Owner</th>
+                                    <th className="p-4 text-right">Price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {claims.map((claim, index) => (
+                                    <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition">
+                                        <td className="p-4 font-bold text-white">{claim.horse_name}</td>
+                                        <td className="p-4">{claim.new_trainer_name || 'N/A'}</td>
+                                        <td className="p-4">{claim.new_owner_name || 'N/A'}</td>
+                                        <td className="p-4 text-right text-green-400">
+                                            {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
-                )}
-                {race.equibase_pdf_url && (
-                    <div className="mt-2">
-                        <a href={race.equibase_pdf_url} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300 underline text-sm">
-                            View PDF Chart (Equibase)
-                        </a>
-                    </div>
-                )}
-            </div>
+                </div>
+            )}
 
-            {/* Horse Entries Table */}
+            {/* 2. Horse Entries / Results Table (Second Priority) */}
             <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 overflow-x-auto opacity-0 animate-fadeIn" style={{ animationDelay: '150ms' }}>
-                <h4 className="text-xl font-semibold text-white mb-4">
-                    {isUpcoming ? `Entries (${sortedEntries.length})` : `Results (${sortedEntries.length} entries)`}
-                </h4>
+                <div className="flex justify-between items-center mb-4">
+                    <h4 className="text-xl font-semibold text-white">
+                        {isUpcoming ? `Entries (${sortedEntries.length})` : `Results (${sortedEntries.length} entries)`}
+                    </h4>
+                    {race.equibase_pdf_url && (
+                        <a href={race.equibase_pdf_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-purple-400 hover:text-purple-300 hover:underline text-sm font-medium">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            Official Equibase PDF
+                        </a>
+                    )}
+                </div>
+
                 <table className="w-full text-left text-gray-300 min-w-max">
                     <thead className="bg-purple-900/50">
                         <tr>
@@ -179,78 +219,67 @@ export default function RaceDetails() {
                 )}
             </div>
 
-            {/* Exotic Payouts (only for completed races) */}
-            {isCompleted && exotic_payouts && exotic_payouts.length > 0 && (
-                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '200ms' }}>
-                    <h4 className="text-xl font-semibold text-white mb-4">Exotic Payouts</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {exotic_payouts.map((payout, index) => (
-                            <div key={index} className="bg-purple-900/10 p-4 rounded-lg border border-purple-900/50">
-                                <p className="text-purple-300 font-medium">{payout.wager_type}</p>
-                                <p className="text-gray-300 text-sm mt-1">{payout.winning_combination}</p>
-                                <p className="text-green-400 text-lg font-bold mt-2">${payout.payout}</p>
-                            </div>
+            {/* 3. Race Summary / Conditions (Third Priority) */}
+            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 overflow-hidden opacity-0 animate-fadeIn" style={{ animationDelay: '200ms' }}>
+                <h4 className="text-xl font-semibold text-white mb-4">Race Summary</h4>
+                {race.conditions && (
+                    <p className="text-sm text-gray-400 mb-4 italic">{race.conditions}</p>
+                )}
+                <table className="w-full text-left text-gray-300">
+                    <tbody>
+                        {raceConditions.map((cond, index) => (
+                            <tr key={index} className="border-b border-purple-900/50 last:border-b-0">
+                                <td className="p-3 font-medium text-white">{cond.detail}</td>
+                                <td className="p-3 text-gray-300">{cond.value}</td>
+                            </tr>
                         ))}
-                    </div>
-                </div>
-            )}
+                    </tbody>
+                </table>
+            </div>
 
-            {/* Claims (only for completed races) */}
-            {isCompleted && claims && claims.length > 0 && (
-                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '225ms' }}>
-                    <h4 className="text-xl font-semibold text-white mb-4">Claims</h4>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-gray-300">
-                            <thead className="bg-purple-900/50">
-                                <tr>
-                                    <th className="p-4">Horse</th>
-                                    <th className="p-4">New Trainer</th>
-                                    <th className="p-4">New Owner</th>
-                                    <th className="p-4 text-right">Price</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {claims.map((claim, index) => (
-                                    <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition">
-                                        <td className="p-4 font-bold text-white">{claim.horse_name}</td>
-                                        <td className="p-4">{claim.new_trainer_name || 'N/A'}</td>
-                                        <td className="p-4">{claim.new_owner_name || 'N/A'}</td>
-                                        <td className="p-4 text-right text-green-400">
-                                            {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+            {/* 4. Exotic Payouts and Technical Data */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {isCompleted && exotic_payouts && exotic_payouts.length > 0 && (
+                    <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '250ms' }}>
+                        <h4 className="text-xl font-semibold text-white mb-4">Exotic Payouts</h4>
+                        <div className="space-y-4">
+                            {exotic_payouts.map((payout, index) => (
+                                <div key={index} className="bg-purple-900/10 p-3 rounded-lg border border-purple-900/50 flex justify-between items-center">
+                                    <div>
+                                        <p className="text-purple-300 font-medium text-sm">{payout.wager_type}</p>
+                                        <p className="text-gray-300 text-xs">{payout.winning_combination}</p>
+                                    </div>
+                                    <p className="text-green-400 font-bold">${payout.payout}</p>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Technical Data */}
-            {(race.fractional_times || isUpcoming) && (
-                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '250ms' }}>
-                    <h4 className="text-xl font-semibold text-white mb-4">
-                        {isUpcoming ? 'Pre-Race Information' : 'Race Data'}
-                    </h4>
-                    <div className="space-y-4">
-                        {race.fractional_times && (
-                            <div className="p-4 bg-purple-900/10 rounded-lg border border-purple-900/50">
-                                <p className="text-purple-300 font-medium">Fractional Times:</p>
-                                <p className="text-gray-300 text-sm mt-1">{race.fractional_times}</p>
-                            </div>
-                        )}
-                        {isUpcoming && (
-                            <div className="p-4 bg-blue-900/10 rounded-lg border border-blue-900/50">
-                                <p className="text-blue-300 font-medium">Race Status:</p>
-                                <p className="text-gray-300 text-sm mt-1">
-                                    This race has not been run yet. Results will be available after the race completes
-                                    and is automatically crawled from Equibase.
-                                </p>
-                            </div>
-                        )}
+                {(race.fractional_times || isUpcoming) && (
+                    <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '275ms' }}>
+                        <h4 className="text-xl font-semibold text-white mb-4">
+                            {isUpcoming ? 'Pre-Race Information' : 'Technical Data'}
+                        </h4>
+                        <div className="space-y-4">
+                            {race.fractional_times && (
+                                <div className="p-4 bg-purple-900/10 rounded-lg border border-purple-900/50">
+                                    <p className="text-purple-300 font-medium text-sm">Fractional Times:</p>
+                                    <p className="text-gray-300 text-sm mt-1">{race.fractional_times}</p>
+                                </div>
+                            )}
+                            {isUpcoming && (
+                                <div className="p-4 bg-blue-900/10 rounded-lg border border-blue-900/50">
+                                    <p className="text-blue-300 font-medium text-sm">Race Status:</p>
+                                    <p className="text-gray-300 text-xs mt-1">
+                                        This race has not been run yet. Results will be available after the race completes.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 }

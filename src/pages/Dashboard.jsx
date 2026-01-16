@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RecentUploads from '../components/RecentUploads';
+import RaceCard from '../components/RaceCard';
 
 // Helper component for Countdown
 const Countdown = ({ targetIso, originalTime }) => {
@@ -301,12 +302,13 @@ export default function Dashboard() {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
                             {races.map((race, index) => (
-                                <div
+                                <Link
                                     key={race.race_key}
-                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 flex flex-col h-full"
+                                    to={`/race/${race.race_key}`}
+                                    className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl hover:border-purple-500 transition border border-purple-900/50 flex flex-col h-full group"
                                 >
                                     <div className="flex justify-between items-start mb-2">
-                                        <h4 className="text-xl font-bold text-white">
+                                        <h4 className="text-xl font-bold text-white group-hover:text-purple-400 transition">
                                             Race {race.race_number} - {race.track_name}
                                         </h4>
                                         {race.race_status && (
@@ -372,14 +374,10 @@ export default function Dashboard() {
                                             </div>
                                         )}
                                     </div>
-
-                                    <Link
-                                        to={`/race/${race.race_key}`}
-                                        className="w-full block bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-2 rounded-md transition text-center mt-auto shadow-[0_0_10px_rgba(147,51,234,0.2)]"
-                                    >
-                                        View Details
-                                    </Link>
-                                </div>
+                                    <div className="text-center mt-auto pt-2">
+                                        <span className="text-sm text-purple-500 font-medium group-hover:text-purple-300 transition">View Details →</span>
+                                    </div>
+                                </Link>
                             ))}
                         </div>
                     )}
