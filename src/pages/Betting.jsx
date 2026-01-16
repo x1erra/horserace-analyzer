@@ -2,6 +2,28 @@ import { useState, useEffect } from 'react';
 
 const API_BASE_URL = 'http://localhost:5001/api';
 
+// Simple Tooltip Component
+const Tooltip = ({ text, children }) => {
+    const [isVisible, setIsVisible] = useState(false);
+
+    return (
+        <div
+            className="relative inline-block"
+            onMouseEnter={() => setIsVisible(true)}
+            onMouseLeave={() => setIsVisible(false)}
+        >
+            {children}
+            {isVisible && (
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-3 bg-gray-900 text-xs text-gray-300 rounded shadow-xl border border-purple-500/30 z-50">
+                    {text}
+                    {/* Arrow */}
+                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-8 border-transparent border-t-gray-900"></div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export default function Betting() {
     const [tickets, setTickets] = useState([]);
     const [winRate, setWinRate] = useState(0);
@@ -11,12 +33,17 @@ export default function Betting() {
     const [loading, setLoading] = useState(false);
 
     // Form State
-    const [formData, setFormData] = useState({
-        horseNumber: '',
-        horseName: '',
-        betType: 'Win',
-        amount: 2.00
-    });
+    const [betType, setBetType] = useState('Win');
+    const [amount, setAmount] = useState(2.00);
+
+    // Single Selection
+    const [selectedHorseId, setSelectedHorseId] = useState('');
+
+    // Multi Selection (for Box)
+    const [selectedHorseIds, setSelectedHorseIds] = useState([]);
+
+    // Derived State
+    const isBoxBet = ['Exacta Box', 'Trifecta Box'].includes(betType);
 
     // Load bets and races on mount
     useEffect(() => {
@@ -29,26 +56,8 @@ export default function Betting() {
             const res = await fetch(`${API_BASE_URL}/bets`);
             const data = await res.json();
             if (data.bets) {
-                // Sort by Date Desc, Track Asc, Race Number Asc
-                const sortedBets = data.bets.sort((a, b) => {
-                    // 1. Date (created_at)
-                    const dateA = new Date(a.created_at);
-                    const dateB = new Date(b.created_at);
-                    if (dateA > dateB) return -1;
-                    if (dateA < dateB) return 1;
-
-                    // 2. Track
-                    const trackA = (a.hranalyzer_races?.track_code || '').toLowerCase();
-                    const trackB = (b.hranalyzer_races?.track_code || '').toLowerCase();
-                    if (trackA < trackB) return -1;
-                    if (trackA > trackB) return 1;
-
-                    // 3. Race Number
-                    const raceA = Number(a.hranalyzer_races?.race_number || 0);
-                    const raceB = Number(b.hranalyzer_races?.race_number || 0);
-                    return raceA - raceB;
-                });
-
+                // Sort by Date Desc
+                const sortedBets = data.bets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 setTickets(sortedBets);
                 updateWinRate(data.bets);
             }
@@ -59,7 +68,8 @@ export default function Betting() {
 
     const fetchRaces = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/todays-races`);
+            // Filter for UPCOMING races only
+            const res = await fetch(`${API_BASE_URL}/todays-races?status=Upcoming`);
             const data = await res.json();
             if (data.races) {
                 setRaces(data.races);
@@ -76,8 +86,9 @@ export default function Betting() {
             const res = await fetch(`${API_BASE_URL}/race-details/${raceKey}`);
             const data = await res.json();
             setRaceDetails(data);
-            // Reset horse selection when race changes
-            setFormData(prev => ({ ...prev, horseNumber: '', horseName: '' }));
+            // Reset selection
+            setSelectedHorseId('');
+            setSelectedHorseIds([]);
         } catch (error) {
             console.error('Error fetching race details:', error);
         } finally {
@@ -96,15 +107,31 @@ export default function Betting() {
         }
     };
 
-    const handleHorseSelect = (e) => {
-        const number = e.target.value;
-        const entry = raceDetails?.entries.find(ent => ent.program_number === number);
-        setFormData({
-            ...formData,
-            horseNumber: number,
-            horseName: entry ? entry.horse_name : ''
-        });
+    const toggleHorseSelection = (pgm) => {
+        if (selectedHorseIds.includes(pgm)) {
+            setSelectedHorseIds(selectedHorseIds.filter(id => id !== pgm));
+        } else {
+            setSelectedHorseIds([...selectedHorseIds, pgm]);
+        }
     };
+
+    // Cost Calculation Logic
+    const calculateCost = () => {
+        const n = selectedHorseIds.length;
+        if (betType === 'Exacta Box') {
+            // P(n,2) = n * (n-1)
+            return n * (n - 1) * amount;
+        } else if (betType === 'Trifecta Box') {
+            // P(n,3)
+            return n * (n - 1) * (n - 2) * amount;
+        }
+        return amount; // Single bet
+    };
+
+    const totalCost = calculateCost();
+    const isValid = isBoxBet
+        ? (betType === 'Exacta Box' ? selectedHorseIds.length >= 2 : selectedHorseIds.length >= 3)
+        : !!selectedHorseId;
 
     const updateWinRate = (bets) => {
         const resolved = bets.filter(ticket => ticket.status !== 'Pending');
@@ -115,25 +142,30 @@ export default function Betting() {
 
     const handleCreateTicket = async (e) => {
         e.preventDefault();
-        if (!selectedRaceId || !formData.horseNumber) return;
+        if (!selectedRaceId || !isValid) return;
+
+        // Prepare Payload
+        const payload = {
+            race_id: selectedRaceId,
+            bet_type: betType,
+            amount: amount,
+            horse_number: !isBoxBet ? selectedHorseId : null,
+            horse_name: !isBoxBet ? raceDetails?.entries.find(e => e.program_number === selectedHorseId)?.horse_name : null,
+            selection: isBoxBet ? selectedHorseIds : null
+        };
 
         try {
             const res = await fetch(`${API_BASE_URL}/bets`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    race_id: selectedRaceId,
-                    horse_number: formData.horseNumber,
-                    horse_name: formData.horseName,
-                    bet_type: formData.betType,
-                    amount: formData.amount
-                })
+                body: JSON.stringify(payload)
             });
 
             if (res.ok) {
-                fetchBets(); // Refresh list
-                // Reset form
-                setFormData({ ...formData, horseNumber: '', horseName: '' });
+                fetchBets();
+                // Reset form slightly
+                if (isBoxBet) setSelectedHorseIds([]);
+                else setSelectedHorseId('');
                 alert('Bet placed successfully!');
             } else {
                 alert('Failed to place bet');
@@ -144,6 +176,7 @@ export default function Betting() {
     };
 
     const handleResolveBets = async () => {
+        setLoading(true);
         try {
             const res = await fetch(`${API_BASE_URL}/bets/resolve`, { method: 'POST' });
             const data = await res.json();
@@ -155,6 +188,8 @@ export default function Betting() {
             }
         } catch (error) {
             console.error('Error resolving bets:', error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -164,13 +199,14 @@ export default function Betting() {
                 <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
                 <button
                     onClick={handleResolveBets}
-                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.2)]"
+                    disabled={loading}
+                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.2)] disabled:opacity-50"
                 >
-                    Check for Results / Resolve Bets
+                    {loading ? 'Processing...' : 'Check for Results / Resolve Bets'}
                 </button>
             </div>
 
-            <p className="text-sm text-gray-400 mb-4">Place virtual bets on uploaded races and track your performance.</p>
+            <p className="text-sm text-gray-400 mb-4">Place virtual bets on upcoming races. Races will disappear from selection once they start.</p>
 
             {/* Win Rate Stat */}
             <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50">
@@ -180,77 +216,144 @@ export default function Betting() {
             </div>
 
             {/* Form to Create Ticket */}
-            <form onSubmit={handleCreateTicket} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-4">
-                <h4 className="text-xl font-bold text-white mb-4">Place New Bet</h4>
+            <form onSubmit={handleCreateTicket} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-6">
+                <h4 className="text-xl font-bold text-white mb-4 border-b border-gray-800 pb-2">Place New Bet</h4>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Race Selector */}
-                    <div>
-                        <label className="block text-gray-400 text-sm mb-1">Select Race</label>
-                        <select
-                            value={selectedRaceId}
-                            onChange={handleRaceSelect}
-                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                            required
-                        >
-                            <option value="">-- Select a Race --</option>
-                            {races.map(race => (
-                                <option key={race.id} value={race.id}>
-                                    {race.track_code} Race {race.race_number} ({race.race_status})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {/* Horse Selector */}
-                    <div>
-                        <label className="block text-gray-400 text-sm mb-1">Select Horse</label>
-                        <select
-                            value={formData.horseNumber}
-                            onChange={handleHorseSelect}
-                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                            disabled={!raceDetails}
-                            required
-                        >
-                            <option value="">-- Select Horse --</option>
-                            {raceDetails?.entries.map(entry => (
-                                <option key={entry.program_number} value={entry.program_number}>
-                                    #{entry.program_number} - {entry.horse_name} ({entry.morning_line_odds})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                {/* Race Selection */}
+                <div>
+                    <label className="block text-gray-400 text-sm mb-1">Select Race (Today's Upcoming)</label>
+                    <select
+                        value={selectedRaceId}
+                        onChange={handleRaceSelect}
+                        className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                        required
+                    >
+                        <option value="">-- Select a Race --</option>
+                        {races.map(race => (
+                            <option key={race.id} value={race.id}>
+                                {race.track_code} Race {race.race_number} - Post: {race.post_time}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
+                {/* Bet Type & Amount */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-gray-400 text-sm mb-1">Bet Type</label>
                         <select
-                            value={formData.betType}
-                            onChange={(e) => setFormData({ ...formData, betType: e.target.value })}
+                            value={betType}
+                            onChange={(e) => setBetType(e.target.value)}
                             className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
                         >
-                            <option>Win</option>
-                            <option>Place</option>
-                            <option>Show</option>
-                            {/* <option>Exacta</option> */}
-                            {/* <option>Trifecta</option> */}
+                            <option value="Win">Win</option>
+                            <option value="Place">Place</option>
+                            <option value="Show">Show</option>
+                            <option value="Exacta Box">Exacta Box</option>
+                            <option value="Trifecta Box">Trifecta Box</option>
                         </select>
                     </div>
                     <div>
-                        <label className="block text-gray-400 text-sm mb-1">Amount ($)</label>
+                        <label className="block text-gray-400 text-sm mb-1">Unit Amount ($)</label>
                         <input
                             type="number"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
                             className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                            min="2"
+                            min="1"
                             step="1"
                         />
                     </div>
                 </div>
 
-                <button type="submit" className="w-full bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-3 rounded-md transition duration-200 font-medium shadow-[0_0_15px_rgba(147,51,234,0.3)]">
+                {/* Horse Selection Area */}
+                <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-800">
+                    <label className="block text-gray-300 font-bold mb-3">
+                        {isBoxBet
+                            ? `Select Horses for ${betType} (Select multiple)`
+                            : "Select Horse to Win/Place/Show"
+                        }
+                    </label>
+
+                    {!raceDetails ? (
+                        <p className="text-gray-500 italic text-sm">Select a race to view horses.</p>
+                    ) : isBoxBet ? (
+                        // Multi-Select Grid
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                            {raceDetails.entries.map(entry => {
+                                const isSelected = selectedHorseIds.includes(entry.program_number);
+                                return (
+                                    <div
+                                        key={entry.program_number}
+                                        onClick={() => toggleHorseSelection(entry.program_number)}
+                                        className={`
+                                            cursor-pointer p-2 rounded border flex items-center gap-2 transition select-none
+                                            ${isSelected
+                                                ? 'bg-purple-900/50 border-purple-500 text-white'
+                                                : 'bg-black border-gray-700 text-gray-400 hover:bg-gray-800'}
+                                        `}
+                                    >
+                                        <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-gray-500'}`}>
+                                            {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                        </div>
+                                        <span className="font-mono font-bold">#{entry.program_number}</span>
+                                        <span className="truncate text-xs">{entry.horse_name}</span>
+                                        <span className="ml-auto text-xs text-gray-500">{entry.morning_line_odds}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        // Single Select Dropdown
+                        <select
+                            value={selectedHorseId}
+                            onChange={(e) => setSelectedHorseId(e.target.value)}
+                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                            required
+                        >
+                            <option value="">-- Select Horse --</option>
+                            {raceDetails.entries.map(entry => (
+                                <option key={entry.program_number} value={entry.program_number}>
+                                    #{entry.program_number} - {entry.horse_name} ({entry.morning_line_odds})
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                </div>
+
+                {/* Total Cost Display */}
+                <div className="flex justify-between items-center bg-purple-900/20 p-4 rounded-lg border border-purple-900/50">
+                    <div className="flex items-center gap-2">
+                        <span className="text-gray-400 text-sm uppercase tracking-wide">Total Cost</span>
+                        <Tooltip text={
+                            betType === 'Exacta Box'
+                                ? "Exacta Box covers all 1st & 2nd place permutations. Cost = (Horses × (Horses - 1)) × Unit Amount."
+                                : betType === 'Trifecta Box'
+                                    ? "Trifecta Box covers all 1st, 2nd & 3rd place permutations. Cost = (Horses × (Horses - 1) × (Horses - 2)) × Unit Amount."
+                                    : "Standard bet cost is simply the Unit Amount."
+                        }>
+                            <svg className="w-4 h-4 text-purple-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </Tooltip>
+                    </div>
+                    <div className="text-right">
+                        <span className={`text-2xl font-bold ${totalCost > 0 ? 'text-white' : 'text-gray-600'}`}>
+                            ${totalCost.toFixed(2)}
+                        </span>
+                        {isBoxBet && selectedHorseIds.length > 0 && (
+                            <p className="text-xs text-gray-400">
+                                {selectedHorseIds.length} horses · {Math.round(totalCost / amount)} combinations
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <button
+                    type="submit"
+                    disabled={!isValid || !selectedRaceId}
+                    className="w-full bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-3 rounded-md transition duration-200 font-medium shadow-[0_0_15px_rgba(147,51,234,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                     Place Bet
                 </button>
             </form>
@@ -262,28 +365,42 @@ export default function Betting() {
                         <tr>
                             <th className="p-4">Date</th>
                             <th className="p-4">Track/Race</th>
-                            <th className="p-4">Horse</th>
-                            <th className="p-4">Bet</th>
+                            <th className="p-4">Selection</th>
+                            <th className="p-4">Bet Type</th>
+                            <th className="p-4">Cost</th>
                             <th className="p-4">Status</th>
-                            <th className="p-4">Payout</th>
+                            <th className="p-4 text-right">Payout</th>
                         </tr>
                     </thead>
                     <tbody>
                         {tickets.length === 0 ? (
                             <tr>
-                                <td colSpan="6" className="p-4 text-center text-gray-400">No tickets found.</td>
+                                <td colSpan="7" className="p-4 text-center text-gray-400">No tickets found.</td>
                             </tr>
                         ) : (
                             tickets.map((ticket, index) => (
                                 <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200">
-                                    <td className="p-4">{new Date(ticket.created_at).toLocaleDateString()}</td>
+                                    <td className="p-4 text-sm text-gray-500">{new Date(ticket.created_at).toLocaleDateString()}</td>
                                     <td className="p-4">
                                         {ticket.hranalyzer_races ? (
-                                            `${ticket.hranalyzer_races.track_code} Race ${ticket.hranalyzer_races.race_number}`
+                                            <span className="font-medium text-white">
+                                                {ticket.hranalyzer_races.track_code} R{ticket.hranalyzer_races.race_number}
+                                            </span>
                                         ) : 'Unknown'}
                                     </td>
-                                    <td className="p-4">#{ticket.horse_number} {ticket.horse_name}</td>
-                                    <td className="p-4">${ticket.bet_amount} {ticket.bet_type}</td>
+                                    <td className="p-4">
+                                        {ticket.selection ? (
+                                            <div className="flex flex-wrap gap-1">
+                                                {ticket.selection.map(num => (
+                                                    <span key={num} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">#{num}</span>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-purple-300 font-mono">#{ticket.horse_number} {ticket.horse_name}</span>
+                                        )}
+                                    </td>
+                                    <td className="p-4 text-sm">{ticket.bet_type}</td>
+                                    <td className="p-4 text-sm">${ticket.bet_cost || ticket.bet_amount}</td>
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
                                             ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
@@ -292,7 +409,7 @@ export default function Betting() {
                                             {ticket.status}
                                         </span>
                                     </td>
-                                    <td className="p-4 text-green-400 font-bold">
+                                    <td className="p-4 text-right text-green-400 font-bold">
                                         {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
                                     </td>
                                 </tr>

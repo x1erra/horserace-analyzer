@@ -729,11 +729,29 @@ def place_bet():
     try:
         data = request.get_json()
         race_id = data.get('race_id')
-        horse_number = data.get('horse_number')
-        horse_name = data.get('horse_name')
+        # Support both single horse and multi-horse selection
+        horse_number = data.get('horse_number') # Single string or None
+        horse_name = data.get('horse_name')     # Single string or None
+        selection = data.get('selection')       # List of horse numbers for Box bets
+        
         bet_type = data.get('bet_type', 'Win')
-        amount = data.get('amount', 2.00)
-
+        amount = float(data.get('amount', 2.00)) # Base Unit Amount
+        
+        # Calculate Cost
+        cost = amount
+        if bet_type in ['Exacta Box', 'Trifecta Box'] and selection:
+            import math
+            n = len(selection)
+            if bet_type == 'Exacta Box':
+                # P(n, 2) = n * (n-1)
+                count = n * (n - 1)
+            elif bet_type == 'Trifecta Box':
+                 # P(n, 3) = n * (n-1) * (n-2)
+                count = n * (n - 1) * (n - 2)
+            else:
+                count = 1
+            cost = amount * count
+        
         if not race_id or not bet_type:
             return jsonify({'error': 'Missing required fields'}), 400
 
@@ -749,8 +767,10 @@ def place_bet():
             'race_id': race_id,
             'horse_number': horse_number,
             'horse_name': horse_name,
+            'selection': selection,
             'bet_type': bet_type,
             'bet_amount': amount,
+            'bet_cost': cost,
             'status': 'Pending'
         }
         
@@ -790,7 +810,7 @@ def get_bets():
 def resolve_bets():
     """
     Check pending bets against completed races and resolve them.
-    Can be triggered manually or by crawler.
+    Supports Win, Place, Show, Exacta Box, Trifecta Box.
     """
     try:
         supabase = get_supabase_client()
@@ -811,52 +831,94 @@ def resolve_bets():
                 
             # Race is completed! Check results.
             race_id = bet['race_id']
-            horse_number = bet['horse_number']
             bet_type = bet['bet_type']
+            unit_amount = float(bet['bet_amount'])
             
             # Fetch entries for this race to find the winner/payouts
-            entries = supabase.table('hranalyzer_race_entries')\
+            entries_resp = supabase.table('hranalyzer_race_entries')\
                 .select('*')\
                 .eq('race_id', race_id)\
                 .execute()
-                
-            # Find the horse we bet on
-            my_horse = next((e for e in entries.data if e['program_number'] == horse_number), None)
+            entries = entries_resp.data
             
-            if not my_horse:
-                # Scratched or not found?
-                # Check scratches
-                # For now mark as Loss if not found, or maybe 'Void' if scratched logic strictly implemented
-                # Simple logic: Loss
-                new_status = 'Loss'
-                payout = 0
-            elif my_horse.get('scratched'):
-                new_status = 'Scratched' # Refund usually
-                payout = 0 # Or refund amount?
-            else:
-                new_status = 'Loss'
-                payout = 0
+            # Sort winners by position
+            finishers = sorted([e for e in entries if e.get('finish_position')], key=lambda x: x['finish_position'])
+            
+            new_status = 'Loss'
+            payout = 0.0
+            
+            # --- RESOLUTION LOGIC ---
+            
+            if bet_type in ['Win', 'Place', 'Show']:
+                horse_number = bet['horse_number']
+                my_horse = next((e for e in entries if e['program_number'] == horse_number), None)
                 
-                if bet_type == 'Win':
-                    if my_horse.get('finish_position') == 1:
-                        new_status = 'Win'
-                        payout = my_horse.get('win_payout', 0) or 0
-                elif bet_type == 'Place':
-                    if my_horse.get('finish_position') in [1, 2]:
-                        new_status = 'Win'
-                        payout = my_horse.get('place_payout', 0) or 0
-                elif bet_type == 'Show':
-                    if my_horse.get('finish_position') in [1, 2, 3]:
-                        new_status = 'Win'
-                        payout = my_horse.get('show_payout', 0) or 0
+                if not my_horse:
+                    new_status = 'Loss' # Or Void?
+                elif my_horse.get('scratched'):
+                    new_status = 'Scratched' # Refund
+                else:
+                    pos = my_horse.get('finish_position')
+                    if not pos:
+                         new_status = 'Loss'
+                    else:
+                        if bet_type == 'Win' and pos == 1:
+                            new_status = 'Win'
+                            base_payout = my_horse.get('win_payout') or 0
+                            payout = (float(base_payout) / 2.0) * unit_amount
+                            
+                        elif bet_type == 'Place' and pos <= 2:
+                            new_status = 'Win'
+                            base_payout = my_horse.get('place_payout') or 0
+                            payout = (float(base_payout) / 2.0) * unit_amount
+                            
+                        elif bet_type == 'Show' and pos <= 3:
+                            new_status = 'Win'
+                            base_payout = my_horse.get('show_payout') or 0
+                            payout = (float(base_payout) / 2.0) * unit_amount
+                            
+            elif bet_type in ['Exacta Box', 'Trifecta Box']:
+                selection = bet.get('selection', [])
+                if not selection:
+                    new_status = 'Loss'
+                else:
+                    # Get correct finishers numbers
+                    # Need at least 2 finishers for Exacta, 3 for Trifecta
+                    if len(finishers) < 2:
+                        continue # Can't resolve yet?
                         
-                # Handle multiplier (payouts are usually for $2 bet)
-                if new_status == 'Win':
-                    # Basic payout is for $2. If bet_amount is different, scale it.
-                    # Payout from Equibase is usually for a $2 wager.
-                    ratio = float(bet['bet_amount']) / 2.0
-                    payout = float(payout) * ratio
-            
+                    first_num = finishers[0]['program_number']
+                    second_num = finishers[1]['program_number']
+                    third_num = finishers[2]['program_number'] if len(finishers) >= 3 else None
+                    
+                    is_win = False
+                    wager_label = 'Exacta' if bet_type == 'Exacta Box' else 'Trifecta'
+                    
+                    if bet_type == 'Exacta Box':
+                        # Check if 1st and 2nd are in selection
+                        if first_num in selection and second_num in selection:
+                            is_win = True
+                            
+                    elif bet_type == 'Trifecta Box':
+                         if third_num and first_num in selection and second_num in selection and third_num in selection:
+                             is_win = True
+                             
+                    if is_win:
+                        new_status = 'Win'
+                        # Get Payout from exotic_payouts table
+                        exotics = supabase.table('hranalyzer_exotic_payouts')\
+                            .select('*')\
+                            .eq('race_id', race_id)\
+                            .ilike('wager_type', f'%{wager_label}%')\
+                            .execute()
+                        
+                        if exotics.data:
+                            # Use the first one found
+                            base_payout = exotics.data[0]['payout']
+                            payout = (float(base_payout) / 2.0) * unit_amount 
+                        else:
+                            payout = 0 
+                            
             # Update bet
             update_data = {
                 'status': new_status,
