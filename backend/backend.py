@@ -231,8 +231,8 @@ def get_todays_races():
             
             # Check for top 3 finish
             if entry.get('finish_position') in [1, 2, 3]:
-                horse_name = entry.get('hranalyzer_horses', {}).get('horse_name', 'Unknown')
-                trainer_name = entry.get('hranalyzer_trainers', {}).get('trainer_name', 'N/A')
+                horse_name = (entry.get('hranalyzer_horses') or {}).get('horse_name', 'Unknown')
+                trainer_name = (entry.get('hranalyzer_trainers') or {}).get('trainer_name', 'N/A')
                 race_stats[rid]['results'].append({
                     'position': entry['finish_position'],
                     'horse': horse_name,
@@ -246,7 +246,7 @@ def get_todays_races():
 
         races = []
         for race in raw_races:
-            track_name = race.get('hranalyzer_tracks', {}).get('track_name', race['track_code'])
+            track_name = (race.get('hranalyzer_tracks') or {}).get('track_name', race['track_code'])
             
             # Filter logic
             if track_filter and track_filter != 'All':
@@ -325,7 +325,7 @@ def get_filter_options():
         unique_tracks = {}
         for r in tracks_response.data:
             code = r['track_code']
-            name = r.get('hranalyzer_tracks', {}).get('track_name', code)
+            name = (r.get('hranalyzer_tracks') or {}).get('track_name', code)
             unique_tracks[name] = code 
         
         sorted_tracks = []
@@ -348,7 +348,7 @@ def get_filter_options():
         now_utc = datetime.now(pytz.utc)
         
         for r in today_response.data:
-            name = r.get('hranalyzer_tracks', {}).get('track_name', r['track_code'])
+            name = (r.get('hranalyzer_tracks') or {}).get('track_name', r['track_code'])
             if name not in summary_map:
                 summary_map[name] = {
                     'track_name': name,
@@ -509,8 +509,8 @@ def get_past_races():
             for r in results_data:
                 pos = r.get('finish_position')
                 if pos and pos in [1, 2, 3]:
-                    horse_name = r.get('horse', {}).get('horse_name', 'Unknown')
-                    trainer_name = r.get('trainer', {}).get('trainer_name', 'N/A')
+                    horse_name = (r.get('horse') or {}).get('horse_name', 'Unknown')
+                    trainer_name = (r.get('trainer') or {}).get('trainer_name', 'N/A')
                     formatted_results.append({
                         'position': pos,
                         'horse': horse_name,
@@ -525,7 +525,7 @@ def get_past_races():
             races.append({
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
-                'track_name': race.get('track', {}).get('track_name', race['track_code']),
+                'track_name': (race.get('track') or {}).get('track_name', race['track_code']),
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': race['post_time'],
@@ -644,8 +644,8 @@ def get_race_details(race_key):
             'race': {
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
-                'track_name': race.get('hranalyzer_tracks', {}).get('track_name', race['track_code']),
-                'location': race.get('hranalyzer_tracks', {}).get('location'),
+                'track_name': (race.get('hranalyzer_tracks') or {}).get('track_name', race['track_code']),
+                'location': (race.get('hranalyzer_tracks') or {}).get('location'),
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': race['post_time'],
