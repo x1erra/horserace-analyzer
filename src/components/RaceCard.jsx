@@ -24,7 +24,7 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                     )}
                     {/* Claims Tag */}
                     {race.has_claims && (
-                        <span className="text-xs px-2 py-1 rounded text-center min-w-[70px] bg-purple-900/30 text-purple-400 border border-purple-500/30">
+                        <span className="text-xs px-2 py-1 rounded text-center min-w-[70px] bg-purple-900/30 text-purple-400">
                             Claims
                         </span>
                     )}
