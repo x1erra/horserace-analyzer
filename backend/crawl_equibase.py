@@ -365,6 +365,12 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
                 'show_payout': None
             }
             
+            # Check for scratched indications in the row
+            row_str = " ".join([str(c) for c in row if c]).lower()
+            if "scratched" in row_str or "scr" in row_str.split():
+                 logger.info(f"Skipping scratched horse in table: {horse_data['horse_name']}")
+                 continue
+            
             # Helper to merge WPS if available
             # Note: We can't access race_data here directly easily unless we pass it or pass payouts map
             # TODO: We need to refactor parse_horse_table signature or do the merge later.
@@ -699,27 +705,34 @@ def parse_scratched_horses(text: str) -> List[str]:
     Example: Scratched Horse(s): Horse Name (Reason)
     """
     scratches = []
-    # Regex: Scratched Horse(s):\s*(.*?)(?:\s+Trainers:|\s+Footnotes|$)
-    # Regex: Scratched Horse(s):\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|\s+Total\s*WPS|\s+Pgm\s+Horse|\s+Claiming\s*Prices|$)
-    match = re.search(r'Scratched\s*Horse\(s\)\s*:\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|\s+Total\s*WPS|\s+Pgm\s+Horse|\s+Claiming\s*Prices|$)', text, re.IGNORECASE | re.DOTALL)
+    # Expanded stop tokens to prevent runaway captures
+    stop_pattern = r'(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|\s+Total\s*WPS|\s+Pgm\s+Horse|\s+Claiming\s*Prices|\s+Mutuel\s+Prices|\s+Winner:|\s+Final\s+Time|$)'
+    
+    match = re.search(r'Scratched\s*Horse\(s\)\s*:\s*(.*?)' + stop_pattern, text, re.IGNORECASE | re.DOTALL)
     
     if match:
         content = match.group(1).replace('\n', ' ').strip()
-        # Split by comma or semicolon
-        # Example: "Horse A (Trainer); Horse B (Vet)"
-        # Sometimes just commas. "Horse A (Re-entered), Horse B (Trainer)"
         
-        # Split by closing parenthesis + comma/semicolon, or just comma
-        # Splitting by comma is risky if names have commas (rare)
-        # Assuming comma separator
+        # Split by semicolon or comma
         parts = re.split(r'[;,]\s*', content)
         
         for part in parts:
             part = part.strip()
             if not part: continue
             
-            # Remove reason in parens "(Trainer)"
+            # Remove reason in parens "(Trainer)" and other noise
             name = re.sub(r'\s*\(.*?\)', '', part).strip()
+            
+            # Filter matches
+            # 1. Must rename valid after normalization
+            norm = normalize_name(name)
+            if not norm or len(norm) < 3:
+                continue
+                
+            # 2. Heuristic: Name shouldn't be too long (unlikely > 30 chars for a horse name)
+            if len(name) > 35:
+                continue
+
             if name:
                 scratches.append(name)
                 
@@ -1178,24 +1191,42 @@ def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
         if not entries.data:
             return
 
-        # 2. Match names
+        # 2. Match names with STRICTER logic
         for name in scratched_names:
             norm_scratch = normalize_name(name)
+            
+            # Guard: If scratch name normalizes to empty/short string, SKIP IT.
+            # This prevents "..." matching everyone.
+            if len(norm_scratch) < 3:
+                logger.warning(f"Skipping ambiguous scratch name: '{name}' (norm: '{norm_scratch}')")
+                continue
             
             for entry in entries.data:
                 h_name = entry['hranalyzer_horses']['horse_name']
                 norm_h = normalize_name(h_name)
                 
-                # Check match
-                if norm_scratch in norm_h or norm_h in norm_scratch: 
+                match_found = False
+                
+                # 1. Exact Match (Best)
+                if norm_scratch == norm_h:
+                    match_found = True
+                    
+                # 2. One-way containment (Scratch is substring of Horse)
+                # Only if scratch name is long enough to be unique
+                elif len(norm_scratch) >= 4 and norm_scratch in norm_h:
+                    match_found = True
+                    
+                # removed reverse containment (norm_h in norm_scratch) to prevent "Secretariat" matching "Secretariat's Son"
+                
+                if match_found:
                     # Set scratched=True
-                    # We can update by ID directly
                     supabase.table('hranalyzer_race_entries')\
                         .update({'scratched': True, 'finish_position': None})\
                         .eq('id', entry['id'])\
                         .execute()
                     
-                    logger.info(f"Marked {h_name} as scratched")
+                    logger.info(f"Marked {h_name} as scratched (matched '{name}')")
+                    # Don't break here, in case multiple entries match? No, usually one horse per name.
                     break
                     
     except Exception as e:
@@ -1244,7 +1275,6 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
                 race_key = f"{track_code}-{target_date.strftime('%Y%m%d')}-{race_num}"
                 existing = supabase.table('hranalyzer_races').select('id, race_status').eq('race_key', race_key).execute()
                 
-                if existing.data and len(existing.data) > 0:
                 if existing.data and len(existing.data) > 0:
                     race_record = existing.data[0]
                     status = race_record['race_status']
