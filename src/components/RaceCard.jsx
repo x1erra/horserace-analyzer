@@ -52,10 +52,13 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                             ? 'bg-green-900/30 text-green-400'
                             : race.race_status === 'upcoming'
                                 ? 'bg-blue-900/30 text-blue-400'
-                                : 'bg-gray-900/30 text-gray-400'
+                                : race.race_status === 'cancelled'
+                                    ? 'bg-red-900/50 text-red-500 font-bold border border-red-900'
+                                    : 'bg-gray-900/30 text-gray-400'
                             }`}>
                             {race.race_status === 'completed' ? 'Complete' :
-                                race.race_status === 'upcoming' ? 'Upcoming' : 'Past'}
+                                race.race_status === 'upcoming' ? 'Upcoming' :
+                                    race.race_status === 'cancelled' ? 'CANCELLED' : 'Past'}
                         </span>
                     )}
                     {/* Claims Tag */}

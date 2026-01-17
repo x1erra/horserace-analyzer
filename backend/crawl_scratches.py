@@ -112,6 +112,8 @@ def determine_change_type(description):
         return 'Weight Change'
     elif 'blinker' in desc_lower or 'equipment' in desc_lower:
         return 'Equipment Change'
+    elif 'cancel' in desc_lower:
+        return 'Race Cancelled'
     
     return 'Other'
 
@@ -201,6 +203,25 @@ def parse_track_changes(html, track_code):
                 'change_type': change_type,
                 'description': change_desc
             })
+
+    # Also check for whole race cancellation messages in the table or headers if possible
+    # Some pages might have a row like "Race 5 Cancelled"
+    # We rely on determine_change_type mostly, but let's check header too
+    all_headers = target_table.find_all('th', class_='race')
+    for h in all_headers:
+        txt = h.get_text(strip=True)
+        if 'cancel' in txt.lower():
+            # Extract race number
+            m = re.search(r'Race:?\s*(\d+)', txt, re.IGNORECASE)
+            if m:
+                r_num = int(m.group(1))
+                changes.append({
+                    'race_number': r_num,
+                    'program_number': None,
+                    'horse_name': "",
+                    'change_type': 'Race Cancelled',
+                    'description': txt
+                })
             
     return changes
 
@@ -285,8 +306,6 @@ def update_changes_in_db(track_code, race_date, change_list):
 
             # 4. If Scratch, also update existing `scratches` boolean for backward compat
             if item['change_type'] == 'Scratch' and entry_id:
-                # Only update if not already scratched to avoid redundancy?
-                # Actually, idempotent update is fine.
                 supabase.table('hranalyzer_race_entries')\
                     .update({'scratched': True})\
                     .eq('id', entry_id)\
@@ -295,9 +314,16 @@ def update_changes_in_db(track_code, race_date, change_list):
                 start_sym = "✂️"
                 logger.info(f"{start_sym} MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
                 scratches_marked += 1
+            elif item['change_type'] == 'Race Cancelled':
+                # Update Race Status
+                supabase.table('hranalyzer_races')\
+                    .update({'race_status': 'cancelled'})\
+                    .eq('id', race_id)\
+                    .execute()
+                logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
             elif item['change_type'] == 'Jockey Change':
                 logger.info(f"🏇 JOCKEY CHANGE: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
-                
+            
         except Exception as e:
             logger.error(f"Error processing change {item}: {e}")
             

@@ -90,6 +90,7 @@ export default function RaceDetails() {
     const { race, entries, exotic_payouts, claims, navigation } = raceData;
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
+    const isCancelled = race.race_status === 'cancelled';
 
     // Deduplicate entries by horse name and ensure valid data
     const uniqueEntries = entries.reduce((acc, current) => {
@@ -244,12 +245,22 @@ export default function RaceDetails() {
                         ? 'bg-green-900/30 text-green-400 border border-green-900/50'
                         : isUpcoming
                             ? 'bg-blue-900/30 text-blue-400 border border-blue-900/50'
-                            : 'bg-gray-900/30 text-gray-400 border border-gray-800'
+                            : isCancelled
+                                ? 'bg-red-900/30 text-red-500 border border-red-900/50 font-bold animate-pulse'
+                                : 'bg-gray-900/30 text-gray-400 border border-gray-800'
                         }`}>
-                        {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
+                        {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : isCancelled ? 'CANCELLED' : race.race_status}
                     </span>
                 </div>
             </div>
+
+            {/* Cancelled Banner */}
+            {isCancelled && (
+                <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-6 text-center animate-fadeIn">
+                    <h2 className="text-3xl font-bold text-red-500 mb-2">RACE CANCELLED</h2>
+                    <p className="text-gray-300">This race has been cancelled due to weather or track conditions.</p>
+                </div>
+            )}
 
             {/* 1. Claims Section */}
             {isCompleted && claims && claims.length > 0 && (

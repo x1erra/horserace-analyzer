@@ -169,17 +169,18 @@ export default function Betting() {
 
     // Cost Calculation Logic
     const calculateCost = () => {
+        const numericAmount = parseFloat(amount) || 0;
         const n = selectedHorseIds.length;
         if (betType === 'Exacta Box') {
             // P(n,2) = n * (n-1)
-            return n * (n - 1) * amount;
+            return n * (n - 1) * numericAmount;
         } else if (betType === 'Trifecta Box') {
             // P(n,3)
-            return n * (n - 1) * (n - 2) * amount;
+            return n * (n - 1) * (n - 2) * numericAmount;
         } else if (betType === 'Win Place Show') {
-            return amount * 3;
+            return numericAmount * 3;
         } else if (betType === 'Win Place' || betType === 'Place Show') {
-            return amount * 2;
+            return numericAmount * 2;
         } else if (isKeyBet) {
             // Recursive combination counter for Key bets
             const countCombs = (depth, currentPath) => {
@@ -199,9 +200,9 @@ export default function Betting() {
 
             // If pos 1 is empty, 0 combinations
             if (!posSelections[1] || !Array.isArray(posSelections[1]) || posSelections[1].length === 0) return 0;
-            return countCombs(1, []) * amount;
+            return countCombs(1, []) * numericAmount;
         }
-        return amount; // Single bet
+        return numericAmount; // Single bet
     };
 
     const totalCost = calculateCost();
@@ -257,7 +258,7 @@ export default function Betting() {
         const payload = {
             race_id: selectedRaceId,
             bet_type: betType,
-            amount: amount,
+            amount: parseFloat(amount),
             horse_number: !isBoxBet && !isKeyBet ? selectedHorseId : null,
             horse_name: !isBoxBet && !isKeyBet ? raceDetails?.entries.find(e => e.program_number === selectedHorseId)?.horse_name : null,
             selection: selectionData
