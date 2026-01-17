@@ -51,6 +51,28 @@ def health_check():
         }), 500
 
 
+@app.route('/api/crawl-changes', methods=['POST'])
+def trigger_crawl_changes():
+    """
+    Trigger the late changes crawler to fetch scratches, jockey changes, etc.
+    Can be called via: curl -X POST http://localhost:5001/api/crawl-changes
+    """
+    try:
+        from crawl_scratches import crawl_late_changes
+        count = crawl_late_changes()
+        return jsonify({
+            'success': True,
+            'message': f'Crawled changes successfully',
+            'changes_processed': count
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/upload-drf', methods=['POST'])
 def upload_drf():
     """
