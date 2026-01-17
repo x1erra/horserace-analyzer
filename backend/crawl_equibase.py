@@ -1242,22 +1242,37 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
             try:
                 # Check if race is already completed in DB to avoid re-downloading
                 race_key = f"{track_code}-{target_date.strftime('%Y%m%d')}-{race_num}"
-                existing = supabase.table('hranalyzer_races').select('race_status').eq('race_key', race_key).execute()
+                existing = supabase.table('hranalyzer_races').select('id, race_status').eq('race_key', race_key).execute()
                 
                 if existing.data and len(existing.data) > 0:
-                    status = existing.data[0]['race_status']
+                if existing.data and len(existing.data) > 0:
+                    race_record = existing.data[0]
+                    status = race_record['race_status']
+                    
                     if status == 'completed':
-                        logger.info(f"Skipping {race_key} (Already Completed)")
-                        race_num += 1
-                        # If we found it in DB, we count it as "found" essentially, but maybe not for stats?
-                        # Actually if we skip it, we might stop the loop if we rely on "race_data" being found?
-                        # No, we just continue to next race. 
-                        # BUT: if race 1 is completed, race 2 might not be.
-                        # However, if race 1 is NOT found, we break.
-                        # So we must NOT break here.
-                        # We must mark track_had_races = True if we found a completed race too.
-                        track_had_races = True
-                        continue
+                        # Verify it has a winner (entry with finish_position=1)
+                        has_winner = False
+                        try:
+                            # Check for at least one entry with finish_position=1
+                            w_check = supabase.table('hranalyzer_race_entries')\
+                                .select('id')\
+                                .eq('race_id', race_record['id'])\
+                                .eq('finish_position', 1)\
+                                .limit(1)\
+                                .execute()
+                            if w_check.data:
+                                has_winner = True
+                        except Exception as e:
+                            logger.debug(f"Error checking winner for {race_key}: {e}")
+                            
+                        if has_winner:
+                            logger.info(f"Skipping {race_key} (Already Completed & Verified)")
+                            race_num += 1
+                            # We found a valid completed race, so track has races
+                            track_had_races = True
+                            continue
+                        else:
+                            logger.warning(f"Race {race_key} marked completed but has no winner. Re-crawling...")
             except Exception as e:
                 logger.debug(f"Error checking status for {race_key}: {e}")
 

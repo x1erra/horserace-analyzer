@@ -384,7 +384,7 @@ export default function Betting() {
                                         Position {pos}
                                     </h5>
                                     <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
-                                        {raceDetails.entries.map(entry => {
+                                        {raceDetails.entries.map((entry, index) => {
                                             const isSelected = posSelections[pos]?.includes(entry.program_number);
                                             // Check overlapping (visual aid only, backend handles validity)
                                             // const isUsedElsewhere = false; // Could implement
