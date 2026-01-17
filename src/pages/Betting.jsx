@@ -42,8 +42,11 @@ export default function Betting() {
     const [raceDetails, setRaceDetails] = useState(null);
     const [loading, setLoading] = useState(false);
 
-    // Layout State
-    const [isBetFormOpen, setIsBetFormOpen] = useState(true);
+    // Layout State - persist collapse state in localStorage
+    const [isBetFormOpen, setIsBetFormOpen] = useState(() => {
+        const saved = localStorage.getItem('hra_bet_form_open');
+        return saved !== null ? saved === 'true' : true;
+    });
 
     // Form State
     const [betType, setBetType] = useState('Win');
@@ -73,6 +76,11 @@ export default function Betting() {
     useEffect(() => {
         localStorage.setItem('hra_bankroll', bankroll.toString());
     }, [bankroll]);
+
+    // Persist bet form open/close state
+    useEffect(() => {
+        localStorage.setItem('hra_bet_form_open', isBetFormOpen.toString());
+    }, [isBetFormOpen]);
 
     const fetchBets = async () => {
         try {
@@ -466,58 +474,58 @@ export default function Betting() {
                 </div>
             )}
 
-            {/* Performance Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Performance Stats Grid - Compact on mobile */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
                 {/* Win Rate */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
-                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                <div className="bg-black rounded-xl p-3 md:p-5 border border-purple-900/30 flex items-center gap-2 md:gap-4 relative overflow-hidden group">
+                    <div className="hidden md:block absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
                         <TrendingUp className="w-16 h-16 text-purple-500" />
                     </div>
-                    <div className="bg-purple-900/20 p-3 rounded-lg">
-                        <Percent className="w-6 h-6 text-purple-400" />
+                    <div className="bg-purple-900/20 p-2 md:p-3 rounded-lg">
+                        <Percent className="w-4 h-4 md:w-6 md:h-6 text-purple-400" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Win Rate</p>
-                        <p className="text-2xl font-bold text-white">{stats.winRate}%</p>
+                        <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">Win Rate</p>
+                        <p className="text-lg md:text-2xl font-bold text-white">{stats.winRate}%</p>
                     </div>
                 </div>
 
                 {/* Net P&L */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
-                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                <div className="bg-black rounded-xl p-3 md:p-5 border border-purple-900/30 flex items-center gap-2 md:gap-4 relative overflow-hidden group">
+                    <div className="hidden md:block absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
                         <DollarSign className="w-16 h-16 text-green-500" />
                     </div>
-                    <div className={`p-3 rounded-lg ${stats.pnl >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
-                        <DollarSign className={`w-6 h-6 ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} />
+                    <div className={`p-2 md:p-3 rounded-lg ${stats.pnl >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
+                        <DollarSign className={`w-4 h-4 md:w-6 md:h-6 ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L</p>
-                        <p className={`text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L</p>
+                        <p className={`text-lg md:text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}
                         </p>
                     </div>
                 </div>
 
                 {/* Total Wagered */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4">
-                    <div className="bg-blue-900/20 p-3 rounded-lg">
-                        <Wallet className="w-6 h-6 text-blue-400" />
+                <div className="bg-black rounded-xl p-3 md:p-5 border border-purple-900/30 flex items-center gap-2 md:gap-4">
+                    <div className="bg-blue-900/20 p-2 md:p-3 rounded-lg">
+                        <Wallet className="w-4 h-4 md:w-6 md:h-6 text-blue-400" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Total Wagered</p>
-                        <p className="text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
+                        <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">Wagered</p>
+                        <p className="text-lg md:text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
                     </div>
                 </div>
 
                 {/* ROI / Reset */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex justify-between items-center pr-8">
-                    <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-lg ${parseFloat(stats.roi) >= 0 ? 'bg-indigo-900/20' : 'bg-red-900/20'}`}>
-                            <TrendingUp className={`w-6 h-6 ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`} />
+                <div className="bg-black rounded-xl p-3 md:p-5 border border-purple-900/30 flex justify-between items-center pr-2 md:pr-8">
+                    <div className="flex items-center gap-2 md:gap-4">
+                        <div className={`p-2 md:p-3 rounded-lg ${parseFloat(stats.roi) >= 0 ? 'bg-indigo-900/20' : 'bg-red-900/20'}`}>
+                            <TrendingUp className={`w-4 h-4 md:w-6 md:h-6 ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`} />
                         </div>
                         <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
-                            <p className={`text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
+                            <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
+                            <p className={`text-lg md:text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
                                 {stats.roi}%
                             </p>
                         </div>
@@ -526,10 +534,10 @@ export default function Betting() {
                     {/* Reset Button */}
                     <button
                         onClick={handleResetStats}
-                        className="text-gray-600 hover:text-red-500 transition p-2 hover:bg-red-900/20 rounded-full"
+                        className="text-gray-600 hover:text-red-500 transition p-1 md:p-2 hover:bg-red-900/20 rounded-full"
                         title="Reset Stats & History"
                     >
-                        <Trash2 className="w-5 h-5" />
+                        <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
                     </button>
                 </div>
             </div>
