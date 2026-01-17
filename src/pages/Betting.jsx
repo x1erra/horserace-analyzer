@@ -392,19 +392,19 @@ export default function Betting() {
                                             return (
                                                 <div
                                                     key={entry.program_number || index}
-                                                    onClick={() => !isScratched && togglePosSelection(pos, entry.program_number)}
+                                                    onClick={() => !entry.scratched && togglePosSelection(pos, entry.program_number)}
                                                     className={`
                                                         p-1.5 rounded flex items-center justify-between transition text-xs
-                                                        ${isScratched
+                                                        ${entry.scratched
                                                             ? 'opacity-30 cursor-not-allowed bg-black/20'
                                                             : 'cursor-pointer'}
                                                         ${isSelected
                                                             ? 'bg-purple-900 text-white font-bold border border-purple-500'
-                                                            : !isScratched ? 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent' : ''}
+                                                            : !entry.scratched ? 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent' : ''}
                                                     `}
                                                 >
-                                                    <span className={isScratched ? 'line-through' : ''}>#{entry.program_number || 'SCR'}</span>
-                                                    <span className={`truncate w-16 text-right ${isScratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
+                                                    <span className={entry.scratched ? 'line-through' : ''}>#{entry.program_number || 'SCR'}</span>
+                                                    <span className={`truncate w-16 text-right ${entry.scratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
                                                 </div>
                                             )
                                         })}
