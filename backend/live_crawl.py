@@ -8,6 +8,9 @@ import pytz
 from datetime import datetime, date, timedelta
 from crawl_equibase import crawl_historical_races, COMMON_TRACKS
 from crawl_entries import crawl_entries
+from crawl_scratches import crawl_late_changes
+from bet_resolution import resolve_all_pending_bets
+from supabase_client import get_supabase_client
 
 # Configure logging
 log_dir = os.getenv('LOG_DIR', '.')
@@ -100,6 +103,25 @@ def run_crawler():
                     logger.info(f"Crawl finished in {duration:.1f}s. "
                                 f"Results (Y/T): {stats_yesterday.get('races_found', 0)}/{stats_today.get('races_found', 0)}, "
                                 f"Entries: {entry_stats.get('races_found', 0)}")
+                                
+                    # 2.5 Crawl Scratches (Every loop)
+                    logger.info("Checking for Late Scratches...")
+                    try:
+                        scratches_found = crawl_late_changes()
+                        logger.info(f"Scratch check complete. Marked: {scratches_found}")
+                    except Exception as e:
+                        logger.error(f"Scratch crawl failed: {e}")
+
+                                
+                    # 3. Resolve Pending Bets
+                    logger.info("Resolving pending bets...")
+                    try:
+                        supabase = get_supabase_client()
+                        resolution_stats = resolve_all_pending_bets(supabase)
+                        if resolution_stats.get('resolved_count', 0) > 0:
+                            logger.info(f"Resolved {resolution_stats['resolved_count']} bets.")
+                    except Exception as e:
+                         logger.error(f"Bet resolution failed: {e}")
                                 
                 except Exception as e:
                     logger.error(f"Crawl execution failed: {e}")

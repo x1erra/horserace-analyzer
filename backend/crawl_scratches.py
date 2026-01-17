@@ -1,0 +1,285 @@
+
+import logging
+import time
+import os
+import re
+import subprocess
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, date
+from supabase_client import get_supabase_client
+from crawl_equibase import normalize_name, normalize_pgm, COMMON_TRACKS
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+EQUIBASE_BASE_URL = "https://www.equibase.com/static/latechanges/html/"
+LATE_CHANGES_INDEX_URL = "https://www.equibase.com/static/latechanges/html/latechanges.html"
+
+def fetch_static_page(url, retries=3):
+    """
+    Fetch static page using PowerShell to bypass WAF (reused pattern from crawl_entries)
+    """
+    temp_file = f"temp_scratches_{int(time.time())}.html"
+    
+    for attempt in range(retries):
+        try:
+            # logger.info(f"Fetching {url} (Attempt {attempt+1})")
+            
+            cmd = ["powershell", "-Command", f"Invoke-WebRequest -Uri '{url}' -OutFile '{temp_file}'"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0 and os.path.exists(temp_file):
+                size = os.path.getsize(temp_file)
+                if size < 1000: # detailed pages can be small, but index shouldn't be too small
+                    # logger.warning(f"Downloaded file small ({size} bytes).")
+                    pass
+                
+                with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                
+                try: os.remove(temp_file) 
+                except: pass
+                
+                return content
+            
+            time.sleep(2)
+            
+        except Exception as e:
+            logger.error(f"Error fetching {url}: {e}")
+            time.sleep(2)
+            
+    if os.path.exists(temp_file):
+        try: os.remove(temp_file)
+        except: pass
+        
+    return None
+
+def parse_late_changes_index():
+    """
+    Parse the main late changes page to find links for specific tracks
+    Returns: List of dicts { 'track_code': 'GP', 'url': '...' }
+    """
+    html = fetch_static_page(LATE_CHANGES_INDEX_URL)
+    if not html:
+        logger.error("Failed to fetch Late Changes index")
+        return []
+
+    soup = BeautifulSoup(html, 'html.parser')
+    links = []
+    
+    # Links are usually in a list or table. 
+    # Example href: "latechangesGP-USA.html"
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if 'latechanges' in href and '-USA.html' in href:
+            # Extract track code: latechangesGP-USA.html -> GP
+            match = re.search(r'latechanges([A-Z0-9]+)-USA\.html', href)
+            if match:
+                code = match.group(1)
+                full_url = EQUIBASE_BASE_URL + href if not href.startswith('http') else href
+                links.append({'track_code': code, 'url': full_url})
+                
+    return links
+
+def parse_track_scratches(html, track_code):
+    """
+    Parse the scratch table for a specific track
+    """
+    scratches = []
+    if not html: return scratches
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # Table usually has id="fullChanges" or similar, but let's be robust
+    tables = soup.find_all('table')
+    target_table = None
+    
+    for t in tables:
+        if 'Changes' in t.get_text() or t.find('th', class_='changes'):
+            target_table = t
+            break
+            
+    if not target_table:
+        return scratches
+        
+    current_race = None
+    
+    rows = target_table.find_all('tr')
+    for row in rows:
+        # Check for Race Header
+        # <tr class="group-header"><th class="race">Race: 1</th>...</tr>
+        header_th = row.find('th', class_='race')
+        if header_th:
+            txt = header_th.get_text(strip=True)
+            # "Race: 1"
+            m = re.search(r'Race:?\s*(\d+)', txt, re.IGNORECASE)
+            if m:
+                current_race = int(m.group(1))
+            continue
+            
+        # Check for Scratch Row
+        if not current_race: continue
+        
+        cols = row.find_all('td')
+        if len(cols) < 3: continue
+        
+        # Col 0: Horse (#1 Name)
+        # Col 1: Name (sometimes separate?)
+        # Let's inspect browser tool result:
+        # Row: <td class="horse">#1</td> <td class="horse">Dirty Diana</td> <td class="changes">Scratched - Vet</td>
+        
+        horse_num_cell = row.find('td', class_='horse')
+        if not horse_num_cell: continue
+        
+        # Sometimes there are two cells with class 'horse' (number, then name)
+        horse_cells = row.find_all('td', class_='horse')
+        
+        pgm = None
+        horse_name = None
+        change_desc = None
+        
+        if len(horse_cells) >= 2:
+            pgm = horse_cells[0].get_text(strip=True).replace('#', '')
+            horse_name = horse_cells[1].get_text(strip=True)
+        elif len(horse_cells) == 1:
+            # Maybe joined? "#1 Dirty Diana"
+            full = horse_cells[0].get_text(strip=True)
+            if '#' in full:
+                parts = full.split(' ', 1)
+                pgm = parts[0].replace('#', '')
+                if len(parts) > 1: horse_name = parts[1]
+            else:
+                horse_name = full
+                
+        # Change description
+        change_cell = row.find('td', class_='changes')
+        if change_cell:
+            change_desc = change_cell.get_text(strip=True)
+            
+        if change_desc and 'scratched' in change_desc.lower():
+            scratches.append({
+                'race_number': current_race,
+                'program_number': normalize_pgm(pgm),
+                'horse_name': normalize_name(horse_name if horse_name else ""),
+                'reason': change_desc
+            })
+            
+    return scratches
+
+def update_scratches_in_db(track_code, race_date, scratch_list):
+    """
+    Update database for found scratches
+    """
+    supabase = get_supabase_client()
+    count = 0
+    
+    for item in scratch_list:
+        try:
+            # 1. Find Race ID
+            race_key = f"{track_code}-{race_date.strftime('%Y%m%d')}-{item['race_number']}"
+            
+            # Get Race
+            r_res = supabase.table('hranalyzer_races').select('id').eq('race_key', race_key).execute()
+            if not r_res.data:
+                # Race might not exist if crawler hasn't run yet? 
+                # Or maybe it's a new track we don't follow.
+                continue
+                
+            race_id = r_res.data[0]['id']
+            
+            # 2. Find Entry to mark
+            # Strategy: Match PGM first (most reliable), fallback to Name
+            
+            entry_id = None
+            
+            # Try PGM match
+            if item['program_number']:
+                e_res = supabase.table('hranalyzer_race_entries')\
+                    .select('id, scratched')\
+                    .eq('race_id', race_id)\
+                    .eq('program_number', item['program_number'])\
+                    .execute()
+                    
+                if e_res.data:
+                    entry = e_res.data[0]
+                    if not entry['scratched']:
+                        entry_id = entry['id']
+            
+            # Fallback Name match (if PGM search failed)
+            if not entry_id and item['horse_name']:
+                 # Need to join? Or just fuzzy match entries?
+                 # Getting all entries is safer
+                 all_entries = supabase.table('hranalyzer_race_entries')\
+                    .select('id, scratched, hranalyzer_horses!inner(horse_name)')\
+                    .eq('race_id', race_id)\
+                    .execute()
+                 
+                 target_norm = item['horse_name']
+                 for e in all_entries.data:
+                     if e['scratched']: continue
+                     
+                     h_name = e['hranalyzer_horses']['horse_name']
+                     if normalize_name(h_name) == target_norm:
+                         entry_id = e['id']
+                         break
+            
+            # 3. Update Status
+            if entry_id:
+                # Update scratch status and reason (if we had a column for reason, but we don't, just scratch=true)
+                supabase.table('hranalyzer_race_entries')\
+                    .update({'scratched': True})\
+                    .eq('id', entry_id)\
+                    .execute()
+                
+                logger.info(f"MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['reason']})")
+                count += 1
+                
+        except Exception as e:
+            logger.error(f"Error updating scratch {item}: {e}")
+            
+    return count
+
+def crawl_late_changes():
+    """
+    Main entry point for crawling scratches
+    """
+    logger.info("Starting Crawl: Equibase Late Changes")
+    
+    # 1. Get Track Links
+    track_links = parse_late_changes_index()
+    logger.info(f"Found {len(track_links)} tracks with changes")
+    
+    total_scratches_marked = 0
+    today = date.today()
+    
+    for link in track_links:
+        code = link['track_code']
+        url = link['url']
+        
+        # Only process tracks valid in our DB (optional optimization)
+        # if code not in COMMON_TRACKS and ... -> No, let's try to process all relevant ones
+        
+        try:
+            # logger.info(f"Checking scratches for {code}")
+            html = fetch_static_page(url)
+            if not html: continue
+            
+            scratches = parse_track_scratches(html, code)
+            
+            if scratches:
+                # logger.info(f"Found {len(scratches)} scratches for {code}")
+                # Update DB
+                updated = update_scratches_in_db(code, today, scratches)
+                total_scratches_marked += updated
+                
+        except Exception as e:
+            logger.error(f"Error processing {code}: {e}")
+            
+    logger.info(f"Scratches Crawl Complete. Marked {total_scratches_marked} new scratches.")
+    return total_scratches_marked
+
+if __name__ == "__main__":
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    crawl_late_changes()

@@ -13,6 +13,7 @@ from datetime import date, timedelta, datetime
 from pathlib import Path
 from crawl_equibase import crawl_historical_races, COMMON_TRACKS
 from supabase_client import get_supabase_client
+from bet_resolution import resolve_all_pending_bets
 
 # Configuration
 LOG_DIR = os.getenv('LOG_DIR', '/var/log')
@@ -185,6 +186,10 @@ def main():
 
         # Log to database
         log_crawl_to_database(supabase, crawl_date, stats, 'completed')
+        
+        # Resolve Bets
+        logger.info("Resolving pending bets...")
+        resolve_all_pending_bets(supabase)
 
         # Determine exit code
         if stats.get('races_found', 0) == 0:
