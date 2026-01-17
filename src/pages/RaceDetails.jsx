@@ -1,9 +1,9 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
 export default function RaceDetails() {
-    const { id } = useParams();
+    const { id } = useParams(); // This is the race_key
     const navigate = useNavigate();
     const [raceData, setRaceData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -14,6 +14,7 @@ export default function RaceDetails() {
             try {
                 setLoading(true);
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+                // Use the key from params. The backend endpoint expects race_key.
                 const response = await axios.get(`${baseUrl}/api/race-details/${id}`);
                 setRaceData(response.data);
                 setError(null);
@@ -29,7 +30,7 @@ export default function RaceDetails() {
 
     if (loading) {
         return (
-            <div className="text-white text-center p-20">
+            <div className="text-white text-center p-20 min-h-[50vh] flex flex-col justify-center items-center">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
                 <p className="mt-4">Loading details...</p>
             </div>
@@ -39,7 +40,7 @@ export default function RaceDetails() {
     if (error) return <div className="text-red-400 text-center p-20">{error}</div>;
     if (!raceData || !raceData.race) return <div className="text-gray-400 text-center p-20">Race not found.</div>;
 
-    const { race, entries, exotic_payouts, claims } = raceData;
+    const { race, entries, exotic_payouts, claims, navigation } = raceData;
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
 
@@ -57,7 +58,7 @@ export default function RaceDetails() {
         return acc;
     }, []);
 
-    // Sort entries by finish position for completed races, program number for upcoming
+    // Sort entries: Limit logic moved here for safety
     const sortedEntries = uniqueEntries.sort((a, b) => {
         if (isCompleted && a.finish_position && b.finish_position) {
             return a.finish_position - b.finish_position;
@@ -88,55 +89,98 @@ export default function RaceDetails() {
     }
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6 md:space-y-8 pb-20 md:pb-0">
+            {/* Header / Navigation Section */}
             <div className="flex flex-col gap-4">
-                <button
-                    onClick={() => navigate(-1)}
-                    className="self-start flex items-center gap-2 text-gray-400 hover:text-white transition group"
-                >
-                    <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                    Back to Track
-                </button>
+                {/* Top Navigation Bar */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="flex items-center gap-2 bg-black border border-purple-900/50 hover:bg-purple-900/20 text-gray-300 hover:text-white px-4 py-2 rounded-lg transition group text-sm font-medium"
+                    >
+                        <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        Back to Track
+                    </button>
 
-                <div className="flex justify-between items-center">
-                    <h3 className="text-3xl font-bold text-white">
-                        Race {race.race_number} - {race.track_name}
-                    </h3>
-                    <span className={`px-4 py-2 rounded-md text-sm font-medium ${isCompleted
-                        ? 'bg-green-900/30 text-green-400'
+                    {/* Next/Prev Race Navigation */}
+                    {navigation && (
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <button
+                                onClick={() => navigation.prev_race_key && navigate(`/race/${navigation.prev_race_key}`)}
+                                disabled={!navigation.prev_race_key}
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 ${navigation.prev_race_key
+                                    ? 'bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500'
+                                    : 'bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                </svg>
+                                Prev Race
+                            </button>
+                            <button
+                                onClick={() => navigation.next_race_key && navigate(`/race/${navigation.next_race_key}`)}
+                                disabled={!navigation.next_race_key}
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 ${navigation.next_race_key
+                                    ? 'bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500'
+                                    : 'bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed'
+                                    }`}
+                            >
+                                Next Race
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
+                    <div>
+                        <h3 className="text-2xl md:text-3xl font-bold text-white leading-tight">
+                            Race {race.race_number} - {race.track_name}
+                        </h3>
+                        <p className="text-sm text-gray-400 mt-1">{race.race_date} • {race.post_time || 'TBD'}</p>
+                    </div>
+                    <span className={`self-start md:self-center px-4 py-1.5 rounded-full text-xs md:text-sm font-bold uppercase tracking-wider ${isCompleted
+                        ? 'bg-green-900/30 text-green-400 border border-green-900/50'
                         : isUpcoming
-                            ? 'bg-blue-900/30 text-blue-400'
-                            : 'bg-gray-900/30 text-gray-400'
+                            ? 'bg-blue-900/30 text-blue-400 border border-blue-900/50'
+                            : 'bg-gray-900/30 text-gray-400 border border-gray-800'
                         }`}>
                         {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : race.race_status}
                     </span>
                 </div>
-                <p className="text-sm text-gray-400">{race.race_date} • {race.post_time || 'TBD'}</p>
             </div>
 
-            {/* 1. Claims Section (First Priority) */}
+            {/* 1. Claims Section */}
             {isCompleted && claims && claims.length > 0 && (
-                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
-                    <h4 className="text-xl font-semibold text-white mb-4">Claims</h4>
-                    <div className="overflow-x-auto">
+                <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
+                    <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-1 h-6 bg-purple-500 rounded-full"></span>
+                        Claims
+                    </h4>
+
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto">
                         <table className="w-full text-left text-gray-300">
-                            <thead className="bg-purple-900/50">
+                            <thead className="bg-purple-900/20 text-xs uppercase tracking-wider text-purple-300">
                                 <tr>
-                                    <th className="p-4">Horse</th>
+                                    <th className="p-4 rounded-tl-lg">Horse</th>
                                     <th className="p-4">New Trainer</th>
                                     <th className="p-4">New Owner</th>
-                                    <th className="p-4 text-right">Price</th>
+                                    <th className="p-4 text-right rounded-tr-lg">Price</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-purple-900/30">
                                 {claims.map((claim, index) => (
-                                    <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition">
+                                    <tr key={index} className="hover:bg-purple-900/10 transition">
                                         <td className="p-4 font-bold text-white">{claim.horse_name}</td>
                                         <td className="p-4">{claim.new_trainer_name || 'N/A'}</td>
                                         <td className="p-4">{claim.new_owner_name || 'N/A'}</td>
-                                        <td className="p-4 text-right text-green-400">
+                                        <td className="p-4 text-right text-green-400 font-mono">
                                             {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
                                         </td>
                                     </tr>
@@ -144,141 +188,227 @@ export default function RaceDetails() {
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-4">
+                        {claims.map((claim, index) => (
+                            <div key={index} className="bg-gray-900/50 rounded-lg p-4 border border-purple-900/30 space-y-2">
+                                <div className="flex justify-between items-start">
+                                    <div className="font-bold text-white text-lg">{claim.horse_name}</div>
+                                    <div className="text-green-400 font-mono font-bold">
+                                        {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                        <div className="text-gray-500 text-xs uppercase">New Trainer</div>
+                                        <div className="text-gray-300">{claim.new_trainer_name || 'N/A'}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-gray-500 text-xs uppercase">New Owner</div>
+                                        <div className="text-gray-300">{claim.new_owner_name || 'N/A'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 
-            {/* 2. Horse Entries / Results Table (Second Priority) */}
-            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 overflow-x-auto opacity-0 animate-fadeIn" style={{ animationDelay: '150ms' }}>
-                <div className="flex justify-between items-center mb-4">
-                    <h4 className="text-xl font-semibold text-white">
-                        {isUpcoming ? `Entries (${sortedEntries.length})` : `Results (${sortedEntries.length} entries)`}
+            {/* 2. Horse Entries / Results Section */}
+            <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '150ms' }}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+                    <h4 className="text-xl font-semibold text-white flex items-center gap-2">
+                        <span className="w-1 h-6 bg-purple-500 rounded-full"></span>
+                        {isUpcoming ? `Entries (${sortedEntries.length})` : `Results (${sortedEntries.length})`}
                     </h4>
                     {race.equibase_pdf_url && (
-                        <a href={race.equibase_pdf_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-purple-400 hover:text-purple-300 hover:underline text-sm font-medium">
+                        <a href={race.equibase_pdf_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-purple-400 hover:text-purple-300 hover:underline text-sm font-medium bg-purple-900/10 px-3 py-1.5 rounded-lg transition">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                             </svg>
-                            Official Equibase PDF
+                            Official PDF
                         </a>
                     )}
                 </div>
 
-                <table className="w-full text-left text-gray-300 min-w-max">
-                    <thead className="bg-purple-900/50">
-                        <tr>
-                            {isCompleted && <th className="p-4">Fin</th>}
-                            <th className="p-4">Post</th>
-                            <th className="p-4">Horse</th>
-                            {isCompleted && <th className="p-4">Jockey</th>}
-                            {isCompleted && <th className="p-4">Trainer</th>}
-                            {isUpcoming && <th className="p-4">ML Odds</th>}
-                            {isCompleted && <th className="p-4">Odds</th>}
-                            {isCompleted && <th className="p-4">Win $</th>}
-                            {isCompleted && <th className="p-4">Comments</th>}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sortedEntries.map((entry, index) => (
-                            <tr key={index} className={`border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200 ${entry.finish_position === 1 ? 'bg-yellow-900/10' : ''
-                                }`}>
-                                {isCompleted && (
-                                    <td className="p-4 font-bold text-white">
-                                        {entry.finish_position || '-'}
-                                    </td>
-                                )}
-                                <td className="p-4">{entry.program_number}</td>
-                                <td className="p-4 font-bold text-purple-300">{entry.horse_name}</td>
-                                {isCompleted && (
-                                    <td className="p-4">{entry.jockey_name || 'N/A'}</td>
-                                )}
-                                {isCompleted && (
-                                    <td className="p-4">{entry.trainer_name || 'N/A'}</td>
-                                )}
-                                {isUpcoming && (
-                                    <td className="p-4">{entry.morning_line_odds || 'N/A'}</td>
-                                )}
-                                {isCompleted && (
-                                    <td className="p-4">{entry.final_odds || 'N/A'}</td>
-                                )}
-                                {isCompleted && (
-                                    <td className="p-4 text-green-400">
-                                        {entry.win_payout ? `$${entry.win_payout}` : '-'}
-                                    </td>
-                                )}
-                                {isCompleted && (
-                                    <td className="p-4 text-xs text-gray-400 max-w-xs">
-                                        <span className="line-clamp-2">{entry.run_comments || '-'}</span>
-                                    </td>
-                                )}
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-left text-gray-300">
+                        <thead className="bg-purple-900/20 text-xs uppercase tracking-wider text-purple-300">
+                            <tr>
+                                {isCompleted && <th className="p-4 rounded-tl-lg">Fin</th>}
+                                <th className="p-4">Post</th>
+                                <th className="p-4">Horse</th>
+                                {isCompleted && <th className="p-4">Jockey</th>}
+                                {isCompleted && <th className="p-4">Trainer</th>}
+                                {isUpcoming && <th className="p-4">ML Odds</th>}
+                                {isCompleted && <th className="p-4">Odds</th>}
+                                {isCompleted && <th className="p-4">Win $</th>}
+                                {isCompleted && <th className="p-4 rounded-tr-lg">Comments</th>}
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {entries.length === 0 && (
-                    <p className="text-gray-500 mt-4 italic text-center">No entries found for this race.</p>
-                )}
-            </div>
-
-            {/* 3. Race Summary / Conditions (Third Priority) */}
-            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 overflow-hidden opacity-0 animate-fadeIn" style={{ animationDelay: '200ms' }}>
-                <h4 className="text-xl font-semibold text-white mb-4">Race Summary</h4>
-                {race.conditions && (
-                    <p className="text-sm text-gray-400 mb-4 italic">{race.conditions}</p>
-                )}
-                <table className="w-full text-left text-gray-300">
-                    <tbody>
-                        {raceConditions.map((cond, index) => (
-                            <tr key={index} className="border-b border-purple-900/50 last:border-b-0">
-                                <td className="p-3 font-medium text-white">{cond.detail}</td>
-                                <td className="p-3 text-gray-300">{cond.value}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* 4. Exotic Payouts and Technical Data */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {isCompleted && exotic_payouts && exotic_payouts.length > 0 && (
-                    <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '250ms' }}>
-                        <h4 className="text-xl font-semibold text-white mb-4">Exotic Payouts</h4>
-                        <div className="space-y-4">
-                            {exotic_payouts.map((payout, index) => (
-                                <div key={index} className="bg-purple-900/10 p-3 rounded-lg border border-purple-900/50 flex justify-between items-center">
-                                    <div>
-                                        <p className="text-purple-300 font-medium text-sm">{payout.wager_type}</p>
-                                        <p className="text-gray-300 text-xs">{payout.winning_combination}</p>
-                                    </div>
-                                    <p className="text-green-400 font-bold">${payout.payout}</p>
-                                </div>
+                        </thead>
+                        <tbody className="divide-y divide-purple-900/30">
+                            {sortedEntries.map((entry, index) => (
+                                <tr key={index} className={`hover:bg-purple-900/10 transition duration-200 
+                                    ${entry.finish_position === 1 ? 'bg-yellow-900/10' : ''}
+                                    ${entry.scratched ? 'opacity-50 line-through text-gray-600' : ''}
+                                `}>
+                                    {isCompleted && (
+                                        <td className="p-4 font-bold text-white text-lg">
+                                            {entry.finish_position || '-'}
+                                        </td>
+                                    )}
+                                    <td className="p-4 font-mono text-gray-400">{entry.program_number}</td>
+                                    <td className="p-4 font-bold text-purple-300">{entry.horse_name}</td>
+                                    {isCompleted && <td className="p-4 text-sm">{entry.jockey_name || 'N/A'}</td>}
+                                    {isCompleted && <td className="p-4 text-sm">{entry.trainer_name || 'N/A'}</td>}
+                                    {isUpcoming && <td className="p-4">{entry.scratched ? 'SCR' : (entry.morning_line_odds || 'N/A')}</td>}
+                                    {isCompleted && <td className="p-4">{entry.final_odds || 'N/A'}</td>}
+                                    {isCompleted && (
+                                        <td className="p-4 text-green-400 font-mono font-medium">
+                                            {entry.win_payout ? `$${entry.win_payout}` : '-'}
+                                        </td>
+                                    )}
+                                    {isCompleted && (
+                                        <td className="p-4 text-xs text-gray-500 max-w-xs italic">
+                                            {entry.run_comments || '-'}
+                                        </td>
+                                    )}
+                                </tr>
                             ))}
-                        </div>
-                    </div>
-                )}
+                        </tbody>
+                    </table>
+                </div>
 
-                {(race.fractional_times || isUpcoming) && (
-                    <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '275ms' }}>
-                        <h4 className="text-xl font-semibold text-white mb-4">
-                            {isUpcoming ? 'Pre-Race Information' : 'Technical Data'}
-                        </h4>
-                        <div className="space-y-4">
+                {/* Mobile Card View */}
+                <div className="md:hidden space-y-4">
+                    {sortedEntries.map((entry, index) => (
+                        <div key={index} className={`p-4 rounded-xl border ${entry.finish_position === 1
+                            ? 'bg-yellow-900/10 border-yellow-700/50'
+                            : 'bg-gray-900/50 border-purple-900/30'
+                            }`}>
+                            <div className="flex justify-between items-start mb-3">
+                                <div className="flex items-center gap-3">
+                                    {isCompleted && (
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${entry.finish_position === 1 ? 'bg-yellow-500 text-black' :
+                                            entry.finish_position === 2 ? 'bg-gray-400 text-black' :
+                                                entry.finish_position === 3 ? 'bg-orange-700 text-white' :
+                                                    'bg-gray-800 text-gray-400'
+                                            }`}>
+                                            {entry.finish_position || '-'}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <div className={`font-bold text-lg leading-none ${entry.scratched ? 'text-gray-500 line-through' : 'text-white'}`}>
+                                            {entry.horse_name} {entry.scratched && '(SCR)'}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1">NO. {entry.program_number}</div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    {isCompleted && entry.win_payout && (
+                                        <div className="text-green-400 font-mono font-bold text-lg">${entry.win_payout}</div>
+                                    )}
+                                    <div className="text-sm font-medium text-purple-300">
+                                        {isUpcoming ? `ML: ${entry.morning_line_odds || '-'}` : `Odds: ${entry.final_odds || '-'}`}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-sm border-t border-white/10 pt-3">
+                                <div>
+                                    <span className="text-gray-500 text-xs uppercase block">Jockey</span>
+                                    <span className="text-gray-300">{entry.jockey_name || 'N/A'}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-500 text-xs uppercase block">Trainer</span>
+                                    <span className="text-gray-300">{entry.trainer_name || 'N/A'}</span>
+                                </div>
+                                {isCompleted && entry.run_comments && (
+                                    <div className="col-span-2 mt-1">
+                                        <span className="text-gray-500 text-xs uppercase block">Comments</span>
+                                        <span className="text-gray-400 italic text-xs">{entry.run_comments}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {uniqueEntries.length === 0 && (
+                        <div className="text-center p-8 text-gray-500 italic">No entries found.</div>
+                    )}
+                </div>
+            </div>
+
+            {/* 3. Stats & Summary Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Race Summary */}
+                <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '200ms' }}>
+                    <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-1 h-6 bg-purple-500 rounded-full"></span>
+                        Summary
+                    </h4>
+                    {race.conditions && (
+                        <p className="text-sm text-gray-400 mb-4 italic bg-purple-900/10 p-3 rounded-lg border border-purple-900/30">
+                            "{race.conditions}"
+                        </p>
+                    )}
+
+                    <div className="space-y-3">
+                        {raceConditions.map((cond, index) => (
+                            <div key={index} className="flex justify-between items-center py-2 border-b border-gray-800 last:border-0">
+                                <span className="text-sm text-gray-500 font-medium">{cond.detail}</span>
+                                <span className="text-sm text-white font-medium text-right">{cond.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Exotic Payouts & Tech Data */}
+                <div className="space-y-6">
+                    {isCompleted && exotic_payouts && exotic_payouts.length > 0 && (
+                        <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '250ms' }}>
+                            <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                                <span className="w-1 h-6 bg-green-500 rounded-full"></span>
+                                Payouts
+                            </h4>
+                            <div className="space-y-3">
+                                {exotic_payouts.map((payout, index) => (
+                                    <div key={index} className="bg-gray-900 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
+                                        <div>
+                                            <p className="text-purple-300 font-bold text-xs uppercase tracking-wider">{payout.wager_type}</p>
+                                            <p className="text-white text-sm mt-0.5">{payout.winning_combination}</p>
+                                        </div>
+                                        <p className="text-green-400 font-mono font-bold text-lg">${payout.payout}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {(race.fractional_times || isUpcoming) && (
+                        <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-purple-900/20 opacity-0 animate-fadeIn" style={{ animationDelay: '275ms' }}>
+                            <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                                <span className="w-1 h-6 bg-blue-500 rounded-full"></span>
+                                {isUpcoming ? 'Info' : 'Splits'}
+                            </h4>
                             {race.fractional_times && (
                                 <div className="p-4 bg-purple-900/10 rounded-lg border border-purple-900/50">
-                                    <p className="text-purple-300 font-medium text-sm">Fractional Times:</p>
-                                    <p className="text-gray-300 text-sm mt-1">{race.fractional_times}</p>
+                                    <p className="text-purple-300 font-bold text-xs uppercase mb-2">Fractional Times</p>
+                                    <p className="text-white font-mono text-sm">{race.fractional_times}</p>
                                 </div>
                             )}
                             {isUpcoming && (
                                 <div className="p-4 bg-blue-900/10 rounded-lg border border-blue-900/50">
-                                    <p className="text-blue-300 font-medium text-sm">Race Status:</p>
-                                    <p className="text-gray-300 text-xs mt-1">
-                                        This race has not been run yet. Results will be available after the race completes.
+                                    <p className="text-blue-300 font-bold text-xs uppercase mb-2">Status</p>
+                                    <p className="text-gray-300 text-sm">
+                                        Results pending. Check back after post time.
                                     </p>
                                 </div>
                             )}
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </div>
     );

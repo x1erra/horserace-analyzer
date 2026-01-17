@@ -12,6 +12,7 @@ import Upload from './pages/Upload.jsx'; // Added for Upload page
 import Claims from './pages/Claims.jsx'; // Added for Claims page
 import { useState } from 'react';
 import PasswordGate from './components/auth/PasswordGate.jsx';
+import PullToRefresh from './components/layout/PullToRefresh.jsx';
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -25,20 +26,22 @@ function App() {
 
           {/* Main Content */}
           <div className="flex-1">
-            <Header onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
-            <main className="p-8 bg-black">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/races" element={<Races />} />
-                <Route path="/horses" element={<Horses />} />
-                <Route path="/predictions" element={<Predictions />} />
-                <Route path="/betting" element={<Betting />} />
-                <Route path="/race/:id" element={<RaceDetails />} />
-                <Route path="/results" element={<Results />} /> {/* New route */}
-                <Route path="/claims" element={<Claims />} /> {/* New route */}
-                <Route path="/upload" element={<Upload />} /> {/* New route */}
-              </Routes>
-            </main>
+            <PullToRefresh>
+              <Header onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
+              <main className="p-8 bg-black">
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/races" element={<Races />} />
+                  <Route path="/horses" element={<Horses />} />
+                  <Route path="/predictions" element={<Predictions />} />
+                  <Route path="/betting" element={<Betting />} />
+                  <Route path="/race/:id" element={<RaceDetails />} />
+                  <Route path="/results" element={<Results />} /> {/* New route */}
+                  <Route path="/claims" element={<Claims />} /> {/* New route */}
+                  <Route path="/upload" element={<Upload />} /> {/* New route */}
+                </Routes>
+              </main>
+            </PullToRefresh>
           </div>
         </div>
       </PasswordGate>

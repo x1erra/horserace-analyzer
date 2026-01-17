@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS hranalyzer_race_entries (
   weight INTEGER,  -- Weight carried
   medication VARCHAR(100),  -- Lasix, Bute, etc.
   equipment VARCHAR(100),  -- Blinkers, etc.
+  scratched BOOLEAN DEFAULT FALSE,
   claim_price VARCHAR(50),
 
   -- Pre-race data (from DRF)

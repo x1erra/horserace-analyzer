@@ -128,7 +128,8 @@ export default function Results() {
 
             {/* Results Table */}
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50 opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
-                <div className="overflow-x-auto">
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-left text-gray-300">
                         <thead className="bg-purple-900/30 border-b border-purple-900/50">
                             <tr>
@@ -176,6 +177,44 @@ export default function Results() {
                             )}
                         </tbody>
                     </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="md:hidden">
+                    {currentItems.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500 italic">No race results found.</div>
+                    ) : (
+                        <div className="divide-y divide-purple-900/20">
+                            {currentItems.map((result, index) => (
+                                <div key={result.race_key || index} className="p-4 space-y-3 hover:bg-purple-900/5 transition">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-bold text-white text-lg">{result.track_name}</div>
+                                            <div className="text-xs text-gray-400 mt-0.5">{result.race_date}</div>
+                                        </div>
+                                        <div className="bg-purple-900/30 text-purple-300 text-xs font-mono px-2 py-1 rounded">
+                                            Race {result.race_number}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between items-center bg-purple-900/10 p-3 rounded-lg border border-purple-900/20">
+                                        <div>
+                                            <span className="text-gray-500 text-xs uppercase block">Winner</span>
+                                            <span className="text-purple-300 font-bold">{result.winner || 'N/A'}</span>
+                                        </div>
+                                        {result.link && result.link !== '#' && (
+                                            <a href={result.link} target="_blank" rel="noopener noreferrer" className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+                                                Chart
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                </svg>
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Pagination Controls */}

@@ -390,17 +390,20 @@ export default function Betting() {
 
                                             return (
                                                 <div
-                                                    key={entry.program_number}
-                                                    onClick={() => togglePosSelection(pos, entry.program_number)}
+                                                    key={entry.program_number || index}
+                                                    onClick={() => !isScratched && togglePosSelection(pos, entry.program_number)}
                                                     className={`
-                                                        cursor-pointer p-1.5 rounded flex items-center justify-between transition text-xs
+                                                        p-1.5 rounded flex items-center justify-between transition text-xs
+                                                        ${isScratched
+                                                            ? 'opacity-30 cursor-not-allowed bg-black/20'
+                                                            : 'cursor-pointer'}
                                                         ${isSelected
                                                             ? 'bg-purple-900 text-white font-bold border border-purple-500'
-                                                            : 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent'}
+                                                            : !isScratched ? 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent' : ''}
                                                     `}
                                                 >
-                                                    <span>#{entry.program_number}</span>
-                                                    <span className="truncate w-16 text-right">{entry.horse_name}</span>
+                                                    <span className={isScratched ? 'line-through' : ''}>#{entry.program_number || 'SCR'}</span>
+                                                    <span className={`truncate w-16 text-right ${isScratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
                                                 </div>
                                             )
                                         })}
@@ -411,25 +414,30 @@ export default function Betting() {
                     ) : isBoxBet ? (
                         // Multi-Select Grid
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                            {raceDetails.entries.map(entry => {
+                            {raceDetails.entries.map((entry, index) => {
                                 const isSelected = selectedHorseIds.includes(entry.program_number);
+                                const isScratched = entry.scratched || entry.program_number === 'SCR' || !entry.program_number;
+
                                 return (
                                     <div
-                                        key={entry.program_number}
-                                        onClick={() => toggleHorseSelection(entry.program_number)}
+                                        key={entry.program_number || index}
+                                        onClick={() => !isScratched && toggleHorseSelection(entry.program_number)}
                                         className={`
-                                            cursor-pointer p-2 rounded border flex items-center gap-2 transition select-none
+                                            p-2 rounded border flex items-center gap-2 transition select-none
+                                            ${isScratched
+                                                ? 'opacity-30 cursor-not-allowed bg-black/20 border-transparent'
+                                                : 'cursor-pointer'}
                                             ${isSelected
                                                 ? 'bg-purple-900/50 border-purple-500 text-white'
-                                                : 'bg-black border-gray-700 text-gray-400 hover:bg-gray-800'}
+                                                : !isScratched ? 'bg-black border-gray-700 text-gray-400 hover:bg-gray-800' : ''}
                                         `}
                                     >
                                         <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-gray-500'}`}>
                                             {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                                         </div>
-                                        <span className="font-mono font-bold">#{entry.program_number}</span>
-                                        <span className="truncate text-xs">{entry.horse_name}</span>
-                                        <span className="ml-auto text-xs text-gray-500">{entry.morning_line_odds}</span>
+                                        <span className={`font-mono font-bold ${isScratched ? 'line-through' : ''}`}>#{entry.program_number || 'SCR'}</span>
+                                        <span className={`truncate text-xs ${isScratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
+                                        <span className="ml-auto text-xs text-gray-500">{isScratched ? 'SCR' : entry.morning_line_odds}</span>
                                     </div>
                                 );
                             })}
@@ -444,8 +452,12 @@ export default function Betting() {
                         >
                             <option value="">-- Select Horse --</option>
                             {raceDetails.entries.map(entry => (
-                                <option key={entry.program_number} value={entry.program_number}>
-                                    #{entry.program_number} - {entry.horse_name} ({entry.morning_line_odds})
+                                <option
+                                    key={entry.program_number || entry.horse_name}
+                                    value={entry.program_number}
+                                    disabled={entry.scratched || !entry.program_number || entry.program_number === 'SCR'}
+                                >
+                                    #{entry.program_number || 'SCR'} - {entry.horse_name} ({entry.scratched ? 'SCR' : entry.morning_line_odds})
                                 </option>
                             ))}
                         </select>

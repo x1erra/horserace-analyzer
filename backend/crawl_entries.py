@@ -226,8 +226,27 @@ def parse_entries_html(html_content, track_code, race_date):
                         'horse_name': horse_name,
                         'jockey': jockey,
                         'trainer': trainer,
-                        'morning_line_odds': odds_ml
+                        'morning_line_odds': odds_ml,
+                        'scratched': False
                     })
+
+                    # Check for scratch indications
+                    # 1. "SCR" in odds
+                    # 2. "SCR" or "Scratched" in Program Number (sometimes happens)
+                    # 3. "Scratched" in horse name bucket
+                    
+                    # Logic
+                    is_scratch = False
+                    if odds_ml and 'SCR' in odds_ml.upper():
+                        is_scratch = True
+                    elif pgm and 'SCR' in pgm.upper():
+                        is_scratch = True
+                    
+                    if is_scratch:
+                        entries[-1]['scratched'] = True
+                        entries[-1]['morning_line_odds'] = 'SCR'  # Normalize
+                        if not entries[-1]['program_number'] or entries[-1]['program_number'] == '0':
+                             entries[-1]['program_number'] = 'SCR'
             else:
                  # Fallback to standard table parsing if Contenders div is missing
                  # (Some tracks might use table view in static)
@@ -642,7 +661,9 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data, allow_compl
                 'program_number': pgm_val,
                 'jockey_id': jockey_id,
                 'trainer_id': trainer_id,
-                'morning_line_odds': entry.get('morning_line_odds')
+                'trainer_id': trainer_id,
+                'morning_line_odds': entry.get('morning_line_odds'),
+                'scratched': entry.get('scratched', False)
             }
             
             # Upsert entry

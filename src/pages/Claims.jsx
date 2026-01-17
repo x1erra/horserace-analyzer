@@ -174,7 +174,8 @@ export default function Claims() {
 
             {/* Claims Table */}
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50">
-                <div className="overflow-x-auto">
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-gray-900/50 border-b border-purple-900/30 text-gray-400 text-sm uppercase">
@@ -263,6 +264,60 @@ export default function Claims() {
                             )}
                         </tbody>
                     </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="md:hidden">
+                    {loading ? (
+                        <div className="p-8 text-center text-gray-500">
+                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
+                            <p>Loading claims...</p>
+                        </div>
+                    ) : currentItems.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500">
+                            No claims found matching your filters.
+                        </div>
+                    ) : (
+                        <div className="divide-y divide-purple-900/20">
+                            {currentItems.map((claim, index) => (
+                                <div key={claim.id || index} className="p-4 space-y-3 hover:bg-purple-900/5 transition">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-bold text-white text-lg">{claim.horse_name}</div>
+                                            <div className="text-xs text-purple-300 mt-0.5">{claim.track_name} • {claim.race_date}</div>
+                                        </div>
+                                        <div className="text-green-400 font-mono font-bold text-lg">
+                                            {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 text-sm bg-purple-900/10 p-3 rounded-lg border border-purple-900/20">
+                                        <div>
+                                            <span className="text-gray-500 text-xs uppercase block">New Trainer</span>
+                                            <span className="text-gray-300">{claim.new_trainer || 'N/A'}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 text-xs uppercase block">New Owner</span>
+                                            <span className="text-gray-300 truncate block">{claim.new_owner || 'N/A'}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between items-center pt-1">
+                                        <span className="text-xs text-gray-500 font-mono bg-gray-900 px-2 py-1 rounded">Race {claim.race_number}</span>
+                                        <Link
+                                            to={`/race/${claim.race_key}`}
+                                            className="text-purple-400 hover:text-white text-sm font-medium flex items-center gap-1"
+                                        >
+                                            View Race
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </Link>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Pagination Controls */}

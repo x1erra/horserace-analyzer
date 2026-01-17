@@ -245,7 +245,10 @@ def parse_race_chart_text(text: str) -> Dict:
         'horses': [],
         'exotic_payouts': [],
         'wps_payouts': parse_wps_payouts(text),
-        'claims': []
+        'exotic_payouts': [],
+        'wps_payouts': parse_wps_payouts(text),
+        'claims': [],
+        'scratches': parse_scratched_horses(text)
     }
 
     lines = text.split('\n')
@@ -690,6 +693,38 @@ def parse_trainers_section(text: str) -> Dict[str, str]:
     return trainers
 
 
+def parse_scratched_horses(text: str) -> List[str]:
+    """
+    Parse Scratched Horses section
+    Example: Scratched Horse(s): Horse Name (Reason)
+    """
+    scratches = []
+    # Regex: Scratched Horse(s):\s*(.*?)(?:\s+Trainers:|\s+Footnotes|$)
+    match = re.search(r'Scratched\s*Horse\(s\)\s*:\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|$)', text, re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        content = match.group(1).replace('\n', ' ').strip()
+        # Split by comma or semicolon
+        # Example: "Horse A (Trainer); Horse B (Vet)"
+        # Sometimes just commas. "Horse A (Re-entered), Horse B (Trainer)"
+        
+        # Split by closing parenthesis + comma/semicolon, or just comma
+        # Splitting by comma is risky if names have commas (rare)
+        # Assuming comma separator
+        parts = re.split(r'[;,]\s*', content)
+        
+        for part in parts:
+            part = part.strip()
+            if not part: continue
+            
+            # Remove reason in parens "(Trainer)"
+            name = re.sub(r'\s*\(.*?\)', '', part).strip()
+            if name:
+                scratches.append(name)
+                
+    return scratches
+
+
 def parse_claims_text(text: str) -> List[Dict]:
     """
     Parse claimed horses information
@@ -993,6 +1028,11 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             for claim in claims_data:
                 insert_claim(supabase, race_id, claim)
 
+        # Mark scratches
+        scratches = race_data.get('scratches', [])
+        if scratches:
+            mark_scratched_horses(supabase, race_id, scratches)
+
         return True
 
     except Exception as e:
@@ -1117,6 +1157,48 @@ def insert_claim(supabase, race_id: int, claim_data: Dict):
         
     except Exception as e:
         logger.error(f"Error inserting/updating claim: {e}")
+
+
+def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
+    """
+    Mark horses as scratched in the database
+    """
+    try:
+        if not scratched_names:
+            return
+
+        # 1. Get all entries for this race to find program numbers/ids by name
+        # We need to join with horses table to get names
+        entries = supabase.table('hranalyzer_race_entries')\
+            .select('id, program_number, hranalyzer_horses!inner(horse_name)')\
+            .eq('race_id', race_id)\
+            .execute()
+            
+        if not entries.data:
+            return
+
+        # 2. Match names
+        for name in scratched_names:
+            norm_scratch = normalize_name(name)
+            
+            for entry in entries.data:
+                h_name = entry['hranalyzer_horses']['horse_name']
+                norm_h = normalize_name(h_name)
+                
+                # Check match
+                if norm_scratch in norm_h or norm_h in norm_scratch: 
+                    # Set scratched=True
+                    # We can update by ID directly
+                    supabase.table('hranalyzer_race_entries')\
+                        .update({'scratched': True, 'finish_position': None})\
+                        .eq('id', entry['id'])\
+                        .execute()
+                    
+                    logger.info(f"Marked {h_name} as scratched")
+                    break
+                    
+    except Exception as e:
+        logger.error(f"Error marking scratches: {e}")
 
 
 def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
