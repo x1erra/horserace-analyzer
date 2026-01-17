@@ -153,34 +153,55 @@ export default function RaceDetails() {
                     </button>
 
                     {/* Next/Prev Race Navigation */}
+                    {/* Next/Prev Race Navigation */}
                     {navigation && (
                         <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <button
-                                onClick={() => navigation.prev_race_key && navigate(`/race/${navigation.prev_race_key}`)}
-                                disabled={!navigation.prev_race_key}
-                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 ${navigation.prev_race_key
-                                    ? 'bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500'
-                                    : 'bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed'
-                                    }`}
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                                Prev Race
-                            </button>
-                            <button
-                                onClick={() => navigation.next_race_key && navigate(`/race/${navigation.next_race_key}`)}
-                                disabled={!navigation.next_race_key}
-                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 ${navigation.next_race_key
-                                    ? 'bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500'
-                                    : 'bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed'
-                                    }`}
-                            >
-                                Next Race
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
+                            {/* Debug Log */}
+                            {console.log("Navigation Data:", navigation)}
+
+                            {navigation.prev_race_key ? (
+                                <Link
+                                    to={`/race/${navigation.prev_race_key}`}
+                                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                    Prev Race
+                                </Link>
+                            ) : (
+                                <button
+                                    disabled
+                                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                    Prev Race
+                                </button>
+                            )}
+
+                            {navigation.next_race_key ? (
+                                <Link
+                                    to={`/race/${navigation.next_race_key}`}
+                                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium transition flex items-center justify-center gap-2 bg-black border-purple-900/50 text-purple-300 hover:bg-purple-900/20 hover:text-white hover:border-purple-500"
+                                >
+                                    Next Race
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </Link>
+                            ) : (
+                                <button
+                                    disabled
+                                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 bg-black/50 border-gray-800 text-gray-600 cursor-not-allowed"
+                                >
+                                    Next Race
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -312,7 +333,7 @@ export default function RaceDetails() {
                                             const style = getPostColor(entry.program_number);
                                             return (
                                                 <span
-                                                    className="inline-block w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                    className="inline-flex w-8 h-8 rounded-md items-center justify-center font-bold text-sm shadow-sm leading-none"
                                                     style={{ backgroundColor: style.bg, color: style.text }}
                                                 >
                                                     {entry.program_number}
@@ -354,7 +375,7 @@ export default function RaceDetails() {
                                         const style = getPostColor(entry.program_number);
                                         return (
                                             <div
-                                                className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                className="inline-flex w-8 h-8 rounded-md items-center justify-center font-bold text-sm shadow-sm leading-none"
                                                 style={{ backgroundColor: style.bg, color: style.text }}
                                             >
                                                 {entry.program_number || '-'}
