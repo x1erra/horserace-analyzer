@@ -116,6 +116,13 @@ export default function Betting() {
         try {
             const res = await fetch(`${API_BASE_URL}/race-details/${raceKey}`);
             const data = await res.json();
+            if (data.entries) {
+                data.entries.sort((a, b) => {
+                    const numA = parseInt(a.program_number, 10) || 999;
+                    const numB = parseInt(b.program_number, 10) || 999;
+                    return numA - numB;
+                });
+            }
             setRaceDetails(data);
             // Reset selection
             setSelectedHorseId('');
