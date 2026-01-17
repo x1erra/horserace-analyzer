@@ -2,6 +2,35 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
+const getPostColor = (number) => {
+    const num = parseInt(number);
+    if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
+
+    switch (num) {
+        case 1: return { bg: '#EF4444', text: '#FFFFFF' }; // Red
+        case 2: return { bg: '#FFFFFF', text: '#000000' }; // White
+        case 3: return { bg: '#3B82F6', text: '#FFFFFF' }; // Blue
+        case 4: return { bg: '#EAB308', text: '#000000' }; // Yellow
+        case 5: return { bg: '#22C55E', text: '#FFFFFF' }; // Green
+        case 6: return { bg: '#000000', text: '#FFFFFF' }; // Black
+        case 7: return { bg: '#F97316', text: '#FFFFFF' }; // Orange
+        case 8: return { bg: '#EC4899', text: '#FFFFFF' }; // Pink
+        case 9: return { bg: '#06B6D4', text: '#FFFFFF' }; // Turquoise
+        case 10: return { bg: '#A855F7', text: '#FFFFFF' }; // Purple
+        case 11: return { bg: '#9CA3AF', text: '#FFFFFF' }; // Grey
+        case 12: return { bg: '#84CC16', text: '#FFFFFF' }; // Lime
+        case 13: return { bg: '#78350F', text: '#FFFFFF' }; // Brown
+        case 14: return { bg: '#831843', text: '#FFFFFF' }; // Maroon
+        case 15: return { bg: '#C3B091', text: '#000000' }; // Khaki (Corrected)
+        case 16: return { bg: '#60A5FA', text: '#FFFFFF' }; // Copen Blue
+        case 17: return { bg: '#1E3A8A', text: '#FFFFFF' }; // Navy
+        case 18: return { bg: '#14532D', text: '#FFFFFF' }; // Forest Green
+        case 19: return { bg: '#0EA5E9', text: '#FFFFFF' }; // Moonstone
+        case 20: return { bg: '#D946EF', text: '#FFFFFF' }; // Fuschia
+        default: return { bg: '#374151', text: '#FFFFFF' };
+    }
+};
+
 export default function RaceDetails() {
     const { id } = useParams(); // This is the race_key
     const navigate = useNavigate();
@@ -13,6 +42,9 @@ export default function RaceDetails() {
         const fetchRaceDetails = async () => {
             try {
                 setLoading(true);
+                // Scroll to top when race changes
+                window.scrollTo(0, 0);
+
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 // Use the key from params. The backend endpoint expects race_key.
                 const response = await axios.get(`${baseUrl}/api/race-details/${id}`);
@@ -275,7 +307,19 @@ export default function RaceDetails() {
                                             {entry.finish_position || '-'}
                                         </td>
                                     )}
-                                    <td className="p-4 font-mono text-gray-400">{entry.program_number}</td>
+                                    <td className="p-4">
+                                        {(() => {
+                                            const style = getPostColor(entry.program_number);
+                                            return (
+                                                <span
+                                                    className="inline-block w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-sm"
+                                                    style={{ backgroundColor: style.bg, color: style.text }}
+                                                >
+                                                    {entry.program_number}
+                                                </span>
+                                            );
+                                        })()}
+                                    </td>
                                     <td className="p-4 font-bold text-purple-300">{entry.horse_name}</td>
                                     {isCompleted && <td className="p-4 text-sm">{entry.jockey_name || 'N/A'}</td>}
                                     {isCompleted && <td className="p-4 text-sm">{entry.trainer_name || 'N/A'}</td>}
@@ -306,15 +350,17 @@ export default function RaceDetails() {
                             }`}>
                             <div className="flex justify-between items-start mb-3">
                                 <div className="flex items-center gap-3">
-                                    {isCompleted && (
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${entry.finish_position === 1 ? 'bg-yellow-500 text-black' :
-                                            entry.finish_position === 2 ? 'bg-gray-400 text-black' :
-                                                entry.finish_position === 3 ? 'bg-orange-700 text-white' :
-                                                    'bg-gray-800 text-gray-400'
-                                            }`}>
-                                            {entry.finish_position || '-'}
-                                        </div>
-                                    )}
+                                    {isCompleted && (() => {
+                                        const style = getPostColor(entry.program_number);
+                                        return (
+                                            <div
+                                                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-sm"
+                                                style={{ backgroundColor: style.bg, color: style.text }}
+                                            >
+                                                {entry.program_number || '-'}
+                                            </div>
+                                        );
+                                    })()}
                                     <div>
                                         <div className={`font-bold text-lg leading-none ${entry.scratched ? 'text-gray-500 line-through' : 'text-white'}`}>
                                             {entry.horse_name} {entry.scratched && '(SCR)'}

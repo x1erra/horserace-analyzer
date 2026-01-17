@@ -50,7 +50,7 @@ export default function Betting() {
 
     // Derived State
     const isBoxBet = ['Exacta Box', 'Trifecta Box'].includes(betType);
-    const isKeyBet = ['Exacta Key', 'Trifecta Key'].includes(betType);
+    const isKeyBet = ['Exacta Key', 'Trifecta Key', 'Exacta', 'Trifecta'].includes(betType);
 
     // Load bets and races on mount
     useEffect(() => {
@@ -123,12 +123,22 @@ export default function Betting() {
     };
 
     const togglePosSelection = (pos, pgm) => {
+        // For Straight Exacta/Trifecta, enforce single selection per position
+        const isStraight = ['Exacta', 'Trifecta'].includes(betType);
+
         setPosSelections(prev => {
             const current = prev[pos] || [];
+
             if (current.includes(pgm)) {
                 return { ...prev, [pos]: current.filter(id => id !== pgm) };
             } else {
-                return { ...prev, [pos]: [...current, pgm] };
+                if (isStraight) {
+                    // Replace current selection for this position
+                    return { ...prev, [pos]: [pgm] };
+                } else {
+                    // Append for Key bets
+                    return { ...prev, [pos]: [...current, pgm] };
+                }
             }
         });
     };
@@ -142,12 +152,14 @@ export default function Betting() {
         } else if (betType === 'Trifecta Box') {
             // P(n,3)
             return n * (n - 1) * (n - 2) * amount;
-        } else if (betType === 'WPS') {
+        } else if (betType === 'Win Place Show') {
             return amount * 3;
+        } else if (betType === 'Win Place' || betType === 'Place Show') {
+            return amount * 2;
         } else if (isKeyBet) {
             // Recursive combination counter for Key bets
             const countCombs = (depth, currentPath) => {
-                const maxDepth = betType === 'Exacta Key' ? 2 : 3;
+                const maxDepth = (betType === 'Exacta Key' || betType === 'Exacta') ? 2 : 3;
                 if (depth > maxDepth) return 1;
 
                 const candidates = posSelections[depth] || [];
@@ -172,7 +184,7 @@ export default function Betting() {
     const isValid = isBoxBet
         ? (betType === 'Exacta Box' ? selectedHorseIds.length >= 2 : selectedHorseIds.length >= 3)
         : isKeyBet
-            ? (betType === 'Exacta Key' ? posSelections[1].length > 0 && posSelections[2].length > 0
+            ? ((betType === 'Exacta Key' || betType === 'Exacta') ? posSelections[1].length > 0 && posSelections[2].length > 0
                 : posSelections[1].length > 0 && posSelections[2].length > 0 && posSelections[3].length > 0)
             : !!selectedHorseId;
 
@@ -194,7 +206,7 @@ export default function Betting() {
             // Convert {1:[], 2:[]} to [[], []]
             // Ensure strictly ordered list
             selectionData = [];
-            const max = betType === 'Exacta Key' ? 2 : 3;
+            const max = (betType === 'Exacta Key' || betType === 'Exacta') ? 2 : 3;
             for (let i = 1; i <= max; i++) {
                 selectionData.push(posSelections[i] || []);
             }
@@ -336,13 +348,23 @@ export default function Betting() {
                         <label className="block text-gray-400 text-sm mb-1">Bet Type</label>
                         <select
                             value={betType}
-                            onChange={(e) => setBetType(e.target.value)}
+                            onChange={(e) => {
+                                setBetType(e.target.value);
+                                // Reset selections on type change to avoid confusion
+                                setSelectedHorseId('');
+                                setSelectedHorseIds([]);
+                                setPosSelections({ 1: [], 2: [], 3: [] });
+                            }}
                             className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
                         >
                             <option value="Win">Win</option>
+                            <option value="Win Place">Win Place</option>
+                            <option value="Win Place Show">Win Place Show</option>
                             <option value="Place">Place</option>
+                            <option value="Place Show">Place Show</option>
                             <option value="Show">Show</option>
-                            <option value="WPS">WPS (Win/Place/Show)</option>
+                            <option value="Exacta">Exacta (Straight)</option>
+                            <option value="Trifecta">Trifecta (Straight)</option>
                             <option value="Exacta Box">Exacta Box</option>
                             <option value="Trifecta Box">Trifecta Box</option>
                             <option value="Exacta Key">Exacta Key</option>
@@ -378,7 +400,7 @@ export default function Betting() {
                     ) : isKeyBet ? (
                         // Position Selection Grid
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                            {[1, 2, (betType === 'Trifecta Key' ? 3 : null)].filter(Boolean).map(pos => (
+                            {[1, 2, ((betType === 'Trifecta Key' || betType === 'Trifecta') ? 3 : null)].filter(Boolean).map(pos => (
                                 <div key={pos} className="bg-black/50 p-3 rounded border border-gray-800">
                                     <h5 className="text-purple-400 font-bold text-sm mb-2 text-center uppercase tracking-wide">
                                         Position {pos}
@@ -474,9 +496,11 @@ export default function Betting() {
                                 ? "Exacta Box covers all 1st & 2nd place permutations. Cost = (Horses × (Horses - 1)) × Unit Amount."
                                 : betType === 'Trifecta Box'
                                     ? "Trifecta Box covers all 1st, 2nd & 3rd place permutations. Cost = (Horses × (Horses - 1) × (Horses - 2)) × Unit Amount."
-                                    : betType === 'WPS'
-                                        ? "WPS places three separate bets (Win, Place, Show) on the same horse. Cost = 3 × Unit Amount."
-                                        : "Standard bet cost is simply the Unit Amount."
+                                    : betType === 'Win Place Show'
+                                        ? "Win Place Show (WPS) places three separate bets on the same horse. Cost = 3 × Unit Amount."
+                                        : (betType === 'Win Place' || betType === 'Place Show')
+                                            ? "Covers two positions. Cost = 2 × Unit Amount."
+                                            : "Standard bet cost is simply the Unit Amount."
                         }>
                             <svg className="w-4 h-4 text-purple-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

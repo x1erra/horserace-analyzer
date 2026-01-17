@@ -797,9 +797,15 @@ def place_bet():
             else:
                 count = 1
             cost = amount * count
-        elif bet_type == 'WPS':
+        elif bet_type == 'WPS' or bet_type == 'Win Place Show':
             # WPS = Win + Place + Show (3 bets)
             cost = amount * 3.0
+        elif bet_type == 'Win Place' or bet_type == 'Place Show':
+            # 2 bets
+            cost = amount * 2.0
+        elif bet_type == 'Exacta' or bet_type == 'Trifecta':
+            # Straight Exotics = 1 bet
+            cost = amount * 1.0
         elif 'Key' in bet_type and selection:
             # Key/Wheel Logic
             # Selection is expected to be a list of lists: [[1], [2,3], [4,5]]
@@ -831,7 +837,7 @@ def place_bet():
             elif bet_type == 'Trifecta Key':
                 # Needs 3 positions
                 if len(selection) >= 3:
-                     count = count_combinations(0, [])
+                    count = count_combinations(0, [])
                 else:
                     count = 0
             cost = amount * count
@@ -983,10 +989,45 @@ def resolve_bets():
                         elif bet_type == 'Show' and pos <= 3:
                             new_status = 'Win'
                             base_payout = my_horse.get('show_payout') or 0
-                            base_payout = my_horse.get('show_payout') or 0
                             payout = (float(base_payout) / 2.0) * unit_amount
-                            
-            elif bet_type == 'WPS':
+
+            elif bet_type == 'Win Place':
+                horse_number = bet['horse_number']
+                my_horse = next((e for e in entries if e['program_number'] == horse_number), None)
+                if not my_horse: new_status = 'Loss'
+                elif my_horse.get('scratched'): new_status = 'Scratched'
+                else:
+                    pos = my_horse.get('finish_position')
+                    if pos:
+                        total_payout = 0
+                        if pos == 1:
+                            total_payout += (float(my_horse.get('win_payout') or 0) / 2.0) * unit_amount
+                        if pos <= 2:
+                            total_payout += (float(my_horse.get('place_payout') or 0) / 2.0) * unit_amount
+                        
+                        if total_payout > 0:
+                            new_status = 'Win'
+                            payout = total_payout
+
+            elif bet_type == 'Place Show':
+                horse_number = bet['horse_number']
+                my_horse = next((e for e in entries if e['program_number'] == horse_number), None)
+                if not my_horse: new_status = 'Loss'
+                elif my_horse.get('scratched'): new_status = 'Scratched'
+                else:
+                    pos = my_horse.get('finish_position')
+                    if pos:
+                        total_payout = 0
+                        if pos <= 2:
+                            total_payout += (float(my_horse.get('place_payout') or 0) / 2.0) * unit_amount
+                        if pos <= 3:
+                            total_payout += (float(my_horse.get('show_payout') or 0) / 2.0) * unit_amount
+                        
+                        if total_payout > 0:
+                            new_status = 'Win'
+                            payout = total_payout
+
+            elif bet_type == 'WPS' or bet_type == 'Win Place Show':
                 horse_number = bet['horse_number']
                 my_horse = next((e for e in entries if e['program_number'] == horse_number), None)
                 
@@ -1033,10 +1074,8 @@ def resolve_bets():
                 if not selection:
                     new_status = 'Loss'
                 else:
-                    # Get correct finishers numbers
-                    # Need at least 2 finishers for Exacta, 3 for Trifecta
                     if len(finishers) < 2:
-                        continue # Can't resolve yet?
+                        continue 
                         
                     first_num = finishers[0]['program_number']
                     second_num = finishers[1]['program_number']
@@ -1046,7 +1085,6 @@ def resolve_bets():
                     wager_label = 'Exacta' if bet_type == 'Exacta Box' else 'Trifecta'
                     
                     if bet_type == 'Exacta Box':
-                        # Check if 1st and 2nd are in selection
                         if first_num in selection and second_num in selection:
                             is_win = True
                             
@@ -1056,7 +1094,6 @@ def resolve_bets():
                              
                     if is_win:
                         new_status = 'Win'
-                        # Get Payout from exotic_payouts table
                         exotics = supabase.table('hranalyzer_exotic_payouts')\
                             .select('*')\
                             .eq('race_id', race_id)\
@@ -1064,33 +1101,25 @@ def resolve_bets():
                             .execute()
                         
                         if exotics.data:
-                            # Use the first one found
                             base_payout = exotics.data[0]['payout']
                             payout = (float(base_payout) / 2.0) * unit_amount 
                         else:
                             payout = 0 
                             
-                            payout = 0 
-                            
-            elif 'Key' in bet_type and selection:
-                # Key/Wheel Resolution
-                # Check if the finishers match the positional requirements
-                # finishers is list of entry objects sorted by position
-                
+            elif ('Key' in bet_type or bet_type in ['Exacta', 'Trifecta']) and selection:
+                # Expanded Key/Wheel/Straight Resolution
                 required_positions = 0
-                if bet_type == 'Exacta Key': required_positions = 2
-                elif bet_type == 'Trifecta Key': required_positions = 3
+                is_straight = bet_type in ['Exacta', 'Trifecta']
+                
+                if 'Exacta' in bet_type: required_positions = 2
+                elif 'Trifecta' in bet_type: required_positions = 3
                 
                 if len(finishers) >= required_positions and len(selection) >= required_positions:
                     is_win = True
                     for i in range(required_positions):
-                        # The horse that finished in position i+1
                         finisher_num = finishers[i]['program_number']
+                        allowed_for_pos = selection[i] # Expect list of allowed numbers
                         
-                        # The allowable horses for this position (from bet selection)
-                        allowed_for_pos = selection[i]
-                        
-                        # Check: Winner must be in pos 1 list, 2nd in pos 2 list, etc.
                         if finisher_num not in allowed_for_pos:
                             is_win = False
                             break
@@ -1099,8 +1128,6 @@ def resolve_bets():
                         new_status = 'Win'
                         wager_label = 'Exacta' if 'Exacta' in bet_type else 'Trifecta'
                         
-                        # Get Payout
-                        # Note: Payouts for keys are same as straight exotics if the combination matches
                         exotics = supabase.table('hranalyzer_exotic_payouts')\
                             .select('*')\
                             .eq('race_id', race_id)\

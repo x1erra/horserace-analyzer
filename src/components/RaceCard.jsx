@@ -1,5 +1,34 @@
 import { Link } from 'react-router-dom';
 
+const getPostColor = (number) => {
+    const num = parseInt(number);
+    if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
+
+    switch (num) {
+        case 1: return { bg: '#EF4444', text: '#FFFFFF' }; // Red
+        case 2: return { bg: '#FFFFFF', text: '#000000' }; // White
+        case 3: return { bg: '#3B82F6', text: '#FFFFFF' }; // Blue
+        case 4: return { bg: '#EAB308', text: '#000000' }; // Yellow
+        case 5: return { bg: '#22C55E', text: '#FFFFFF' }; // Green
+        case 6: return { bg: '#000000', text: '#FFFFFF' }; // Black
+        case 7: return { bg: '#F97316', text: '#FFFFFF' }; // Orange
+        case 8: return { bg: '#EC4899', text: '#FFFFFF' }; // Pink
+        case 9: return { bg: '#06B6D4', text: '#FFFFFF' }; // Turquoise
+        case 10: return { bg: '#A855F7', text: '#FFFFFF' }; // Purple
+        case 11: return { bg: '#9CA3AF', text: '#FFFFFF' }; // Grey
+        case 12: return { bg: '#84CC16', text: '#FFFFFF' }; // Lime
+        case 13: return { bg: '#78350F', text: '#FFFFFF' }; // Brown
+        case 14: return { bg: '#831843', text: '#FFFFFF' }; // Maroon
+        case 15: return { bg: '#C3B091', text: '#000000' }; // Khaki (Corrected)
+        case 16: return { bg: '#60A5FA', text: '#FFFFFF' }; // Copen Blue
+        case 17: return { bg: '#1E3A8A', text: '#FFFFFF' }; // Navy
+        case 18: return { bg: '#14532D', text: '#FFFFFF' }; // Forest Green
+        case 19: return { bg: '#0EA5E9', text: '#FFFFFF' }; // Moonstone
+        case 20: return { bg: '#D946EF', text: '#FFFFFF' }; // Fuschia
+        default: return { bg: '#374151', text: '#FFFFFF' };
+    }
+};
+
 export default function RaceCard({ race, linkTo, minimal = false }) {
     // Determine link if not provided
     const detailsLink = linkTo || `/race/${race.race_key}`;
@@ -79,14 +108,17 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                             {race.results.map((result) => (
                                 <div key={result.position} className="flex justify-between items-center text-sm">
                                     <div className="flex items-center gap-2 overflow-hidden">
-                                        <span className={`
-                                            w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full text-xs font-bold text-black
-                                            ${result.position === 1 ? 'bg-yellow-400' :
-                                                result.position === 2 ? 'bg-gray-300' :
-                                                    'bg-orange-400'}
-                                        `}>
-                                            {result.position}
-                                        </span>
+                                        {(() => {
+                                            const style = getPostColor(result.number);
+                                            return (
+                                                <span
+                                                    className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full text-xs font-bold shadow-sm"
+                                                    style={{ backgroundColor: style.bg, color: style.text }}
+                                                >
+                                                    {result.number}
+                                                </span>
+                                            );
+                                        })()}
                                         <span className="text-white font-medium truncate">#{result.number} {result.horse}</span>
                                     </div>
                                     {/* Trainer Name Display - Right Side */}
