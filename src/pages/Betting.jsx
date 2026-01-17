@@ -205,7 +205,7 @@ export default function Betting() {
             : !!selectedHorseId;
 
     const calculateStats = (bets) => {
-        const resolved = bets.filter(ticket => ticket.status !== 'Pending');
+        const resolved = bets.filter(ticket => !['Pending', 'Returned', 'Cancelled'].includes(ticket.status));
         const wins = resolved.filter(ticket => ticket.status === 'Win').length;
         const rate = resolved.length > 0 ? Math.round((wins / resolved.length) * 100) : 0;
 

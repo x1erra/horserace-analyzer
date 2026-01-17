@@ -4,6 +4,35 @@ import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
 
+const getPostColor = (number) => {
+    const num = parseInt(number);
+    if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
+
+    switch (num) {
+        case 1: return { bg: '#EF4444', text: '#FFFFFF' }; // Red
+        case 2: return { bg: '#FFFFFF', text: '#000000' }; // White
+        case 3: return { bg: '#3B82F6', text: '#FFFFFF' }; // Blue
+        case 4: return { bg: '#EAB308', text: '#000000' }; // Yellow
+        case 5: return { bg: '#22C55E', text: '#FFFFFF' }; // Green
+        case 6: return { bg: '#000000', text: '#FACC15' }; // Black with Yellow text
+        case 7: return { bg: '#F97316', text: '#000000' }; // Orange with Black text
+        case 8: return { bg: '#EC4899', text: '#000000' }; // Pink with Black text
+        case 9: return { bg: '#06B6D4', text: '#000000' }; // Turquoise with Black text
+        case 10: return { bg: '#A855F7', text: '#FFFFFF' }; // Purple
+        case 11: return { bg: '#9CA3AF', text: '#FFFFFF' }; // Grey
+        case 12: return { bg: '#84CC16', text: '#000000' }; // Lime with Black text
+        case 13: return { bg: '#78350F', text: '#FFFFFF' }; // Brown
+        case 14: return { bg: '#831843', text: '#FFFFFF' }; // Maroon
+        case 15: return { bg: '#C3B091', text: '#000000' }; // Khaki (Corrected)
+        case 16: return { bg: '#60A5FA', text: '#FFFFFF' }; // Copen Blue
+        case 17: return { bg: '#1E3A8A', text: '#FFFFFF' }; // Navy
+        case 18: return { bg: '#14532D', text: '#FFFFFF' }; // Forest Green
+        case 19: return { bg: '#0EA5E9', text: '#FFFFFF' }; // Moonstone
+        case 20: return { bg: '#D946EF', text: '#FFFFFF' }; // Fuschia
+        default: return { bg: '#374151', text: '#FFFFFF' };
+    }
+};
+
 export default function Scratches() {
     const [loading, setLoading] = useState(true);
     const [scratches, setScratches] = useState([]);
@@ -58,8 +87,8 @@ export default function Scratches() {
                     <button
                         onClick={() => setViewMode('upcoming')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'upcoming'
-                                ? 'bg-yellow-500/20 text-yellow-500'
-                                : 'text-gray-400 hover:text-white'
+                            ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                            : 'text-gray-400 hover:text-white border border-transparent'
                             }`}
                     >
                         Upcoming
@@ -67,8 +96,8 @@ export default function Scratches() {
                     <button
                         onClick={() => setViewMode('all')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'all'
-                                ? 'bg-yellow-500/20 text-yellow-500'
-                                : 'text-gray-400 hover:text-white'
+                            ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                            : 'text-gray-400 hover:text-white border border-transparent'
                             }`}
                     >
                         All History
@@ -77,7 +106,7 @@ export default function Scratches() {
             </div>
 
             {/* Content */}
-            <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-xl">
+            <div className="bg-black rounded-xl border border-purple-900/20 overflow-hidden shadow-xl">
                 {loading ? (
                     <div className="p-12 text-center text-gray-500 animate-pulse">
                         Loading scratch data...
@@ -94,7 +123,7 @@ export default function Scratches() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
-                                <tr className="border-b border-gray-800 bg-gray-900/50 text-gray-400 text-sm uppercase tracking-wider">
+                                <tr className="border-b border-purple-900/30 bg-purple-900/20 text-purple-300 text-sm uppercase tracking-wider">
                                     <th className="p-4">Date</th>
                                     <th className="p-4">Track</th>
                                     <th className="p-4">Race</th>
@@ -103,9 +132,9 @@ export default function Scratches() {
                                     <th className="p-4">Status</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-800">
+                            <tbody className="divide-y divide-purple-900/30">
                                 {scratches.map((item) => (
-                                    <tr key={item.id} className="hover:bg-gray-800/50 transition-colors group">
+                                    <tr key={item.id} className="hover:bg-purple-900/10 transition-colors group">
                                         <td className="p-4 text-gray-300 font-medium">
                                             {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
                                         </td>
@@ -119,10 +148,18 @@ export default function Scratches() {
                                         </td>
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 font-bold text-sm border border-red-500/30">
-                                                    {item.program_number}
-                                                </div>
-                                                <span className="text-white font-medium group-hover:text-yellow-400 transition-colors">
+                                                {(() => {
+                                                    const style = getPostColor(item.program_number);
+                                                    return (
+                                                        <div
+                                                            className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                            style={{ backgroundColor: style.bg, color: style.text }}
+                                                        >
+                                                            {item.program_number}
+                                                        </div>
+                                                    );
+                                                })()}
+                                                <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
                                                     {item.horse_name || 'Unknown'}
                                                 </span>
                                             </div>
