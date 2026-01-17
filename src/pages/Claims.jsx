@@ -148,7 +148,7 @@ export default function Claims() {
                 <select
                     value={selectedTrack}
                     onChange={(e) => setSelectedTrack(e.target.value)}
-                    className="w-full md:w-auto bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
+                    className="w-full md:w-auto bg-black border border-purple-900/30 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
                 >
                     {tracks.map(track => (
                         <option key={track} value={track}>{track}</option>
@@ -157,7 +157,7 @@ export default function Claims() {
                 <select
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full md:w-auto bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
+                    className="w-full md:w-auto bg-black border border-purple-900/30 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
                 >
                     {dates.map(date => (
                         <option key={date} value={date}>{date}</option>
@@ -178,7 +178,7 @@ export default function Claims() {
                 <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="bg-gray-900/50 border-b border-purple-900/30 text-gray-400 text-sm uppercase">
+                            <tr className="bg-purple-900/20 border-b border-purple-900/30 text-purple-300 text-sm uppercase">
                                 <th
                                     className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
                                     onClick={() => handleSort('race_date')}
@@ -347,7 +347,7 @@ export default function Claims() {
                                 onClick={() => paginate(currentPage - 1)}
                                 disabled={currentPage === 1}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
                                     : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
@@ -362,7 +362,7 @@ export default function Claims() {
                                 onClick={() => paginate(currentPage + 1)}
                                 disabled={currentPage === totalPages}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
                                     : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >

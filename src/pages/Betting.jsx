@@ -401,8 +401,8 @@ export default function Betting() {
                         onClick={() => setIsBankModalOpen(true)}
                         className="group flex items-center gap-3 bg-gray-900 border border-purple-500/30 px-4 py-2 rounded-lg hover:bg-gray-800 transition shadow-[0_0_15px_rgba(147,51,234,0.1)]"
                     >
-                        <div className="bg-purple-900/50 p-1.5 rounded-full group-hover:bg-purple-600 transition">
-                            <Wallet className="w-5 h-5 text-purple-200" />
+                        <div className="bg-purple-900/30 p-1.5 rounded-full group-hover:bg-purple-600/40 transition">
+                            <Wallet className="w-5 h-5 text-purple-300" />
                         </div>
                         <div className="text-left">
                             <span className="block text-[10px] text-gray-400 uppercase tracking-widest font-bold">Wallet</span>
@@ -414,7 +414,7 @@ export default function Betting() {
                     <button
                         onClick={handleResolveBets}
                         disabled={loading}
-                        className="bg-purple-900/20 border border-purple-600 hover:bg-purple-900/50 text-white px-4 py-3 rounded-lg transition duration-200 flex items-center gap-2 disabled:opacity-50"
+                        className="bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white px-4 py-3 rounded-lg transition duration-200 flex items-center gap-2 disabled:opacity-50 shadow-[0_0_10px_rgba(147,51,234,0.1)]"
                     >
                         {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
                         <span className="hidden md:inline">Check Results</span>
@@ -765,6 +765,12 @@ export default function Betting() {
                         <button
                             type="submit"
                             disabled={!isValid || !selectedRaceId}
+                            className={`
+                                w-full py-4 rounded-lg font-bold text-lg transition-all
+                                ${isValid && selectedRaceId
+                                    ? 'bg-purple-900/40 text-purple-100 border border-purple-500/30 hover:bg-purple-800/50 hover:border-purple-500/50 shadow-[0_0_15px_rgba(147,51,234,0.1)]'
+                                    : 'bg-gray-900 text-gray-600 border border-gray-800 cursor-not-allowed opacity-50'}
+                            `}
                         >
                             Place Bet
                         </button>

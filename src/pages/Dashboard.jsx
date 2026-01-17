@@ -74,7 +74,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                         onClick={onToggleFavorite}
                         className={`p-1.5 rounded-full transition-all duration-200 ${isFavorite
                             ? 'text-yellow-500 bg-yellow-500/10'
-                            : 'text-gray-400 opacity-30 hover:opacity-100 hover:text-yellow-500'
+                            : 'text-gray-600 opacity-40 hover:opacity-100 hover:text-yellow-500'
                             }`}
                         title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
                     >
@@ -87,7 +87,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                     <span className="text-gray-400">Total Races</span>
                     <span className="text-white font-medium">{track.total}</span>
                 </div>
-                <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                <div className="w-full bg-purple-900/20 h-1.5 rounded-full overflow-hidden border border-purple-900/30">
                     <div
                         className="bg-green-500 h-full"
                         style={{ width: `${(track.completed / track.total) * 100}%` }}
@@ -101,7 +101,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
         </div>
 
         {/* Additional Info: Next / Last */}
-        <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-gray-800">
+        <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-purple-900/20">
             <div>
                 <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Last Winner</span>
                 {track.last_race_winner ? (
@@ -241,7 +241,7 @@ export default function Dashboard() {
                 </div>
                 <Link
                     to="/upload"
-                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-5 py-2.5 rounded-lg transition text-sm font-medium flex items-center gap-2 shadow-[0_0_15px_rgba(147,51,234,0.3)]"
+                    className="bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-white px-5 py-2.5 rounded-lg transition text-sm font-medium flex items-center gap-2 shadow-[0_0_10px_rgba(147,51,234,0.1)]"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -258,7 +258,7 @@ export default function Dashboard() {
                         <select
                             value={selectedTrack}
                             onChange={(e) => setSelectedTrack(e.target.value)}
-                            className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
+                            className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
                         >
                             <option value="All">All Tracks ({todaySummary.length})</option>
                             {todaySummary.map(item => (
@@ -273,7 +273,7 @@ export default function Dashboard() {
                         <select
                             value={selectedStatus}
                             onChange={(e) => setSelectedStatus(e.target.value)}
-                            className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
+                            className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
                         >
                             <option value="All">All Races</option>
                             <option value="Upcoming">Upcoming Only</option>
@@ -284,7 +284,7 @@ export default function Dashboard() {
                 <button
                     onClick={() => handleLoadRaces()}
                     disabled={loading}
-                    className="w-full md:w-auto bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-[0_0_15px_rgba(147,51,234,0.3)] flex items-center justify-center gap-2 h-[42px]"
+                    className="w-full md:w-auto bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold shadow-[0_0_10px_rgba(147,51,234,0.1)] flex items-center justify-center gap-2 h-[42px]"
                 >
                     {loading ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

@@ -203,7 +203,7 @@ export default function Results() {
                                             <span className="text-purple-300 font-bold">{result.winner || 'N/A'}</span>
                                         </div>
                                         {result.link && result.link !== '#' && (
-                                            <a href={result.link} target="_blank" rel="noopener noreferrer" className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+                                            <a href={result.link} target="_blank" rel="noopener noreferrer" className="bg-purple-900/40 text-purple-100 border border-purple-500/30 hover:bg-purple-800/50 hover:border-purple-500/50 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-[0_0_10px_rgba(147,51,234,0.1)]">
                                                 Chart
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -244,7 +244,7 @@ export default function Results() {
                                 onClick={() => paginate(currentPage - 1)}
                                 disabled={currentPage === 1}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === 1
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
                                     : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >
@@ -259,7 +259,7 @@ export default function Results() {
                                 onClick={() => paginate(currentPage + 1)}
                                 disabled={currentPage === totalPages}
                                 className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
                                     : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                     }`}
                             >

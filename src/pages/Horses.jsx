@@ -53,8 +53,8 @@ export default function Horses() {
                             <div className="text-3xl font-bold text-purple-400 mb-4">Speed Rating: {horse.speed}</div>
                             <p className="text-lg text-purple-300 mb-6">Recent Form: {horse.form}</p>
                             <Link
-                                to={`/horse/${horse.id}`} // Placeholder link; create HorseDetails page later if needed
-                                className="w-full block bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-md transition text-center"
+                                to={`/horse/${horse.id}`}
+                                className="w-full block bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white py-2 rounded-md transition text-center shadow-[0_0_10px_rgba(147,51,234,0.1)]"
                             >
                                 View Profile
                             </Link>

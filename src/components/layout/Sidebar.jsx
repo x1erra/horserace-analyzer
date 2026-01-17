@@ -37,7 +37,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -48,7 +50,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/races"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -59,7 +63,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/results"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -70,7 +76,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/claims"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -81,7 +89,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/scratches"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -92,7 +102,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/horses"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -103,7 +115,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/predictions"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -114,7 +128,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/betting"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >
@@ -125,7 +141,9 @@ export default function Sidebar({ isOpen, onClose }) {
                         to="/upload"
                         onClick={onClose}
                         className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition ${isActive ? 'bg-purple-800 text-white' : 'hover:bg-purple-900'
+                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
+                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
+                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
                             }`
                         }
                     >

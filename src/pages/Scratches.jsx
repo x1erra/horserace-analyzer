@@ -102,21 +102,21 @@ export default function Scratches() {
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3 bg-gray-900 p-1 rounded-lg border border-gray-800">
+                <div className="flex items-center gap-3 bg-black p-1 rounded-lg border border-purple-900/30">
                     <button
                         onClick={() => setViewMode('upcoming')}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'upcoming'
-                            ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                            : 'text-gray-400 hover:text-white border border-transparent'
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'upcoming'
+                            ? 'bg-purple-900/40 text-purple-100 border border-purple-500/30 shadow-[0_0_10px_rgba(147,51,234,0.2)]'
+                            : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
                         Upcoming
                     </button>
                     <button
                         onClick={() => setViewMode('all')}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'all'
-                            ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                            : 'text-gray-400 hover:text-white border border-transparent'
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'all'
+                            ? 'bg-purple-900/40 text-purple-100 border border-purple-500/30 shadow-[0_0_10px_rgba(147,51,234,0.2)]'
+                            : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
                         All History
@@ -158,7 +158,7 @@ export default function Scratches() {
                                             {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
                                         </td>
                                         <td className="p-4">
-                                            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-gray-800 text-gray-300 text-xs font-bold border border-gray-700">
+                                            <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-purple-900/20 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
                                                 {item.track_code}
                                             </span>
                                         </td>
@@ -226,8 +226,8 @@ export default function Scratches() {
                             onClick={handlePrevPage}
                             disabled={page === 1}
                             className={`px-3 py-1 rounded text-sm font-medium transition ${page === 1
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
+                                : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                 }`}
                         >
                             Previous
@@ -241,8 +241,8 @@ export default function Scratches() {
                             onClick={handleNextPage}
                             disabled={page >= totalPages}
                             className={`px-3 py-1 rounded text-sm font-medium transition ${page >= totalPages
-                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
+                                : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                 }`}
                         >
                             Next

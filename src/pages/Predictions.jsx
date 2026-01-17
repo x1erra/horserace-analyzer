@@ -102,7 +102,7 @@ export default function Predictions() {
                     </tbody>
                 </table>
             </div>
-            <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-md transition duration-200">
+            <button className="bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white px-6 py-3 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.1)]">
                 Run New Predictions
             </button>
         </div>

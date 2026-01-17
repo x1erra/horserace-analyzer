@@ -210,7 +210,7 @@ export default function Races() {
                     onClick={() => handleTabChange('today')}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'today'
                         ? 'text-purple-400 border-b-2 border-purple-400'
-                        : 'text-gray-400 hover:text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-purple-900/10'
                         }`}
                 >
                     Today's Races
@@ -219,7 +219,7 @@ export default function Races() {
                     onClick={() => handleTabChange('past')}
                     className={`px-6 py-3 font-medium transition ${activeTab === 'past'
                         ? 'text-purple-400 border-b-2 border-purple-400'
-                        : 'text-gray-400 hover:text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-purple-900/10'
                         }`}
                 >
                     Past Races
@@ -234,7 +234,7 @@ export default function Races() {
                         <select
                             value={selectedTrack}
                             onChange={(e) => setSelectedTrack(e.target.value)}
-                            className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
+                            className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition appearance-none"
                         >
                             {availableTracks.map(track => (
                                 <option key={track.code} value={track.code}>{track.name}</option>
@@ -248,7 +248,7 @@ export default function Races() {
                             <select
                                 value={selectedDate}
                                 onChange={(e) => setSelectedDate(e.target.value)}
-                                className="w-full bg-black border border-gray-800 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition"
+                                className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 transition appearance-none"
                             >
                                 <option value="All Dates">All Dates</option>
                                 {availableDates.filter(d => d !== 'All Dates').map(date => (
@@ -262,7 +262,7 @@ export default function Races() {
                 <button
                     onClick={handleSearch}
                     disabled={loading}
-                    className="w-full md:w-auto bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold flex items-center justify-center gap-2 h-[42px] shadow-[0_0_15px_rgba(147,51,234,0.3)]"
+                    className="w-full md:w-auto bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 disabled:opacity-50 text-white px-8 py-2.5 rounded-lg transition font-bold flex items-center justify-center gap-2 h-[42px] shadow-[0_0_10px_rgba(147,51,234,0.1)]"
                 >
                     {loading ? (
                         <>
