@@ -41,6 +41,32 @@ def normalize_name(name: str) -> str:
     return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
 
 
+def normalize_pgm(pgm: str) -> str:
+    """
+    Normalize program number (e.g. '08' -> '8', '1A' -> '1A')
+    """
+    if not pgm:
+        return "0"
+    
+    pgm = str(pgm).strip().upper()
+    
+    # Remove leading zeros if it's numeric-ish (but keep '0' if it is just '0')
+    # Regex: replace leading zeros at start of string, but only if followed by other characters?
+    # Actually just stripping leading zeros works for '01', '01A' -> '1A'
+    
+    # If strictly numeric, simple int conversion
+    if pgm.isdigit():
+        return str(int(pgm))
+        
+    # If alphanumeric, try to strip leading zeros from the numeric part? 
+    # E.g. "01A" -> "1A". 
+    # Let's simple regex: ^0+
+    pgm = re.sub(r'^0+', '', pgm)
+    
+    return pgm if pgm else "0"
+
+
+
 def build_equibase_url(track_code: str, race_date: date, race_number: int) -> str:
     """
     Build Equibase PDF URL for a specific race
@@ -350,7 +376,7 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
 
         try:
             horse_data = {
-                'program_number': str(row[0]).strip() if row[0] else str(row_idx),
+                'program_number': normalize_pgm(str(row[0]).strip() if row[0] else str(row_idx)),
                 'horse_name': str(row[1]).strip() if len(row) > 1 and row[1] else None,
                 'jockey': str(row[2]).strip() if len(row) > 2 and row[2] else None,
                 'trainer': str(row[3]).strip() if len(row) > 3 and row[3] else None,
@@ -1026,9 +1052,38 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
 
         # Insert horses and entries
         horses_data = race_data.get('horses', [])
+        updated_entry_ids = []
+        
         if horses_data:
             for horse_data in horses_data:
-                insert_horse_entry(supabase, race_id, horse_data)
+                entry_id = insert_horse_entry(supabase, race_id, horse_data)
+                if entry_id:
+                    updated_entry_ids.append(entry_id)
+
+        # ---------------------------------------------------------
+        # ZOMBIE CLEANUP: Scratch entries that weren't updated
+        # ---------------------------------------------------------
+        if updated_entry_ids:
+            try:
+                # 1. Fetch all active (non-scratched) entries for this race
+                all_entries = supabase.table('hranalyzer_race_entries')\
+                    .select('id, program_number, scratched')\
+                    .eq('race_id', race_id)\
+                    .execute()
+                
+                if all_entries.data:
+                    for entry in all_entries.data:
+                        # If entry is NOT in our update list, and NOT already scratched
+                        if entry['id'] not in updated_entry_ids and not entry.get('scratched'):
+                            logger.warning(f"Marking ZOMBIE entry as scratched: ID {entry['id']} (Pgm {entry['program_number']})")
+                            
+                            supabase.table('hranalyzer_race_entries')\
+                                .update({'scratched': True, 'finish_position': None})\
+                                .eq('id', entry['id'])\
+                                .execute()
+            except Exception as e:
+                logger.error(f"Error during zombie cleanup: {e}")
+        # ---------------------------------------------------------
 
         # Insert exotic payouts
         payouts = race_data.get('exotic_payouts', [])
@@ -1073,27 +1128,83 @@ def get_or_create_participant(supabase, table_name: str, name_col: str, name_val
     return None
 
 
-def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
-    """Insert horse and race entry"""
+def insert_horse_entry(supabase, race_id: int, horse_data: Dict) -> Optional[str]:
+    """
+    Insert horse and race entry
+    Returns: Entry ID if successful, None otherwise
+    """
     try:
         horse_name = horse_data.get('horse_name')
         if not horse_name:
-            return
+            return None
 
-        # Get or create horse
+        # -------------------------------------------------------
+        # CANONICAL NAME LOOKUP (Fuzzy Match)
+        # -------------------------------------------------------
+        horse_id = None
+        
+        # 1. Try Exact Match
         horse_result = supabase.table('hranalyzer_horses').select('id').eq('horse_name', horse_name).execute()
-
+        
         if horse_result.data and len(horse_result.data) > 0:
             horse_id = horse_result.data[0]['id']
         else:
-            # Create horse
-            new_horse = {'horse_name': horse_name}
-            horse_insert = supabase.table('hranalyzer_horses').insert(new_horse).execute()
-            if horse_insert.data:
-                horse_id = horse_insert.data[0]['id']
-            else:
-                logger.error(f"Could not create horse: {horse_name}")
-                return
+            # 2. Try Normalized Match (Fuzzy)
+            # Fetch all horses that *might* match? No, that's too expensive.
+            # Ideally we'd have a normalized column. 
+            # For now, we can check if there's a horse with the normalized name? No, names are stored display-friendly.
+            
+            # Since we can't easily query by function in Supabase-py without RPC,
+            # We will assume if exact match fails, it's potentially a new horse OR a weirdly formatted existing one.
+            # But let's check strict "squeezed" match if the name looks squeezed?
+            # E.g. "StayedinforHalf"
+            
+            # Optimization: Only do deep search if name looks suspicious (CamelCase without spaces?)
+            # Or just blindly create new horse.
+            
+            # Wait, the user SPECIFICALLY asked for this fix.
+            # We can try to search for the name with spaces?
+            # "StayedinforHalf" -> "Stayed In For Half" is hard to guess.
+            # "Stayed in for Half" -> "StayedinforHalf" is easy.
+            
+            # The problem: Data has "StayedinforHalf" (PDF result) but DB has "Stayed in for Half" (Entry)
+            # So looking up "StayedinforHalf" fails.
+            
+            # We need to find "Stayed in for Half" in DB using "StayedinforHalf".
+            # Without a normalized column, this is hard SQL.
+            # BUT, we likely ALREADY created the entry in `crawl_entries` recently.
+            # So the horse should exist in `hranalyzer_race_entries` for this `race_id`!
+            
+            # SMART FIX: Look at existing entries for THIS race first!
+            # We have `race_id`. We can get all horse_ids and names for this race.
+            
+            race_horses = supabase.table('hranalyzer_race_entries')\
+                .select('horse_id, hranalyzer_horses(id, horse_name)')\
+                .eq('race_id', race_id)\
+                .execute()
+                
+            found_local_match = False
+            if race_horses.data:
+                norm_target = normalize_name(horse_name)
+                for entry in race_horses.data:
+                    db_horse = entry.get('hranalyzer_horses')
+                    if db_horse:
+                        db_name = db_horse.get('horse_name')
+                        if normalize_name(db_name) == norm_target:
+                            horse_id = db_horse['id']
+                            found_local_match = True
+                            logger.info(f"Fuzzy matched '{horse_name}' to existing '{db_name}' in race entries.")
+                            break
+            
+            if not found_local_match:
+                # Fallback: Just create new horse
+                new_horse = {'horse_name': horse_name}
+                horse_insert = supabase.table('hranalyzer_horses').insert(new_horse).execute()
+                if horse_insert.data:
+                    horse_id = horse_insert.data[0]['id']
+                else:
+                    logger.error(f"Could not create horse: {horse_name}")
+                    return None
 
         # Get/Create Jockey
         jockey_id = None
@@ -1111,7 +1222,7 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
         entry_data = {
             'race_id': race_id,
             'horse_id': horse_id,
-            'program_number': horse_data.get('program_number'),
+            'program_number': normalize_pgm(horse_data.get('program_number')), # Normalize PGM here too
             'finish_position': horse_data.get('finish_position'),
             'jockey_id': jockey_id,
             'trainer_id': trainer_id,
@@ -1126,13 +1237,19 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict):
         try:
             # Use upsert to handle case where entries were pre-populated by DRF PDF upload
             # on_conflict specified to match unique constraint (race_id, program_number)
-            supabase.table('hranalyzer_race_entries').upsert(entry_data, on_conflict='race_id, program_number').execute()
+            res = supabase.table('hranalyzer_race_entries').upsert(entry_data, on_conflict='race_id, program_number').execute()
             logger.debug(f"Upserted entry for horse {horse_name}")
+            
+            if res.data:
+                return res.data[0]['id']
+            
         except Exception as e:
             logger.error(f"Error upserting horse entry: {e}")
-
+            
     except Exception as e:
         logger.error(f"Error inserting horse entry: {e}")
+        
+    return None
 
 
 def insert_exotic_payout(supabase, race_id: int, payout_data: Dict):

@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 import subprocess
 
 from supabase_client import get_supabase_client
-from crawl_equibase import get_or_create_track, get_or_create_participant, COMMON_TRACKS
+from crawl_equibase import get_or_create_track, get_or_create_participant, normalize_pgm, COMMON_TRACKS
 
 logger = logging.getLogger(__name__)
 
@@ -658,7 +658,7 @@ def insert_upcoming_race(supabase, track_code, race_date, race_data, allow_compl
             entry_obj = {
                 'race_id': race_id,
                 'horse_id': horse_id,
-                'program_number': pgm_val,
+                'program_number': normalize_pgm(pgm_val),
                 'jockey_id': jockey_id,
                 'trainer_id': trainer_id,
                 'trainer_id': trainer_id,
