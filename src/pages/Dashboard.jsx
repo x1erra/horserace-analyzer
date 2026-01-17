@@ -73,8 +73,8 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                     <button
                         onClick={onToggleFavorite}
                         className={`p-1.5 rounded-full transition-all duration-200 ${isFavorite
-                                ? 'text-yellow-500 bg-yellow-500/10'
-                                : 'text-gray-400 opacity-30 hover:opacity-100 hover:text-yellow-500'
+                            ? 'text-yellow-500 bg-yellow-500/10'
+                            : 'text-gray-400 opacity-30 hover:opacity-100 hover:text-yellow-500'
                             }`}
                         title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
                     >
@@ -309,7 +309,7 @@ export default function Dashboard() {
                     {favoritedTracks.length > 0 && (
                         <div className="space-y-4">
                             <div className="flex items-center gap-2 text-purple-300">
-                                <HiStar className="w-5 h-5 text-yellow-500" />
+                                <HiStar className="w-5 h-5" />
                                 <h4 className="font-semibold text-lg">Favorite Tracks</h4>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
