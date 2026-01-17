@@ -41,7 +41,8 @@ def health_check():
         supabase.table('hranalyzer_tracks').select('id').limit(1).execute()
         return jsonify({
             'status': 'healthy',
-            'database': 'connected'
+            'database': 'connected',
+            'version': '1.0.1'
         })
     except Exception as e:
         traceback.print_exc()
