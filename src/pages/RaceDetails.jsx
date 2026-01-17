@@ -144,7 +144,7 @@ export default function RaceDetails() {
                     {cameFromChanges ? (
                         <Link
                             to="/changes"
-                            className="flex items-center gap-2 bg-black border border-yellow-900/50 hover:bg-yellow-900/20 text-yellow-300 hover:text-yellow-100 px-4 py-2 rounded-lg transition group text-sm font-medium"
+                            className="flex items-center gap-2 bg-black border border-purple-900/50 hover:bg-purple-900/20 text-purple-300 hover:text-white px-4 py-2 rounded-lg transition group text-sm font-medium"
                         >
                             <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
