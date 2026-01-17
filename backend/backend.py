@@ -42,7 +42,7 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'version': '1.0.1'
+            'version': '1.0.2'
         })
     except Exception as e:
         traceback.print_exc()
