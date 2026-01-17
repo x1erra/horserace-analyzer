@@ -112,14 +112,14 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                                             const style = getPostColor(result.number);
                                             return (
                                                 <span
-                                                    className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full text-xs font-bold shadow-sm"
+                                                    className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-md text-xs font-bold shadow-sm leading-none"
                                                     style={{ backgroundColor: style.bg, color: style.text }}
                                                 >
                                                     {result.number}
                                                 </span>
                                             );
                                         })()}
-                                        <span className="text-white font-medium truncate">#{result.number} {result.horse}</span>
+                                        <span className="text-white font-medium truncate">{result.horse}</span>
                                     </div>
                                     {/* Trainer Name Display - Right Side */}
                                     {result.trainer && result.trainer !== 'N/A' && (

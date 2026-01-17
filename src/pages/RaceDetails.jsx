@@ -312,7 +312,7 @@ export default function RaceDetails() {
                                             const style = getPostColor(entry.program_number);
                                             return (
                                                 <span
-                                                    className="inline-block w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-sm"
+                                                    className="inline-block w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
                                                     style={{ backgroundColor: style.bg, color: style.text }}
                                                 >
                                                     {entry.program_number}
@@ -354,7 +354,7 @@ export default function RaceDetails() {
                                         const style = getPostColor(entry.program_number);
                                         return (
                                             <div
-                                                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-sm"
+                                                className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
                                                 style={{ backgroundColor: style.bg, color: style.text }}
                                             >
                                                 {entry.program_number || '-'}
@@ -365,7 +365,6 @@ export default function RaceDetails() {
                                         <div className={`font-bold text-lg leading-none ${entry.scratched ? 'text-gray-500 line-through' : 'text-white'}`}>
                                             {entry.horse_name} {entry.scratched && '(SCR)'}
                                         </div>
-                                        <div className="text-xs text-gray-500 mt-1">NO. {entry.program_number}</div>
                                     </div>
                                 </div>
                                 <div className="text-right">
