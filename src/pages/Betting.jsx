@@ -356,6 +356,18 @@ export default function Betting() {
         }
     };
 
+    const handleAddFunds = (e) => {
+        e.preventDefault();
+        const amountToAdd = parseFloat(addFundsAmount);
+        if (amountToAdd > 0) {
+            setBankroll(prev => prev + amountToAdd);
+            setIsBankModalOpen(false);
+            alert(`Successfully added $${amountToAdd.toFixed(2)} to your wallet!`);
+        } else {
+            alert('Please enter a valid amount.');
+        }
+    };
+
     return (
         <div className="space-y-8 relative">
             {/* Header Area */}
