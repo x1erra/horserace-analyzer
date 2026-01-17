@@ -35,6 +35,7 @@ export default function RaceDetails() {
     const { id } = useParams(); // This is the race_key
     const navigate = useNavigate();
     const [raceData, setRaceData] = useState(null);
+    const [raceChanges, setRaceChanges] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -49,6 +50,18 @@ export default function RaceDetails() {
                 // Use the key from params. The backend endpoint expects race_key.
                 const response = await axios.get(`${baseUrl}/api/race-details/${id}`);
                 setRaceData(response.data);
+
+                // Also fetch changes for this race
+                const raceId = response.data.race?.id;
+                if (raceId) {
+                    try {
+                        const changesRes = await axios.get(`${baseUrl}/api/race/${raceId}/changes`);
+                        setRaceChanges(changesRes.data.changes || []);
+                    } catch (e) {
+                        console.log('No changes data available');
+                    }
+                }
+
                 setError(null);
             } catch (err) {
                 console.error("Error fetching race details:", err);
@@ -277,6 +290,53 @@ export default function RaceDetails() {
                                         <div className="text-gray-500 text-xs uppercase">New Owner</div>
                                         <div className="text-gray-300">{claim.new_owner_name || 'N/A'}</div>
                                     </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* 1b. Race Changes Section */}
+            {raceChanges.length > 0 && (
+                <div className="bg-black rounded-xl shadow-md p-4 md:p-6 border border-yellow-900/30 opacity-0 animate-fadeIn" style={{ animationDelay: '120ms' }}>
+                    <h4 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                        <span className="w-1 h-6 bg-yellow-500 rounded-full"></span>
+                        Late Changes ({raceChanges.length})
+                    </h4>
+                    <div className="space-y-2">
+                        {raceChanges.map((change, idx) => (
+                            <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border ${change.change_type === 'Scratch'
+                                    ? 'bg-red-900/10 border-red-900/30'
+                                    : change.change_type === 'Jockey Change'
+                                        ? 'bg-blue-900/10 border-blue-900/30'
+                                        : 'bg-yellow-900/10 border-yellow-900/30'
+                                }`}>
+                                {change.program_number && change.program_number !== '-' && (
+                                    (() => {
+                                        const style = getPostColor(change.program_number);
+                                        return (
+                                            <div
+                                                className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center font-bold text-xs shadow-sm"
+                                                style={{ backgroundColor: style.bg, color: style.text }}
+                                            >
+                                                {change.program_number}
+                                            </div>
+                                        );
+                                    })()
+                                )}
+                                <div className="flex-1">
+                                    <span className="text-white font-medium">{change.horse_name}</span>
+                                    <span className="mx-2 text-gray-500">•</span>
+                                    <span className={`text-sm font-medium ${change.change_type === 'Scratch' ? 'text-red-400'
+                                            : change.change_type === 'Jockey Change' ? 'text-blue-400'
+                                                : 'text-yellow-400'
+                                        }`}>
+                                        {change.change_type}
+                                    </span>
+                                </div>
+                                <div className="text-gray-400 text-sm">
+                                    {change.description}
                                 </div>
                             </div>
                         ))}

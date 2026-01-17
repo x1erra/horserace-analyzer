@@ -931,6 +931,76 @@ def get_changes():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/race/<race_id>/changes', methods=['GET'])
+def get_race_changes(race_id):
+    """
+    Get changes for a specific race.
+    Returns scratches from race_entries + changes from hranalyzer_changes table.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        all_changes = []
+        
+        # SOURCE 1: Scratches from race_entries
+        scratch_response = supabase.table('hranalyzer_race_entries')\
+            .select('''
+                id, program_number, scratched, updated_at,
+                horse:hranalyzer_horses(horse_name)
+            ''')\
+            .eq('race_id', race_id)\
+            .eq('scratched', True)\
+            .execute()
+        
+        for item in scratch_response.data or []:
+            horse = item.get('horse') or {}
+            all_changes.append({
+                'id': item['id'],
+                'program_number': item.get('program_number', '-'),
+                'horse_name': horse.get('horse_name', 'Unknown'),
+                'change_type': 'Scratch',
+                'description': 'Scratched',
+                'change_time': item.get('updated_at')
+            })
+        
+        # SOURCE 2: Changes from hranalyzer_changes table
+        try:
+            changes_response = supabase.table('hranalyzer_changes')\
+                .select('''
+                    id, change_type, description, change_time,
+                    entry:hranalyzer_race_entries(
+                        program_number,
+                        horse:hranalyzer_horses(horse_name)
+                    )
+                ''')\
+                .eq('race_id', race_id)\
+                .execute()
+            
+            for item in changes_response.data or []:
+                entry = item.get('entry') or {}
+                horse = entry.get('horse') or {}
+                
+                all_changes.append({
+                    'id': item['id'],
+                    'program_number': entry.get('program_number', '-'),
+                    'horse_name': horse.get('horse_name', 'Race-wide'),
+                    'change_type': item['change_type'],
+                    'description': item['description'],
+                    'change_time': item['change_time']
+                })
+        except:
+            pass  # Table might not exist
+        
+        return jsonify({
+            'changes': all_changes,
+            'count': len(all_changes)
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/scratches', methods=['GET'])
 def get_scratches():
     """

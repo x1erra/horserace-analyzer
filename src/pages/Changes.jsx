@@ -1,5 +1,6 @@
 
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 import { AlertTriangle, Info, Shuffle, ShieldAlert } from 'lucide-react';
@@ -180,8 +181,13 @@ export default function Changes() {
                                                 {item.track_code}
                                             </span>
                                         </td>
-                                        <td className="p-4 text-gray-300 whitespace-nowrap">
-                                            Race {item.race_number}
+                                        <td className="p-4 whitespace-nowrap">
+                                            <Link
+                                                to={`/race/${item.track_code}-${item.race_date?.replace(/-/g, '')}-${item.race_number}`}
+                                                className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                                            >
+                                                Race {item.race_number}
+                                            </Link>
                                         </td>
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
