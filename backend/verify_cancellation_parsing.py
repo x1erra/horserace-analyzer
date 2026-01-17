@@ -1,36 +1,27 @@
-import sys
-import os
 
-# Add parent directory to path to import local modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from crawl_scratches import parse_track_changes
-import requests
+import logging
 from bs4 import BeautifulSoup
+from crawl_scratches import fetch_static_page, CANCELLATIONS_URL
 
-def test_aqueduct_cancellation():
-    url = "https://www.equibase.com/static/latechanges/html/latechangesAQU-USA.html"
-    print(f"Fetching {url}...")
-    
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def debug_cancellations():
+    rss_url = "https://www.equibase.com/static/latechanges/rss/AQU-USA.rss"
+    logger.info(f"Fetching RSS: {rss_url}")
+    # Use requests directly first
+    import requests
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
-    
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        print(f"Failed to fetch: {response.status_code}")
-        return
-
-    html = response.text
-    changes = parse_track_changes(html, "AQU")
-    
-    cancellations = [c for c in changes if c['change_type'] == 'Race Cancelled']
-    
-    print(f"Found {len(changes)} total changes.")
-    print(f"Found {len(cancellations)} cancellations.")
-    
-    for c in cancellations:
-        print(f"Race {c['race_number']}: {c['description']}")
+    try:
+        r = requests.get(rss_url, headers=headers, timeout=10)
+        logger.info(f"RSS Status: {r.status_code}")
+        logger.info(f"RSS Content Preview: {r.text[:500]}")
+        with open("dump_rss.xml", "w", encoding='utf-8') as f:
+            f.write(r.text)
+    except Exception as e:
+        logger.error(f"RSS Fetch Failed: {e}")
 
 if __name__ == "__main__":
-    test_aqueduct_cancellation()
+    debug_cancellations()
