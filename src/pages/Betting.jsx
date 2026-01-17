@@ -151,6 +151,7 @@ export default function Betting() {
                 if (depth > maxDepth) return 1;
 
                 const candidates = posSelections[depth] || [];
+                if (!Array.isArray(candidates)) return 0;
                 let count = 0;
                 for (const pgm of candidates) {
                     if (!currentPath.includes(pgm)) {
@@ -161,7 +162,7 @@ export default function Betting() {
             };
 
             // If pos 1 is empty, 0 combinations
-            if (posSelections[1].length === 0) return 0;
+            if (!posSelections[1] || !Array.isArray(posSelections[1]) || posSelections[1].length === 0) return 0;
             return countCombs(1, []) * amount;
         }
         return amount; // Single bet
@@ -537,8 +538,10 @@ export default function Betting() {
                                     <td className="p-4">
                                         {ticket.selection ? (
                                             <div className="flex flex-wrap gap-1">
-                                                {ticket.selection.map(num => (
-                                                    <span key={num} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">#{num}</span>
+                                                {ticket.selection.map((num, idx) => (
+                                                    <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">
+                                                        #{Array.isArray(num) ? num.join(',') : num}
+                                                    </span>
                                                 ))}
                                             </div>
                                         ) : (
