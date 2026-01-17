@@ -1138,6 +1138,12 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict) -> Optional[str
         if not horse_name:
             return None
 
+        # CRITICAL VALIDITY CHECK
+        pgm_check = normalize_pgm(horse_data.get('program_number'))
+        if not pgm_check or pgm_check in ['0', '', 'None']:
+            logger.warning(f"Skipping entry for {horse_name} - Invalid Program Number: '{horse_data.get('program_number')}'")
+            return None
+
         # -------------------------------------------------------
         # CANONICAL NAME LOOKUP (Fuzzy Match / Race Constraint)
         # -------------------------------------------------------
