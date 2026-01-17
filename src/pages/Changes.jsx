@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Info, Shuffle, ShieldAlert } from 'lucide-react';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -33,22 +33,40 @@ const getPostColor = (number) => {
     }
 };
 
-export default function Scratches() {
+const getChangeIcon = (type) => {
+    switch (type) {
+        case 'Scratch': return <ShieldAlert className="w-4 h-4 text-red-500" />;
+        case 'Jockey Change': return <Shuffle className="w-4 h-4 text-blue-400" />;
+        case 'Equipment Change': return <Info className="w-4 h-4 text-yellow-400" />;
+        default: return <Info className="w-4 h-4 text-gray-400" />;
+    }
+};
+
+const getChangeColor = (type) => {
+    switch (type) {
+        case 'Scratch': return 'bg-red-500/10 text-red-500 border-red-500/20';
+        case 'Jockey Change': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+        case 'Equipment Change': return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+        default: return 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+    }
+};
+
+export default function Changes() {
     const [loading, setLoading] = useState(true);
-    const [scratches, setScratches] = useState([]);
+    const [changes, setChanges] = useState([]);
     const [error, setError] = useState(null);
     const [viewMode, setViewMode] = useState('upcoming'); // 'upcoming' or 'all'
     const [page, setPage] = useState(1);
     const [limit, setLimit] = useState(20);
     const [totalPages, setTotalPages] = useState(1);
 
-    const fetchScratches = async () => {
+    const fetchChanges = async () => {
         try {
             setLoading(true);
             setError(null);
 
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-            const endpoint = `${baseUrl}/api/scratches`;
+            const endpoint = `${baseUrl}/api/changes`;
 
             const params = {
                 view: viewMode,
@@ -60,13 +78,13 @@ export default function Scratches() {
             const response = await axios.get(endpoint, { params });
 
             // Backend returns list and count
-            setScratches(response.data.scratches || []);
+            setChanges(response.data.changes || []);
             const totalCount = response.data.count || 0;
             setTotalPages(Math.ceil(totalCount / limit) || 1);
 
         } catch (e) {
-            console.error("Error fetching scratches:", e);
-            setError("Failed to load scratches. Is the backend running?");
+            console.error("Error fetching changes:", e);
+            setError("Failed to load changes. Is the backend running?");
         } finally {
             setLoading(false);
         }
@@ -77,7 +95,7 @@ export default function Scratches() {
     }, [viewMode]);
 
     useEffect(() => {
-        fetchScratches();
+        fetchChanges();
     }, [viewMode, page, limit]);
 
     const handleNextPage = () => {
@@ -95,10 +113,10 @@ export default function Scratches() {
                 <div>
                     <h1 className="text-3xl font-bold text-white flex items-center gap-3">
                         <AlertTriangle className="w-8 h-8 text-yellow-500" />
-                        Scratched Horses
+                        Late Changes
                     </h1>
                     <p className="text-gray-400 mt-1">
-                        Real-time updates on scratched horses
+                        Real-time updates (Scratches, Jockey Changes, etc.)
                     </p>
                 </div>
 
@@ -128,15 +146,15 @@ export default function Scratches() {
             <div className="bg-black rounded-xl border border-purple-900/20 overflow-hidden shadow-xl">
                 {loading ? (
                     <div className="p-12 text-center text-gray-500 animate-pulse">
-                        Loading scratch data...
+                        Loading updates...
                     </div>
                 ) : error ? (
                     <div className="p-12 text-center text-red-400">
                         {error}
                     </div>
-                ) : scratches.length === 0 ? (
+                ) : changes.length === 0 ? (
                     <div className="p-12 text-center text-gray-500">
-                        No scratches found for this period.
+                        No changes found for this period.
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -147,14 +165,14 @@ export default function Scratches() {
                                     <th className="p-4">Track</th>
                                     <th className="p-4">Race</th>
                                     <th className="p-4">Horse</th>
-                                    <th className="p-4">Trainer</th>
-                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Type</th>
+                                    <th className="p-4">Details</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-purple-900/30">
-                                {scratches.map((item) => (
+                                {changes.map((item) => (
                                     <tr key={item.id} className="hover:bg-purple-900/10 transition-colors group">
-                                        <td className="p-4 text-gray-300 font-medium">
+                                        <td className="p-4 text-gray-300 font-medium whitespace-nowrap">
                                             {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
                                         </td>
                                         <td className="p-4">
@@ -162,34 +180,41 @@ export default function Scratches() {
                                                 {item.track_code}
                                             </span>
                                         </td>
-                                        <td className="p-4 text-gray-300">
+                                        <td className="p-4 text-gray-300 whitespace-nowrap">
                                             Race {item.race_number}
                                         </td>
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
-                                                {(() => {
-                                                    const style = getPostColor(item.program_number);
-                                                    return (
-                                                        <div
-                                                            className="w-8 h-8 rounded-md flex items-center justify-center font-bold text-sm shadow-sm leading-none"
-                                                            style={{ backgroundColor: style.bg, color: style.text }}
-                                                        >
-                                                            {item.program_number}
-                                                        </div>
-                                                    );
-                                                })()}
+                                                {item.program_number && item.program_number !== '-' ? (
+                                                    (() => {
+                                                        const style = getPostColor(item.program_number);
+                                                        return (
+                                                            <div
+                                                                className="w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                                style={{ backgroundColor: style.bg, color: style.text }}
+                                                            >
+                                                                {item.program_number}
+                                                            </div>
+                                                        );
+                                                    })()
+                                                ) : (
+                                                    <div className="w-8 h-8 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                                                        -
+                                                    </div>
+                                                )}
                                                 <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
-                                                    {item.horse_name || 'Unknown'}
+                                                    {item.horse_name || 'Race-wide'}
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="p-4 text-gray-400">
-                                            {item.trainer_name || '-'}
-                                        </td>
                                         <td className="p-4">
-                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20">
-                                                Scratched
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
+                                                {getChangeIcon(item.change_type)}
+                                                {item.change_type}
                                             </span>
+                                        </td>
+                                        <td className="p-4 text-gray-400 text-sm max-w-xs break-words">
+                                            {item.description || '-'}
                                         </td>
                                     </tr>
                                 ))}
@@ -200,7 +225,7 @@ export default function Scratches() {
             </div>
 
             {/* Pagination Controls */}
-            {!loading && !error && scratches.length > 0 && (
+            {!loading && !error && changes.length > 0 && (
                 <div className="px-4 py-3 border-t border-purple-900/50 bg-black flex flex-col sm:flex-row items-center justify-between gap-4 rounded-b-xl">
                     <div className="flex items-center text-sm text-gray-400">
                         <span>Show</span>

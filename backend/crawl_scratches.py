@@ -82,12 +82,30 @@ def parse_late_changes_index():
                 
     return links
 
-def parse_track_scratches(html, track_code):
+def determine_change_type(description):
     """
-    Parse the scratch table for a specific track
+    Determine the type of change based on the description text
     """
-    scratches = []
-    if not html: return scratches
+    desc_lower = description.lower()
+    
+    if 'scratched' in desc_lower:
+        return 'Scratch'
+    elif 'jockey' in desc_lower:
+        return 'Jockey Change'
+    elif 'weight' in desc_lower:
+        return 'Weight Change'
+    elif 'blinker' in desc_lower or 'equipment' in desc_lower:
+        return 'Equipment Change'
+    
+    return 'Other'
+
+def parse_track_changes(html, track_code):
+    """
+    Parse the changes table for a specific track.
+    Captures Scratches, Jockey Changes, and others.
+    """
+    changes = []
+    if not html: return changes
     
     soup = BeautifulSoup(html, 'html.parser')
     
@@ -101,7 +119,7 @@ def parse_track_scratches(html, track_code):
             break
             
     if not target_table:
-        return scratches
+        return changes
         
     current_race = None
     
@@ -118,7 +136,7 @@ def parse_track_scratches(html, track_code):
                 current_race = int(m.group(1))
             continue
             
-        # Check for Scratch Row
+        # Check for Change Row
         if not current_race: continue
         
         cols = row.find_all('td')
@@ -157,24 +175,28 @@ def parse_track_scratches(html, track_code):
         if change_cell:
             change_desc = change_cell.get_text(strip=True)
             
-        if change_desc and 'scratched' in change_desc.lower():
-            scratches.append({
+        if change_desc:
+            change_type = determine_change_type(change_desc)
+            
+            changes.append({
                 'race_number': current_race,
-                'program_number': normalize_pgm(pgm),
+                'program_number': normalize_pgm(pgm) if pgm else None,
                 'horse_name': normalize_name(horse_name if horse_name else ""),
-                'reason': change_desc
+                'change_type': change_type,
+                'description': change_desc
             })
             
-    return scratches
+    return changes
 
-def update_scratches_in_db(track_code, race_date, scratch_list):
+def update_changes_in_db(track_code, race_date, change_list):
     """
-    Update database for found scratches
+    Update database for found changes (scratches and others)
     """
     supabase = get_supabase_client()
     count = 0
+    scratches_marked = 0
     
-    for item in scratch_list:
+    for item in change_list:
         try:
             # 1. Find Race ID
             race_key = f"{track_code}-{race_date.strftime('%Y%m%d')}-{item['race_number']}"
@@ -189,8 +211,6 @@ def update_scratches_in_db(track_code, race_date, scratch_list):
             race_id = r_res.data[0]['id']
             
             # 2. Find Entry to mark
-            # Strategy: Match PGM first (most reliable), fallback to Name
-            
             entry_id = None
             
             # Try PGM match
@@ -203,46 +223,73 @@ def update_scratches_in_db(track_code, race_date, scratch_list):
                     
                 if e_res.data:
                     entry = e_res.data[0]
-                    if not entry['scratched']:
-                        entry_id = entry['id']
+                    entry_id = entry['id']
             
-            # Fallback Name match (if PGM search failed)
+            # Fallback Name match (if PGM search failed or PGM matches nothing)
             if not entry_id and item['horse_name']:
-                 # Need to join? Or just fuzzy match entries?
-                 # Getting all entries is safer
                  all_entries = supabase.table('hranalyzer_race_entries')\
-                    .select('id, scratched, hranalyzer_horses!inner(horse_name)')\
+                    .select('id, hranalyzer_horses!inner(horse_name)')\
                     .eq('race_id', race_id)\
                     .execute()
                  
                  target_norm = item['horse_name']
                  for e in all_entries.data:
-                     if e['scratched']: continue
-                     
                      h_name = e['hranalyzer_horses']['horse_name']
                      if normalize_name(h_name) == target_norm:
                          entry_id = e['id']
                          break
             
-            # 3. Update Status
-            if entry_id:
-                # Update scratch status and reason (if we had a column for reason, but we don't, just scratch=true)
+            # 3. UPSERT into hranalyzer_changes
+            # Construct Change Record
+            change_record = {
+                'race_id': race_id,
+                'entry_id': entry_id, # Can be None if horse not found (but we shouldn't insert if entry is missing? actually changes page might link to track info)
+                                      # But for now, let's allow inserting even if entry_id is None (generic race change?) 
+                                      # The SQL constraints might require unique entry_id per description? 
+                                      # "CONSTRAINT unique_race_entry_change UNIQUE (race_id, entry_id, change_type, description)"
+                                      # If entry_id is NULL, multiple NULLs are distinct in SQL usually. 
+                                      # Let's ensure we skip if we can't find entry, unless it's a race-wide change.
+                'change_type': item['change_type'],
+                'description': item['description']
+            }
+            
+            # Basic deduplication handled by SQL Unique Constraint (changes often repeat on the page)
+            # Use upsert or ignore conflict
+            try:
+                res = supabase.table('hranalyzer_changes')\
+                    .upsert(change_record, on_conflict='race_id,entry_id,change_type,description')\
+                    .execute()
+                
+                # Check if it was actually inserted/updated (count > 0 in most libs, but supabase insert response might vary)
+                count += 1
+            except Exception as e:
+                # likely duplicate or constraint violation if not using upsert correctly
+                # logger.warning(f"Error inserting change: {e}")
+                pass
+
+            # 4. If Scratch, also update existing `scratches` boolean for backward compat
+            if item['change_type'] == 'Scratch' and entry_id:
+                # Only update if not already scratched to avoid redundancy?
+                # Actually, idempotent update is fine.
                 supabase.table('hranalyzer_race_entries')\
                     .update({'scratched': True})\
                     .eq('id', entry_id)\
                     .execute()
                 
-                logger.info(f"MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['reason']})")
-                count += 1
+                start_sym = "✂️"
+                logger.info(f"{start_sym} MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
+                scratches_marked += 1
+            elif item['change_type'] == 'Jockey Change':
+                logger.info(f"🏇 JOCKEY CHANGE: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
                 
         except Exception as e:
-            logger.error(f"Error updating scratch {item}: {e}")
+            logger.error(f"Error processing change {item}: {e}")
             
     return count
 
 def crawl_late_changes():
     """
-    Main entry point for crawling scratches
+    Main entry point for crawling changes
     """
     logger.info("Starting Crawl: Equibase Late Changes")
     
@@ -250,34 +297,31 @@ def crawl_late_changes():
     track_links = parse_late_changes_index()
     logger.info(f"Found {len(track_links)} tracks with changes")
     
-    total_scratches_marked = 0
+    total_changes_processed = 0
     today = date.today()
     
     for link in track_links:
         code = link['track_code']
         url = link['url']
         
-        # Only process tracks valid in our DB (optional optimization)
-        # if code not in COMMON_TRACKS and ... -> No, let's try to process all relevant ones
-        
         try:
-            # logger.info(f"Checking scratches for {code}")
+            # logger.info(f"Checking changes for {code}")
             html = fetch_static_page(url)
             if not html: continue
             
-            scratches = parse_track_scratches(html, code)
+            changes = parse_track_changes(html, code)
             
-            if scratches:
-                # logger.info(f"Found {len(scratches)} scratches for {code}")
+            if changes:
+                # logger.info(f"Found {len(changes)} changes for {code}")
                 # Update DB
-                updated = update_scratches_in_db(code, today, scratches)
-                total_scratches_marked += updated
+                processed = update_changes_in_db(code, today, changes)
+                total_changes_processed += processed
                 
         except Exception as e:
             logger.error(f"Error processing {code}: {e}")
             
-    logger.info(f"Scratches Crawl Complete. Marked {total_scratches_marked} new scratches.")
-    return total_scratches_marked
+    logger.info(f"Changes Crawl Complete. Processed {total_changes_processed} records.")
+    return total_changes_processed
 
 if __name__ == "__main__":
     # Setup logging

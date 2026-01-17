@@ -86,7 +86,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         Claims
                     </NavLink>
                     <NavLink
-                        to="/scratches"
+                        to="/changes"
                         onClick={onClose}
                         className={({ isActive }) =>
                             `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
@@ -96,7 +96,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         }
                     >
                         <HiOutlineFlag className="w-6 h-6" />
-                        Scratches
+                        Changes
                     </NavLink>
                     <NavLink
                         to="/horses"

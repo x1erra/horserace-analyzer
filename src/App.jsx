@@ -10,7 +10,7 @@ import Betting from './pages/Betting.jsx';
 import Results from './pages/Results.jsx'; // Added for Results page
 import Upload from './pages/Upload.jsx'; // Added for Upload page
 import Claims from './pages/Claims.jsx'; // Added for Claims page
-import Scratches from './pages/Scratches.jsx'; // Added for Scratches page
+import Changes from './pages/Changes.jsx'; // Renamed from Scratches
 import { useState } from 'react';
 import PasswordGate from './components/auth/PasswordGate.jsx';
 import PullToRefresh from './components/layout/PullToRefresh.jsx';
@@ -39,7 +39,7 @@ function App() {
                   <Route path="/race/:id" element={<RaceDetails />} />
                   <Route path="/results" element={<Results />} /> {/* New route */}
                   <Route path="/claims" element={<Claims />} /> {/* New route */}
-                  <Route path="/scratches" element={<Scratches />} /> {/* New route */}
+                  <Route path="/changes" element={<Changes />} /> {/* Renamed route */}
                   <Route path="/upload" element={<Upload />} /> {/* New route */}
                 </Routes>
               </main>
