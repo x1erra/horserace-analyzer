@@ -782,6 +782,10 @@ def get_changes():
     - view: 'upcoming' (default) or 'all'
     - page: Page number (default 1)
     - limit: Results per page (default 20)
+    
+    This endpoint merges data from:
+    1. hranalyzer_race_entries (existing scratches with scratched=True)
+    2. hranalyzer_changes (new changes table for jockey changes, etc.)
     """
     try:
         supabase = get_supabase_client()
@@ -794,87 +798,133 @@ def get_changes():
         start = (page - 1) * limit
         end = start + limit - 1
         
-        # Query hranalyzer_changes
-        # Join with races and tracks
-        query = supabase.table('hranalyzer_changes')\
+        all_changes = []
+        
+        # --- SOURCE 1: Existing Scratches from hranalyzer_race_entries ---
+        scratch_query = supabase.table('hranalyzer_race_entries')\
             .select('''
-                id, change_type, description, change_time,
-                program_number:hranalyzer_race_entries(program_number),
-                entry:hranalyzer_race_entries(
-                    program_number,
-                    horse:hranalyzer_horses(horse_name),
-                    trainer:hranalyzer_trainers(trainer_name)
-                ),
+                id, program_number, scratched, updated_at,
+                horse:hranalyzer_horses(horse_name),
+                trainer:hranalyzer_trainers(trainer_name),
                 race:hranalyzer_races!inner(
                     id, track_code, race_date, race_number, post_time, race_status,
                     track:hranalyzer_tracks(track_name)
                 )
-            ''', count='exact')
+            ''')\
+            .eq('scratched', True)
             
-        # Filter and Sort
         if view_mode == 'upcoming':
-             # Upcoming: Soonest first (ASC)
-             query = query.gte('race.race_date', today)\
-                .order('race_date', foreign_table='race')\
-                .order('track_code', foreign_table='race')\
-                .order('race_number', foreign_table='race')\
-                .order('change_time', desc=True)
+            scratch_query = scratch_query.gte('race.race_date', today)
         else:
-             # All History: Most recent first (DESC)
-             query = query.lte('race.race_date', today)\
-                .order('race_date', desc=True, foreign_table='race')\
-                .order('track_code', foreign_table='race')\
-                .order('race_number', foreign_table='race')\
-                .order('change_time', desc=True)
-             
-        # Apply pagination
-        response = query.range(start, end).execute()
+            scratch_query = scratch_query.lte('race.race_date', today)
         
-        count = response.count if response.count is not None else 0
-        data = response.data
+        scratch_response = scratch_query.execute()
         
-        changes = []
-        for item in data:
-            # Safe access
+        for item in scratch_response.data or []:
             race = item.get('race') or {}
             track = race.get('track') or {}
-            entry = item.get('entry') or {}
-            horse = entry.get('horse') or {}
-            trainer = entry.get('trainer') or {}
+            horse = item.get('horse') or {}
+            trainer = item.get('trainer') or {}
             
-            # Program number might come from entry object or direct relation depending on schema
-            # In our SQL, we linked entry_id. 
-            # If entry_id is NULL (race-wide change), entry is None.
+            formatted_time = race.get('post_time', 'N/A')
             
-            pgm = entry.get('program_number', '-')
-            h_name = horse.get('horse_name', 'Race-wide')
-            t_name = trainer.get('trainer_name', '-')
-            
-            formatted_time = "N/A"
-            if race.get('post_time'):
-                 formatted_time = race['post_time']
-            
-            changes.append({
+            all_changes.append({
                 'id': item['id'],
                 'race_date': race.get('race_date'),
                 'track_code': race.get('track_code'),
                 'track_name': track.get('track_name', race.get('track_code')),
                 'race_number': race.get('race_number'),
                 'post_time': formatted_time,
-                'program_number': pgm,
-                'horse_name': h_name,
-                'trainer_name': t_name,
-                'change_type': item['change_type'],
-                'description': item['description'],
-                'change_time': item['change_time']
+                'program_number': item.get('program_number', '-'),
+                'horse_name': horse.get('horse_name', 'Unknown'),
+                'trainer_name': trainer.get('trainer_name', '-'),
+                'change_type': 'Scratch',
+                'description': 'Scratched',
+                'change_time': item.get('updated_at'),
+                '_source': 'entries'  # For deduplication
             })
+        
+        # --- SOURCE 2: New Changes from hranalyzer_changes table ---
+        try:
+            changes_query = supabase.table('hranalyzer_changes')\
+                .select('''
+                    id, change_type, description, change_time,
+                    entry:hranalyzer_race_entries(
+                        program_number,
+                        horse:hranalyzer_horses(horse_name),
+                        trainer:hranalyzer_trainers(trainer_name)
+                    ),
+                    race:hranalyzer_races!inner(
+                        id, track_code, race_date, race_number, post_time, race_status,
+                        track:hranalyzer_tracks(track_name)
+                    )
+                ''')
+                
+            if view_mode == 'upcoming':
+                changes_query = changes_query.gte('race.race_date', today)
+            else:
+                changes_query = changes_query.lte('race.race_date', today)
+            
+            changes_response = changes_query.execute()
+            
+            for item in changes_response.data or []:
+                race = item.get('race') or {}
+                track = race.get('track') or {}
+                entry = item.get('entry') or {}
+                horse = entry.get('horse') or {}
+                trainer = entry.get('trainer') or {}
+                
+                formatted_time = race.get('post_time', 'N/A')
+                
+                all_changes.append({
+                    'id': item['id'],
+                    'race_date': race.get('race_date'),
+                    'track_code': race.get('track_code'),
+                    'track_name': track.get('track_name', race.get('track_code')),
+                    'race_number': race.get('race_number'),
+                    'post_time': formatted_time,
+                    'program_number': entry.get('program_number', '-'),
+                    'horse_name': horse.get('horse_name', 'Race-wide'),
+                    'trainer_name': trainer.get('trainer_name', '-'),
+                    'change_type': item['change_type'],
+                    'description': item['description'],
+                    'change_time': item['change_time'],
+                    '_source': 'changes'
+                })
+        except Exception as e:
+            # hranalyzer_changes table might not exist yet, that's OK
+            pass
+        
+        # --- Sort combined results ---
+        if view_mode == 'upcoming':
+            # Upcoming: soonest first
+            all_changes.sort(key=lambda x: (
+                x.get('race_date') or '',
+                x.get('track_code') or '',
+                x.get('race_number') or 0
+            ))
+        else:
+            # History: most recent first
+            all_changes.sort(key=lambda x: (
+                x.get('race_date') or '',
+                x.get('track_code') or '',
+                x.get('race_number') or 0
+            ), reverse=True)
+        
+        # --- Pagination ---
+        total_count = len(all_changes)
+        paginated_changes = all_changes[start:end+1]
+        
+        # Remove internal _source field
+        for c in paginated_changes:
+            c.pop('_source', None)
             
         return jsonify({
-            'changes': changes,
-            'count': count,
+            'changes': paginated_changes,
+            'count': total_count,
             'page': page,
             'limit': limit,
-            'total_pages': (count + limit - 1) // limit if limit > 0 else 1
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
         })
 
     except Exception as e:
