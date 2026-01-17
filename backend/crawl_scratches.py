@@ -374,8 +374,26 @@ def update_changes_in_db(track_code, race_date, change_list):
                     'description': item['description']
                 }
                 
-                supabase.table('hranalyzer_changes').insert(change_record).execute()
-                count += 1
+                try:
+                    supabase.table('hranalyzer_changes').insert(change_record).execute()
+                    count += 1
+                except Exception as e:
+                    # R RACE CONDITION: Unique constraint violation if inserted by another process just now
+                    # Fallback to UPDATE (append description)
+                    logger.warning(f"Insert race condition for {track_code} R{item['race_number']}, retrying as update: {e}")
+                    
+                    # Re-fetch the ID (it must exist now)
+                    q = supabase.table('hranalyzer_changes').select('id, description').eq('race_id', race_id).eq('change_type', item['change_type'])
+                    if entry_id: q = q.eq('entry_id', entry_id)
+                    else: q = q.is_('entry_id', 'null')
+                    
+                    retry_res = q.execute()
+                    if retry_res.data:
+                         rec = retry_res.data[0]
+                         exist_desc = rec['description'] or ""
+                         if item['description'] not in exist_desc:
+                             m_desc = f"{exist_desc}; {item['description']}"[:495] # safely truncated
+                             supabase.table('hranalyzer_changes').update({'description': m_desc}).eq('id', rec['id']).execute()
 
             # 5. Side effects (Scratched flag, Race Status)
             if item['change_type'] == 'Scratch' and entry_id:
