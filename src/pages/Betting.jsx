@@ -530,62 +530,106 @@ export default function Betting() {
 
             {/* Tickets Table */}
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50">
-                <table className="w-full text-left text-gray-300">
-                    <thead className="bg-purple-900/50">
-                        <tr>
-                            <th className="p-4">Date</th>
-                            <th className="p-4">Track/Race</th>
-                            <th className="p-4">Selection</th>
-                            <th className="p-4">Bet Type</th>
-                            <th className="p-4">Cost</th>
-                            <th className="p-4">Status</th>
-                            <th className="p-4 text-right">Payout</th>
-                            <th className="p-4 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {tickets.length === 0 ? (
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-left text-gray-300">
+                        <thead className="bg-purple-900/50">
                             <tr>
-                                <td colSpan="8" className="p-4 text-center text-gray-400">No tickets found.</td>
+                                <th className="p-4">Date</th>
+                                <th className="p-4">Track/Race</th>
+                                <th className="p-4">Selection</th>
+                                <th className="p-4">Bet Type</th>
+                                <th className="p-4">Cost</th>
+                                <th className="p-4">Status</th>
+                                <th className="p-4 text-right">Payout</th>
+                                <th className="p-4 text-right">Actions</th>
                             </tr>
-                        ) : (
-                            tickets.map((ticket, index) => (
-                                <tr key={index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200">
-                                    <td className="p-4 text-sm text-gray-500">{new Date(ticket.created_at).toLocaleDateString()}</td>
-                                    <td className="p-4">
-                                        {ticket.hranalyzer_races ? (
-                                            <span className="font-medium text-white">
-                                                {ticket.hranalyzer_races.track_code} R{ticket.hranalyzer_races.race_number}
+                        </thead>
+                        <tbody>
+                            {tickets.length === 0 ? (
+                                <tr>
+                                    <td colSpan="8" className="p-4 text-center text-gray-400">No tickets found.</td>
+                                </tr>
+                            ) : (
+                                tickets.map((ticket, index) => (
+                                    <tr key={ticket.id || index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200">
+                                        <td className="p-4 text-sm text-gray-500">{new Date(ticket.created_at).toLocaleDateString()}</td>
+                                        <td className="p-4">
+                                            {ticket.hranalyzer_races ? (
+                                                <span className="font-medium text-white">
+                                                    {ticket.hranalyzer_races.track_code} R{ticket.hranalyzer_races.race_number}
+                                                </span>
+                                            ) : 'Unknown'}
+                                        </td>
+                                        <td className="p-4">
+                                            {ticket.selection ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {ticket.selection.map((num, idx) => (
+                                                        <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">
+                                                            #{Array.isArray(num) ? num.join(',') : num}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-purple-300 font-mono">#{ticket.horse_number} {ticket.horse_name}</span>
+                                            )}
+                                        </td>
+                                        <td className="p-4 text-sm">{ticket.bet_type}</td>
+                                        <td className="p-4 text-sm">${ticket.bet_cost || ticket.bet_amount}</td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
+                                                ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
+                                                    'bg-yellow-900 text-yellow-200'
+                                                }`}>
+                                                {ticket.status}
                                             </span>
-                                        ) : 'Unknown'}
-                                    </td>
-                                    <td className="p-4">
-                                        {ticket.selection ? (
-                                            <div className="flex flex-wrap gap-1">
-                                                {ticket.selection.map((num, idx) => (
-                                                    <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">
-                                                        #{Array.isArray(num) ? num.join(',') : num}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <span className="text-purple-300 font-mono">#{ticket.horse_number} {ticket.horse_name}</span>
-                                        )}
-                                    </td>
-                                    <td className="p-4 text-sm">{ticket.bet_type}</td>
-                                    <td className="p-4 text-sm">${ticket.bet_cost || ticket.bet_amount}</td>
-                                    <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
+                                        </td>
+                                        <td className="p-4 text-right text-green-400 font-bold">
+                                            {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <button
+                                                onClick={() => handleDeleteBet(ticket.id)}
+                                                className="bg-red-900/20 hover:bg-red-900/50 text-red-400 p-2 rounded transition"
+                                                title="Delete Bet"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="md:hidden divide-y divide-purple-900/20">
+                    {tickets.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400">No tickets found.</div>
+                    ) : (
+                        tickets.map((ticket, index) => (
+                            <div key={ticket.id || index} className="p-4 space-y-3 hover:bg-purple-900/10 transition">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="text-white font-bold text-lg">
+                                            {ticket.hranalyzer_races ? (
+                                                `${ticket.hranalyzer_races.track_code} R${ticket.hranalyzer_races.race_number}`
+                                            ) : 'Unknown'}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                            {new Date(ticket.created_at).toLocaleDateString()} • {ticket.bet_type}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
                                             ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
                                                 'bg-yellow-900 text-yellow-200'
                                             }`}>
                                             {ticket.status}
                                         </span>
-                                    </td>
-                                    <td className="p-4 text-right text-green-400 font-bold">
-                                        {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
-                                    </td>
-                                    <td className="p-4 text-right">
                                         <button
                                             onClick={() => handleDeleteBet(ticket.id)}
                                             className="bg-red-900/20 hover:bg-red-900/50 text-red-400 p-2 rounded transition"
@@ -595,12 +639,40 @@ export default function Betting() {
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                             </svg>
                                         </button>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                                    </div>
+                                </div>
+
+                                <div className="bg-purple-900/10 p-3 rounded-lg border border-purple-900/20">
+                                    <div className="text-xs text-gray-500 uppercase mb-1">Selection</div>
+                                    {ticket.selection ? (
+                                        <div className="flex flex-wrap gap-1">
+                                            {ticket.selection.map((num, idx) => (
+                                                <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700 text-white">
+                                                    #{Array.isArray(num) ? num.join(',') : num}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <span className="text-purple-300 font-mono text-sm">#{ticket.horse_number} {ticket.horse_name}</span>
+                                    )}
+                                </div>
+
+                                <div className="flex justify-between items-center bg-black/40 p-2 rounded-md">
+                                    <div>
+                                        <span className="text-[10px] text-gray-500 uppercase block">Cost</span>
+                                        <span className="text-white font-medium">${ticket.bet_cost || ticket.bet_amount}</span>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="text-[10px] text-gray-500 uppercase block">Payout</span>
+                                        <span className={`font-bold ${ticket.payout > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                                            {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
         </div >
     );
