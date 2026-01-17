@@ -767,7 +767,45 @@ def place_bet():
             else:
                 count = 1
             cost = amount * count
-        
+        elif bet_type == 'WPS':
+            # WPS = Win + Place + Show (3 bets)
+            cost = amount * 3.0
+        elif 'Key' in bet_type and selection:
+            # Key/Wheel Logic
+            # Selection is expected to be a list of lists: [[1], [2,3], [4,5]]
+            # Cost = Number of valid combinations * amount
+            
+            # Helper to calculate combinations
+            def count_combinations(current_depth, selected_so_far):
+                if current_depth >= len(selection):
+                    return 1
+                
+                count = 0
+                # Candidates for this position
+                candidates = selection[current_depth]
+                if not isinstance(candidates, list):
+                    candidates = [candidates] # Handle simple list case if malformed
+                    
+                for horse in candidates:
+                    # Standard logic: A horse cannot be in multiple positions in one combination
+                    if horse not in selected_so_far:
+                        count += count_combinations(current_depth + 1, selected_so_far + [horse])
+                return count
+
+            if bet_type == 'Exacta Key':
+                # Needs 2 positions
+                if len(selection) >= 2:
+                    count = count_combinations(0, [])
+                else:
+                    count = 0
+            elif bet_type == 'Trifecta Key':
+                # Needs 3 positions
+                if len(selection) >= 3:
+                     count = count_combinations(0, [])
+                else:
+                    count = 0
+            cost = amount * count
+            
         if not race_id or not bet_type:
             return jsonify({'error': 'Missing required fields'}), 400
 
@@ -819,6 +857,30 @@ def get_bets():
             'bets': response.data
         })
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/bets/<bet_id>', methods=['DELETE'])
+def delete_bet(bet_id):
+    """Delete a bet"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Verify it exists
+        # In a real app we might check user ownership
+        
+        response = supabase.table('hranalyzer_bets').delete().eq('id', bet_id).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'Bet not found or already deleted'}), 404
+            
+        return jsonify({
+            'success': True,
+            'message': 'Bet deleted',
+            'deleted_bet': response.data[0]
+        })
+    except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -891,8 +953,51 @@ def resolve_bets():
                         elif bet_type == 'Show' and pos <= 3:
                             new_status = 'Win'
                             base_payout = my_horse.get('show_payout') or 0
+                            base_payout = my_horse.get('show_payout') or 0
                             payout = (float(base_payout) / 2.0) * unit_amount
                             
+            elif bet_type == 'WPS':
+                horse_number = bet['horse_number']
+                my_horse = next((e for e in entries if e['program_number'] == horse_number), None)
+                
+                if not my_horse:
+                    new_status = 'Loss'
+                elif my_horse.get('scratched'):
+                    new_status = 'Scratched'
+                else:
+                    pos = my_horse.get('finish_position')
+                    if not pos:
+                        new_status = 'Loss'
+                    else:
+                        # WPS Logic
+                        total_payout = 0.0
+                        win_part = 0.0
+                        place_part = 0.0
+                        show_part = 0.0
+                        
+                        # Has it won? (1st)
+                        if pos == 1:
+                            win_base = my_horse.get('win_payout') or 0
+                            win_part = (float(win_base) / 2.0) * unit_amount
+                            
+                        # Has it placed? (1st or 2nd)
+                        if pos <= 2:
+                            place_base = my_horse.get('place_payout') or 0
+                            place_part = (float(place_base) / 2.0) * unit_amount
+                            
+                        # Has it shown? (1st, 2nd, or 3rd)
+                        if pos <= 3:
+                            show_base = my_horse.get('show_payout') or 0
+                            show_part = (float(show_base) / 2.0) * unit_amount
+                            
+                        total_payout = win_part + place_part + show_part
+                        
+                        if total_payout > 0:
+                            new_status = 'Win'
+                            payout = total_payout
+                        else:
+                            new_status = 'Loss'
+
             elif bet_type in ['Exacta Box', 'Trifecta Box']:
                 selection = bet.get('selection', [])
                 if not selection:
@@ -935,6 +1040,49 @@ def resolve_bets():
                         else:
                             payout = 0 
                             
+                            payout = 0 
+                            
+            elif 'Key' in bet_type and selection:
+                # Key/Wheel Resolution
+                # Check if the finishers match the positional requirements
+                # finishers is list of entry objects sorted by position
+                
+                required_positions = 0
+                if bet_type == 'Exacta Key': required_positions = 2
+                elif bet_type == 'Trifecta Key': required_positions = 3
+                
+                if len(finishers) >= required_positions and len(selection) >= required_positions:
+                    is_win = True
+                    for i in range(required_positions):
+                        # The horse that finished in position i+1
+                        finisher_num = finishers[i]['program_number']
+                        
+                        # The allowable horses for this position (from bet selection)
+                        allowed_for_pos = selection[i]
+                        
+                        # Check: Winner must be in pos 1 list, 2nd in pos 2 list, etc.
+                        if finisher_num not in allowed_for_pos:
+                            is_win = False
+                            break
+                    
+                    if is_win:
+                        new_status = 'Win'
+                        wager_label = 'Exacta' if 'Exacta' in bet_type else 'Trifecta'
+                        
+                        # Get Payout
+                        # Note: Payouts for keys are same as straight exotics if the combination matches
+                        exotics = supabase.table('hranalyzer_exotic_payouts')\
+                            .select('*')\
+                            .eq('race_id', race_id)\
+                            .ilike('wager_type', f'%{wager_label}%')\
+                            .execute()
+                            
+                        if exotics.data:
+                            base_payout = exotics.data[0]['payout']
+                            payout = (float(base_payout) / 2.0) * unit_amount
+                        else:
+                            payout = 0
+
             # Update bet
             update_data = {
                 'status': new_status,

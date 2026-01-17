@@ -44,8 +44,13 @@ export default function Betting() {
     // Multi Selection (for Box)
     const [selectedHorseIds, setSelectedHorseIds] = useState([]);
 
+    // Logic Selection (for Keys)
+    // Structure: { 1: [ids], 2: [ids], 3: [ids] }
+    const [posSelections, setPosSelections] = useState({ 1: [], 2: [], 3: [] });
+
     // Derived State
     const isBoxBet = ['Exacta Box', 'Trifecta Box'].includes(betType);
+    const isKeyBet = ['Exacta Key', 'Trifecta Key'].includes(betType);
 
     // Load bets and races on mount
     useEffect(() => {
@@ -117,6 +122,17 @@ export default function Betting() {
         }
     };
 
+    const togglePosSelection = (pos, pgm) => {
+        setPosSelections(prev => {
+            const current = prev[pos] || [];
+            if (current.includes(pgm)) {
+                return { ...prev, [pos]: current.filter(id => id !== pgm) };
+            } else {
+                return { ...prev, [pos]: [...current, pgm] };
+            }
+        });
+    };
+
     // Cost Calculation Logic
     const calculateCost = () => {
         const n = selectedHorseIds.length;
@@ -126,6 +142,27 @@ export default function Betting() {
         } else if (betType === 'Trifecta Box') {
             // P(n,3)
             return n * (n - 1) * (n - 2) * amount;
+        } else if (betType === 'WPS') {
+            return amount * 3;
+        } else if (isKeyBet) {
+            // Recursive combination counter for Key bets
+            const countCombs = (depth, currentPath) => {
+                const maxDepth = betType === 'Exacta Key' ? 2 : 3;
+                if (depth > maxDepth) return 1;
+
+                const candidates = posSelections[depth] || [];
+                let count = 0;
+                for (const pgm of candidates) {
+                    if (!currentPath.includes(pgm)) {
+                        count += countCombs(depth + 1, [...currentPath, pgm]);
+                    }
+                }
+                return count;
+            };
+
+            // If pos 1 is empty, 0 combinations
+            if (posSelections[1].length === 0) return 0;
+            return countCombs(1, []) * amount;
         }
         return amount; // Single bet
     };
@@ -133,7 +170,10 @@ export default function Betting() {
     const totalCost = calculateCost();
     const isValid = isBoxBet
         ? (betType === 'Exacta Box' ? selectedHorseIds.length >= 2 : selectedHorseIds.length >= 3)
-        : !!selectedHorseId;
+        : isKeyBet
+            ? (betType === 'Exacta Key' ? posSelections[1].length > 0 && posSelections[2].length > 0
+                : posSelections[1].length > 0 && posSelections[2].length > 0 && posSelections[3].length > 0)
+            : !!selectedHorseId;
 
     const updateWinRate = (bets) => {
         const resolved = bets.filter(ticket => ticket.status !== 'Pending');
@@ -147,13 +187,25 @@ export default function Betting() {
         if (!selectedRaceId || !isValid) return;
 
         // Prepare Payload
+        let selectionData = null;
+        if (isBoxBet) selectionData = selectedHorseIds;
+        else if (isKeyBet) {
+            // Convert {1:[], 2:[]} to [[], []]
+            // Ensure strictly ordered list
+            selectionData = [];
+            const max = betType === 'Exacta Key' ? 2 : 3;
+            for (let i = 1; i <= max; i++) {
+                selectionData.push(posSelections[i] || []);
+            }
+        }
+
         const payload = {
             race_id: selectedRaceId,
             bet_type: betType,
             amount: amount,
-            horse_number: !isBoxBet ? selectedHorseId : null,
-            horse_name: !isBoxBet ? raceDetails?.entries.find(e => e.program_number === selectedHorseId)?.horse_name : null,
-            selection: isBoxBet ? selectedHorseIds : null
+            horse_number: !isBoxBet && !isKeyBet ? selectedHorseId : null,
+            horse_name: !isBoxBet && !isKeyBet ? raceDetails?.entries.find(e => e.program_number === selectedHorseId)?.horse_name : null,
+            selection: selectionData
         };
 
         try {
@@ -166,7 +218,9 @@ export default function Betting() {
             if (res.ok) {
                 fetchBets();
                 // Reset form slightly
+                // Reset form slightly
                 if (isBoxBet) setSelectedHorseIds([]);
+                else if (isKeyBet) setPosSelections({ 1: [], 2: [], 3: [] });
                 else setSelectedHorseId('');
                 alert('Bet placed successfully!');
             } else {
@@ -192,6 +246,25 @@ export default function Betting() {
             console.error('Error resolving bets:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDeleteBet = async (ticketId) => {
+        if (!confirm('Are you sure you want to delete this bet? This action cannot be undone.')) return;
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/bets/${ticketId}`, { method: 'DELETE' });
+            if (res.ok) {
+                // Remove from state
+                setTickets(tickets.filter(t => t.id !== ticketId));
+                // Recalculate win rate
+                const remaining = tickets.filter(t => t.id !== ticketId);
+                updateWinRate(remaining);
+            } else {
+                alert('Failed to delete bet');
+            }
+        } catch (error) {
+            console.error('Error deleting bet:', error);
         }
     };
 
@@ -268,8 +341,11 @@ export default function Betting() {
                             <option value="Win">Win</option>
                             <option value="Place">Place</option>
                             <option value="Show">Show</option>
+                            <option value="WPS">WPS (Win/Place/Show)</option>
                             <option value="Exacta Box">Exacta Box</option>
                             <option value="Trifecta Box">Trifecta Box</option>
+                            <option value="Exacta Key">Exacta Key</option>
+                            <option value="Trifecta Key">Trifecta Key</option>
                         </select>
                     </div>
                     <div>
@@ -290,12 +366,48 @@ export default function Betting() {
                     <label className="block text-gray-300 font-bold mb-3">
                         {isBoxBet
                             ? `Select Horses for ${betType} (Select multiple)`
-                            : "Select Horse to Win/Place/Show"
+                            : isKeyBet
+                                ? `Construct ${betType} (Select for each position)`
+                                : `Select Horse for ${betType}`
                         }
                     </label>
 
                     {!raceDetails ? (
                         <p className="text-gray-500 italic text-sm">Select a race to view horses.</p>
+                    ) : isKeyBet ? (
+                        // Position Selection Grid
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                            {[1, 2, (betType === 'Trifecta Key' ? 3 : null)].filter(Boolean).map(pos => (
+                                <div key={pos} className="bg-black/50 p-3 rounded border border-gray-800">
+                                    <h5 className="text-purple-400 font-bold text-sm mb-2 text-center uppercase tracking-wide">
+                                        Position {pos}
+                                    </h5>
+                                    <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                        {raceDetails.entries.map(entry => {
+                                            const isSelected = posSelections[pos]?.includes(entry.program_number);
+                                            // Check overlapping (visual aid only, backend handles validity)
+                                            // const isUsedElsewhere = false; // Could implement
+
+                                            return (
+                                                <div
+                                                    key={entry.program_number}
+                                                    onClick={() => togglePosSelection(pos, entry.program_number)}
+                                                    className={`
+                                                        cursor-pointer p-1.5 rounded flex items-center justify-between transition text-xs
+                                                        ${isSelected
+                                                            ? 'bg-purple-900 text-white font-bold border border-purple-500'
+                                                            : 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent'}
+                                                    `}
+                                                >
+                                                    <span>#{entry.program_number}</span>
+                                                    <span className="truncate w-16 text-right">{entry.horse_name}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     ) : isBoxBet ? (
                         // Multi-Select Grid
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
@@ -349,7 +461,9 @@ export default function Betting() {
                                 ? "Exacta Box covers all 1st & 2nd place permutations. Cost = (Horses × (Horses - 1)) × Unit Amount."
                                 : betType === 'Trifecta Box'
                                     ? "Trifecta Box covers all 1st, 2nd & 3rd place permutations. Cost = (Horses × (Horses - 1) × (Horses - 2)) × Unit Amount."
-                                    : "Standard bet cost is simply the Unit Amount."
+                                    : betType === 'WPS'
+                                        ? "WPS places three separate bets (Win, Place, Show) on the same horse. Cost = 3 × Unit Amount."
+                                        : "Standard bet cost is simply the Unit Amount."
                         }>
                             <svg className="w-4 h-4 text-purple-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -389,12 +503,13 @@ export default function Betting() {
                             <th className="p-4">Cost</th>
                             <th className="p-4">Status</th>
                             <th className="p-4 text-right">Payout</th>
+                            <th className="p-4 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {tickets.length === 0 ? (
                             <tr>
-                                <td colSpan="7" className="p-4 text-center text-gray-400">No tickets found.</td>
+                                <td colSpan="8" className="p-4 text-center text-gray-400">No tickets found.</td>
                             </tr>
                         ) : (
                             tickets.map((ticket, index) => (
@@ -431,12 +546,23 @@ export default function Betting() {
                                     <td className="p-4 text-right text-green-400 font-bold">
                                         {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
                                     </td>
+                                    <td className="p-4 text-right">
+                                        <button
+                                            onClick={() => handleDeleteBet(ticket.id)}
+                                            className="bg-red-900/20 hover:bg-red-900/50 text-red-400 p-2 rounded transition"
+                                            title="Delete Bet"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </td>
                                 </tr>
                             ))
                         )}
                     </tbody>
                 </table>
             </div>
-        </div>
+        </div >
     );
 }
