@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -34,6 +34,8 @@ const getPostColor = (number) => {
 export default function RaceDetails() {
     const { id } = useParams(); // This is the race_key
     const navigate = useNavigate();
+    const location = useLocation();
+    const cameFromChanges = location.state?.from === 'changes';
     const [raceData, setRaceData] = useState(null);
     const [raceChanges, setRaceChanges] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -139,31 +141,43 @@ export default function RaceDetails() {
             <div className="flex flex-col gap-4">
                 {/* Top Navigation Bar */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <button
-                        onClick={() => {
-                            // Smart navigation back to track context
-                            const today = new Date();
-                            const year = today.getFullYear();
-                            const month = String(today.getMonth() + 1).padStart(2, '0');
-                            const day = String(today.getDate()).padStart(2, '0');
-                            const todayStr = `${year}-${month}-${day}`;
+                    {cameFromChanges ? (
+                        <Link
+                            to="/changes"
+                            className="flex items-center gap-2 bg-black border border-yellow-900/50 hover:bg-yellow-900/20 text-yellow-300 hover:text-yellow-100 px-4 py-2 rounded-lg transition group text-sm font-medium"
+                        >
+                            <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Back to Changes
+                        </Link>
+                    ) : (
+                        <button
+                            onClick={() => {
+                                // Smart navigation back to track context
+                                const today = new Date();
+                                const year = today.getFullYear();
+                                const month = String(today.getMonth() + 1).padStart(2, '0');
+                                const day = String(today.getDate()).padStart(2, '0');
+                                const todayStr = `${year}-${month}-${day}`;
 
-                            const isToday = race.race_date === todayStr;
-                            const trackCode = race.track_code || 'All'; // Fallback
+                                const isToday = race.race_date === todayStr;
+                                const trackCode = race.track_code || 'All'; // Fallback
 
-                            let url = `/races?track=${trackCode}`;
-                            if (!isToday) {
-                                url += `&tab=past&date=${race.race_date}`;
-                            }
-                            navigate(url);
-                        }}
-                        className="flex items-center gap-2 bg-black border border-purple-900/50 hover:bg-purple-900/20 text-gray-300 hover:text-white px-4 py-2 rounded-lg transition group text-sm font-medium"
-                    >
-                        <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        Back to Track
-                    </button>
+                                let url = `/races?track=${trackCode}`;
+                                if (!isToday) {
+                                    url += `&tab=past&date=${race.race_date}`;
+                                }
+                                navigate(url);
+                            }}
+                            className="flex items-center gap-2 bg-black border border-purple-900/50 hover:bg-purple-900/20 text-gray-300 hover:text-white px-4 py-2 rounded-lg transition group text-sm font-medium"
+                        >
+                            <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Back to Track
+                        </button>
+                    )}
 
                     {/* Next/Prev Race Navigation */}
                     {/* Next/Prev Race Navigation */}
@@ -307,10 +321,10 @@ export default function RaceDetails() {
                     <div className="space-y-2">
                         {raceChanges.map((change, idx) => (
                             <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border ${change.change_type === 'Scratch'
-                                    ? 'bg-red-900/10 border-red-900/30'
-                                    : change.change_type === 'Jockey Change'
-                                        ? 'bg-blue-900/10 border-blue-900/30'
-                                        : 'bg-yellow-900/10 border-yellow-900/30'
+                                ? 'bg-red-900/10 border-red-900/30'
+                                : change.change_type === 'Jockey Change'
+                                    ? 'bg-blue-900/10 border-blue-900/30'
+                                    : 'bg-yellow-900/10 border-yellow-900/30'
                                 }`}>
                                 {change.program_number && change.program_number !== '-' && (
                                     (() => {
@@ -329,8 +343,8 @@ export default function RaceDetails() {
                                     <span className="text-white font-medium">{change.horse_name}</span>
                                     <span className="mx-2 text-gray-500">•</span>
                                     <span className={`text-sm font-medium ${change.change_type === 'Scratch' ? 'text-red-400'
-                                            : change.change_type === 'Jockey Change' ? 'text-blue-400'
-                                                : 'text-yellow-400'
+                                        : change.change_type === 'Jockey Change' ? 'text-blue-400'
+                                            : 'text-yellow-400'
                                         }`}>
                                         {change.change_type}
                                     </span>

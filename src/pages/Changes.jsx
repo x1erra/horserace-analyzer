@@ -184,6 +184,7 @@ export default function Changes() {
                                         <td className="p-4 whitespace-nowrap">
                                             <Link
                                                 to={`/race/${item.track_code}-${item.race_date?.replace(/-/g, '')}-${item.race_number}`}
+                                                state={{ from: 'changes' }}
                                                 className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
                                             >
                                                 Race {item.race_number}

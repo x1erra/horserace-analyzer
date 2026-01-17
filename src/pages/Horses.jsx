@@ -163,26 +163,90 @@ export default function Horses() {
                         ))}
                     </div>
 
-                    {/* Pagination */}
+                    {/* Improved Pagination */}
                     {totalPages > 1 && (
-                        <div className="flex justify-center items-center gap-4 mt-8">
-                            <button
-                                onClick={() => setPage(p => Math.max(1, p - 1))}
-                                disabled={page === 1}
-                                className="px-4 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition"
-                            >
-                                Previous
-                            </button>
-                            <span className="text-gray-400">
-                                Page {page} of {totalPages}
-                            </span>
-                            <button
-                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                                disabled={page === totalPages}
-                                className="px-4 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition"
-                            >
-                                Next
-                            </button>
+                        <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mt-8">
+                            {/* Page navigation buttons */}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setPage(1)}
+                                    disabled={page === 1}
+                                    className="px-3 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition text-sm"
+                                    title="First page"
+                                >
+                                    ««
+                                </button>
+                                <button
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    disabled={page === 1}
+                                    className="px-3 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition text-sm"
+                                >
+                                    Prev
+                                </button>
+
+                                {/* Page number buttons - show nearby pages */}
+                                <div className="hidden sm:flex items-center gap-1">
+                                    {[...Array(Math.min(5, totalPages))].map((_, i) => {
+                                        let pageNum;
+                                        if (totalPages <= 5) {
+                                            pageNum = i + 1;
+                                        } else if (page <= 3) {
+                                            pageNum = i + 1;
+                                        } else if (page >= totalPages - 2) {
+                                            pageNum = totalPages - 4 + i;
+                                        } else {
+                                            pageNum = page - 2 + i;
+                                        }
+                                        return (
+                                            <button
+                                                key={pageNum}
+                                                onClick={() => setPage(pageNum)}
+                                                className={`w-10 py-2 rounded text-sm transition ${page === pageNum
+                                                        ? 'bg-purple-600 text-white'
+                                                        : 'bg-purple-900/30 text-purple-300 hover:bg-purple-900/50'
+                                                    }`}
+                                            >
+                                                {pageNum}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <button
+                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={page === totalPages}
+                                    className="px-3 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition text-sm"
+                                >
+                                    Next
+                                </button>
+                                <button
+                                    onClick={() => setPage(totalPages)}
+                                    disabled={page === totalPages}
+                                    className="px-3 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition text-sm"
+                                    title="Last page"
+                                >
+                                    »»
+                                </button>
+                            </div>
+
+                            {/* Page jump input */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-gray-400 text-sm">Go to:</span>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={totalPages}
+                                    value={page}
+                                    onChange={(e) => {
+                                        const val = parseInt(e.target.value);
+                                        if (val >= 1 && val <= totalPages) {
+                                            setPage(val);
+                                        }
+                                    }}
+                                    className="w-16 px-2 py-1 bg-black border border-purple-900/50 text-white rounded text-center text-sm focus:outline-none focus:border-purple-600"
+                                />
+                                <span className="text-gray-500 text-sm">of {totalPages}</span>
+                            </div>
                         </div>
                     )}
                 </>

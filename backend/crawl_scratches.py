@@ -18,41 +18,57 @@ LATE_CHANGES_INDEX_URL = "https://www.equibase.com/static/latechanges/html/latec
 
 def fetch_static_page(url, retries=3):
     """
-    Fetch static page using PowerShell to bypass WAF (reused pattern from crawl_entries)
+    Fetch static page using Python requests library with proper headers.
+    Falls back to PowerShell if requests fails.
     """
-    temp_file = f"temp_scratches_{int(time.time())}.html"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+    }
     
     for attempt in range(retries):
         try:
-            # logger.info(f"Fetching {url} (Attempt {attempt+1})")
+            # Try Python requests first
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 200 and len(response.text) > 500:
+                return response.text
             
-            cmd = ["powershell", "-Command", f"Invoke-WebRequest -Uri '{url}' -OutFile '{temp_file}'"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            logger.warning(f"Requests got status {response.status_code}, trying PowerShell...")
+            
+        except requests.exceptions.Timeout:
+            logger.warning(f"Requests timeout for {url}, trying PowerShell...")
+        except Exception as e:
+            logger.warning(f"Requests failed: {e}, trying PowerShell...")
+        
+        # Fallback to PowerShell
+        try:
+            temp_file = f"temp_scratches_{int(time.time())}.html"
+            cmd = ["powershell", "-Command", f"Invoke-WebRequest -Uri '{url}' -OutFile '{temp_file}' -TimeoutSec 15"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
             
             if result.returncode == 0 and os.path.exists(temp_file):
-                size = os.path.getsize(temp_file)
-                if size < 1000: # detailed pages can be small, but index shouldn't be too small
-                    # logger.warning(f"Downloaded file small ({size} bytes).")
-                    pass
-                
                 with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                 
                 try: os.remove(temp_file) 
                 except: pass
                 
-                return content
-            
-            time.sleep(2)
-            
+                if len(content) > 500:
+                    return content
+                    
         except Exception as e:
-            logger.error(f"Error fetching {url}: {e}")
-            time.sleep(2)
-            
-    if os.path.exists(temp_file):
-        try: os.remove(temp_file)
-        except: pass
+            logger.warning(f"PowerShell fallback failed: {e}")
+        finally:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except: pass
         
+        time.sleep(1)
+        
+    logger.error(f"All fetch methods failed for {url}")
     return None
 
 def parse_late_changes_index():

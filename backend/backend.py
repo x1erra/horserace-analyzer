@@ -1357,17 +1357,41 @@ def get_horses():
     - search: Filter by horse name (optional)
     - limit: Number of results (default 50)
     - page: Page number for pagination (default 1)
+    - with_races: If 'true', only return horses that have race entries
     """
     try:
         supabase = get_supabase_client()
+        import re
         
         search = request.args.get('search', '').strip()
         limit = int(request.args.get('limit', 50))
         page = int(request.args.get('page', 1))
+        with_races = request.args.get('with_races', 'false').lower() == 'true'
         offset = (page - 1) * limit
         
+        # Helper function to check if a horse name is valid
+        def is_valid_horse_name(name):
+            if not name or len(name) < 2:
+                return False
+            # Exclude names that start with $, are just numbers/punctuation, or look like money amounts
+            if name.startswith('$') or name.startswith('-'):
+                return False
+            if re.match(r'^[\d\s\.\,\-\$]+$', name):
+                return False
+            # Exclude common garbage patterns
+            if name in ['-', '--', 'N/A', 'Unknown', 'TBD']:
+                return False
+            return True
+        
         # Build base query for horses
+        # Filter out garbage names using pattern matching
         query = supabase.table('hranalyzer_horses').select('*', count='exact')
+        
+        # Exclude names starting with $ or that are too short
+        query = query.not_.like('horse_name', '$%')
+        query = query.neq('horse_name', '-')
+        query = query.neq('horse_name', '--')
+        query = query.neq('horse_name', 'N/A')
         
         if search:
             query = query.ilike('horse_name', f'%{search}%')
@@ -1375,7 +1399,8 @@ def get_horses():
         query = query.order('horse_name').range(offset, offset + limit - 1)
         response = query.execute()
         
-        horses_data = response.data
+        # Additional Python-side filtering for names that slip through
+        horses_data = [h for h in response.data if is_valid_horse_name(h.get('horse_name', ''))]
         total_count = response.count or 0
         
         # Now get race entries for these horses to compute stats
