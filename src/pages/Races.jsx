@@ -1,11 +1,12 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RaceCard from '../components/RaceCard';
 
 export default function Races() {
-    const [activeTab, setActiveTab] = useState('today'); // 'today' or 'past'
-    const [selectedTrack, setSelectedTrack] = useState('All'); // Changed default to 'All'
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'today');
+    const [selectedTrack, setSelectedTrack] = useState(searchParams.get('track') || 'All');
 
     // Default to current date YYYY-MM-DD
     const getTodayDate = () => {
@@ -16,7 +17,7 @@ export default function Races() {
         return `${year}-${month}-${day}`;
     };
 
-    const [selectedDate, setSelectedDate] = useState(getTodayDate());
+    const [selectedDate, setSelectedDate] = useState(searchParams.get('date') || getTodayDate());
     const [allRaces, setAllRaces] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -50,6 +51,38 @@ export default function Races() {
         };
         fetchMetadata();
     }, []);
+
+    // Update URL when filters change
+    useEffect(() => {
+        const params = {};
+        if (selectedTrack !== 'All') params.track = selectedTrack;
+        if (activeTab !== 'today') params.tab = activeTab;
+        if (selectedDate !== getTodayDate()) params.date = selectedDate;
+        setSearchParams(params, { replace: true });
+    }, [selectedTrack, activeTab, selectedDate, setSearchParams]);
+
+    // Update state if URL changes (e.g. back button)
+    useEffect(() => {
+        const trackParam = searchParams.get('track');
+        const tabParam = searchParams.get('tab');
+        const dateParam = searchParams.get('date');
+
+        if (trackParam && trackParam !== selectedTrack) {
+            setSelectedTrack(trackParam);
+        } else if (!trackParam && selectedTrack !== 'All') {
+            setSelectedTrack('All');
+        }
+
+        if (tabParam && tabParam !== activeTab) {
+            setActiveTab(tabParam);
+        }
+
+        if (dateParam && dateParam !== selectedDate) {
+            setSelectedDate(dateParam);
+        } else if (!dateParam && selectedDate !== getTodayDate()) {
+            setSelectedDate(getTodayDate());
+        }
+    }, [searchParams]);
 
     // Reset pagination when filters or data change
     useEffect(() => {
@@ -136,6 +169,18 @@ export default function Races() {
             setLoading(false);
         }
     };
+
+    // Auto-search on mount if filters are present
+    useEffect(() => {
+        const hasTrack = searchParams.get('track');
+        const hasDate = searchParams.get('date');
+        const isPast = searchParams.get('tab') === 'past';
+
+        // If we have specific filters, trigger search automatically
+        if ((hasTrack && hasTrack !== 'All') || (isPast && hasDate)) {
+            handleSearch();
+        }
+    }, []); // Run once on mount
 
     // Calculate Pagination
     const indexOfLastItem = currentPage * itemsPerPage;

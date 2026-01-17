@@ -640,36 +640,7 @@ def get_race_details(race_key):
                 .execute()
             claims = claims_response.data
 
-        return jsonify({
-            'race': {
-                'race_key': race['race_key'],
-                'track_code': race['track_code'],
-                'track_name': (race.get('hranalyzer_tracks') or {}).get('track_name', race['track_code']),
-                'location': (race.get('hranalyzer_tracks') or {}).get('location'),
-                'race_number': race['race_number'],
-                'race_date': race['race_date'],
-                'post_time': race['post_time'],
-                'race_type': race['race_type'],
-                'surface': race['surface'],
-                'distance': race['distance'],
-                'distance_feet': race['distance_feet'],
-                'conditions': race['conditions'],
-                'purse': race['purse'],
-                'race_status': race['race_status'],
-                'data_source': race['data_source'],
-                'final_time': race['final_time'],
-                'fractional_times': race['fractional_times'],
-                'equibase_chart_url': race['equibase_chart_url'],
-                'equibase_pdf_url': race['equibase_pdf_url']
-            },
-            'entries': entries,
-            'exotic_payouts': exotic_payouts,
-            'claims': claims,
-            'navigation': {
-                'prev_race_key': None,
-                'next_race_key': None
-            }
-        })
+
 
         # Add navigation logic (Next/Prev Race)
         # Find sibling races (same track, same date)

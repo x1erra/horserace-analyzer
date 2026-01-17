@@ -95,7 +95,23 @@ export default function RaceDetails() {
                 {/* Top Navigation Bar */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <button
-                        onClick={() => navigate(-1)}
+                        onClick={() => {
+                            // Smart navigation back to track context
+                            const today = new Date();
+                            const year = today.getFullYear();
+                            const month = String(today.getMonth() + 1).padStart(2, '0');
+                            const day = String(today.getDate()).padStart(2, '0');
+                            const todayStr = `${year}-${month}-${day}`;
+
+                            const isToday = race.race_date === todayStr;
+                            const trackCode = race.track_code || 'All'; // Fallback
+
+                            let url = `/races?track=${trackCode}`;
+                            if (!isToday) {
+                                url += `&tab=past&date=${race.race_date}`;
+                            }
+                            navigate(url);
+                        }}
                         className="flex items-center gap-2 bg-black border border-purple-900/50 hover:bg-purple-900/20 text-gray-300 hover:text-white px-4 py-2 rounded-lg transition group text-sm font-medium"
                     >
                         <svg className="w-4 h-4 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">

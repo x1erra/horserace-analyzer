@@ -700,7 +700,8 @@ def parse_scratched_horses(text: str) -> List[str]:
     """
     scratches = []
     # Regex: Scratched Horse(s):\s*(.*?)(?:\s+Trainers:|\s+Footnotes|$)
-    match = re.search(r'Scratched\s*Horse\(s\)\s*:\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|$)', text, re.IGNORECASE | re.DOTALL)
+    # Regex: Scratched Horse(s):\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|\s+Total\s*WPS|\s+Pgm\s+Horse|\s+Claiming\s*Prices|$)
+    match = re.search(r'Scratched\s*Horse\(s\)\s*:\s*(.*?)(?:\s+Trainers:|\s+Owner\(s\):|\s+Footnotes|\s+Claiming|\s+Total\s*WPS|\s+Pgm\s+Horse|\s+Claiming\s*Prices|$)', text, re.IGNORECASE | re.DOTALL)
     
     if match:
         content = match.group(1).replace('\n', ' ').strip()
