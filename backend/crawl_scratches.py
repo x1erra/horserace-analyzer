@@ -329,40 +329,166 @@ def update_changes_in_db(track_code, race_date, change_list):
             
     return count
 
+def crawl_otb_changes():
+    """
+    Fallback crawler for OffTrackBetting.com
+    Returns number of changes processed.
+    """
+    logger.info("Starting Fallback Crawl: OTB Scratches & Changes")
+    url = "https://www.offtrackbetting.com/scratches_changes.html"
+    
+    html = fetch_static_page(url)
+    if not html:
+        logger.error("Failed to fetch OTB page")
+        return 0
+        
+    soup = BeautifulSoup(html, 'html.parser')
+    tables = soup.find_all('table')
+    
+    # Locate the main table - usually has "Race Date:"
+    main_table = None
+    for t in tables:
+        if 'Race Date:' in t.get_text():
+            main_table = t
+            break
+            
+    if not main_table:
+        logger.warning("Could not find main table in OTB page")
+        return 0
+        
+    rows = main_table.find_all('tr')
+    
+    current_track = None
+    current_race = None
+    changes_found = []
+    
+    for row in rows:
+        text = row.get_text(strip=True)
+        
+        # Track Header: "AQU : Aqueduct : Race: 1"
+        if 'Change' in text and ':' in text:
+            # Try to parse "CODE : Name : Race: N"
+            cols = row.find_all('td')
+            if cols:
+                header_txt = cols[0].get_text(strip=True)
+                parts = header_txt.split(':')
+                if len(parts) >= 3:
+                    current_track = parts[0].strip() # AQU
+                    # Race number is usually last part " Race: 1" -> "1"
+                    race_part = parts[-1].lower().replace('race', '').strip()
+                    current_race = int(race_part) if race_part.isdigit() else None
+            continue
+            
+        if not current_track or not current_race:
+            continue
+            
+        # Change Row
+        # #5  A Lister  Scratched - Reason Unavailable  10:04 am ET
+        cols = row.find_all('td')
+        if len(cols) < 3: continue
+        
+        pgm = None
+        horse_name = None
+        desc_cell = None
+        
+        # CASE 1: Full Row with Horse Info
+        if len(cols) == 4 and '#' in cols[0].get_text():
+            pgm = cols[0].get_text(strip=True).replace('#', '')
+            horse_name = cols[1].get_text(strip=True)
+            desc_cell = cols[2]
+            
+        # CASE 2: Continuation Row (just description)
+        elif len(cols) == 3 and not '#' in cols[0].get_text():
+             desc_cell = cols[1]
+             pass
+        
+        # Parse description
+        if desc_cell:
+            raw_desc = desc_cell.get_text(" ", strip=True) # "Scratched - Reason"
+            
+            # Cleanup descriptions
+            raw_desc = raw_desc.replace('\n', ' ').strip()
+            
+            # Determine type
+            ctype = determine_change_type(raw_desc)
+            
+            changes_found.append({
+                'track_code': current_track,
+                'race_number': current_race,
+                'program_number': pgm, 
+                'horse_name': horse_name,
+                'change_type': ctype,
+                'description': raw_desc
+            })
+    
+    logger.info(f"OTB Crawl found {len(changes_found)} changes raw")
+    
+    # Group by track and update DB
+    changes_by_track = {}
+    for c in changes_found:
+        t = c['track_code']
+        if t not in changes_by_track: changes_by_track[t] = []
+        changes_by_track[t].append({
+            'race_number': c['race_number'],
+            'program_number': c['program_number'],
+            'horse_name': c['horse_name'],
+            'change_type': c['change_type'],
+            'description': c['description']
+        })
+        
+    total_saved = 0
+    today = date.today()
+    for trk, chgs in changes_by_track.items():
+        saved = update_changes_in_db(trk, today, chgs)
+        total_saved += saved
+        
+    return total_saved
+
+
 def crawl_late_changes():
     """
-    Main entry point for crawling changes
+    Main entry point for crawling changes.
+    Tries Equibase first, then OTB if needed.
     """
     logger.info("Starting Crawl: Equibase Late Changes")
-    
-    # 1. Get Track Links
-    track_links = parse_late_changes_index()
-    logger.info(f"Found {len(track_links)} tracks with changes")
     
     total_changes_processed = 0
     today = date.today()
     
-    for link in track_links:
-        code = link['track_code']
-        url = link['url']
+    # 1. Try Equibase
+    try:
+        track_links = parse_late_changes_index()
+        logger.info(f"Found {len(track_links)} tracks with changes on Equibase")
         
-        try:
-            # logger.info(f"Checking changes for {code}")
-            html = fetch_static_page(url)
-            if not html: continue
-            
-            changes = parse_track_changes(html, code)
-            
-            if changes:
-                # logger.info(f"Found {len(changes)} changes for {code}")
-                # Update DB
-                processed = update_changes_in_db(code, today, changes)
-                total_changes_processed += processed
+        for link in track_links:
+            code = link['track_code']
+            url = link['url']
+            try:
+                html = fetch_static_page(url)
+                if html:
+                    changes = parse_track_changes(html, code)
+                    if changes:
+                        count = update_changes_in_db(code, today, changes)
+                        total_changes_processed += count
+            except Exception as e:
+                logger.error(f"Error crawling {code}: {e}")
                 
-        except Exception as e:
-            logger.error(f"Error processing {code}: {e}")
-            
-    logger.info(f"Changes Crawl Complete. Processed {total_changes_processed} records.")
+    except Exception as e:
+        logger.error(f"Equibase index fetch failed: {e}")
+        
+    logger.info(f"Equibase phase complete. Processed {total_changes_processed} records.")
+    
+    # 2. Run OTB Fallback/Supplement
+    # Always run to catch exceptions and gaps
+    logger.info("Starting OTB Fallback Crawl...")
+    try:
+        otb_count = crawl_otb_changes()
+        total_changes_processed += otb_count
+        logger.info(f"OTB Helper added {otb_count} records.")
+    except Exception as e:
+        logger.error(f"OTB Crawl failed: {e}")
+        
+    logger.info(f"Total Changes Processed (All Sources): {total_changes_processed}")
     return total_changes_processed
 
 if __name__ == "__main__":
