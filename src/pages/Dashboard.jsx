@@ -62,24 +62,25 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
         className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between group relative overflow-hidden"
         onClick={onClick}
     >
-        {/* Favorite Toggle */}
-        <button
-            onClick={onToggleFavorite}
-            className={`absolute top-3 right-3 p-2 rounded-full transition-all duration-200 z-10 ${isFavorite
-                    ? 'text-yellow-500 bg-yellow-500/10'
-                    : 'text-gray-600 hover:text-yellow-500 bg-white/5 opacity-0 group-hover:opacity-100'
-                }`}
-            title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
-        >
-            {isFavorite ? <HiStar className="w-5 h-5" /> : <HiOutlineStar className="w-5 h-5" />}
-        </button>
-
         <div>
-            <div className="flex justify-between items-start mb-4 pr-8">
+            <div className="flex justify-between items-start mb-4">
                 <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
-                <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
-                    {track.track_code}
-                </span>
+                <div className="flex items-center gap-2">
+                    <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
+                        {track.track_code}
+                    </span>
+                    {/* Favorite Toggle */}
+                    <button
+                        onClick={onToggleFavorite}
+                        className={`p-1.5 rounded-full transition-all duration-200 ${isFavorite
+                                ? 'text-yellow-500 bg-yellow-500/10'
+                                : 'text-gray-400 opacity-30 hover:opacity-100 hover:text-yellow-500'
+                            }`}
+                        title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                    >
+                        {isFavorite ? <HiStar className="w-5 h-5" /> : <HiOutlineStar className="w-5 h-5" />}
+                    </button>
+                </div>
             </div>
             <div className="space-y-2">
                 <div className="flex justify-between text-sm">
@@ -307,8 +308,8 @@ export default function Dashboard() {
                     {/* Favorite Tracks Section */}
                     {favoritedTracks.length > 0 && (
                         <div className="space-y-4">
-                            <div className="flex items-center gap-2 text-yellow-500">
-                                <HiStar className="w-5 h-5" />
+                            <div className="flex items-center gap-2 text-purple-300">
+                                <HiStar className="w-5 h-5 text-yellow-500" />
                                 <h4 className="font-semibold text-lg">Favorite Tracks</h4>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
