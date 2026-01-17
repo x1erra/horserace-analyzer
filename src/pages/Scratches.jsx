@@ -1,8 +1,8 @@
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
-import { format } from 'date-fns';
-import { RefreshCw, Filter, Calendar, AlertTriangle } from 'lucide-react';
+import axios from 'axios';
+import { format, parseISO } from 'date-fns';
+import { AlertTriangle } from 'lucide-react';
 
 export default function Scratches() {
     const [loading, setLoading] = useState(true);
@@ -15,64 +15,22 @@ export default function Scratches() {
             setLoading(true);
             setError(null);
 
-            // Base query: get scratches
-            // We need to join r
-            let query = supabase
-                .from('hranalyzer_race_entries')
-                .select(`
-          id,
-          program_number,
-          horse_id,
-          scratched,
-          updated_at,
-          hranalyzer_horses (
-            horse_name
-          ),
-          hranalyzer_races (
-            id,
-            track_code,
-            race_date,
-            race_number,
-            post_time,
-            race_status
-          ),
-          hranalyzer_trainers (
-            trainer_name
-          )
-        `)
-                .eq('scratched', true)
-                .order('updated_at', { ascending: false });
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+            const endpoint = `${baseUrl}/api/scratches`;
 
-            const { data, error: err } = await query;
+            const params = {
+                view: viewMode,
+                _t: Date.now() // cache buster
+            };
 
-            if (err) throw err;
+            const response = await axios.get(endpoint, { params });
 
-            // Filter locally for 'upcoming' if needed, or refine query
-            // Upcoming = race_date >= today
-            const today = new Date().toISOString().split('T')[0];
-
-            let filtered = data.filter(item => item.hranalyzer_races); // ensure race exists
-
-            if (viewMode === 'upcoming') {
-                filtered = filtered.filter(item => item.hranalyzer_races.race_date >= today);
-            }
-
-            // Sort: Date Desc, Track, Race #
-            filtered.sort((a, b) => {
-                const raceA = a.hranalyzer_races;
-                const raceB = b.hranalyzer_races;
-                if (raceA.race_date !== raceB.race_date)
-                    return raceB.race_date.localeCompare(raceA.race_date); // Newest first
-                if (raceA.track_code !== raceB.track_code)
-                    return raceA.track_code.localeCompare(raceB.track_code);
-                return raceA.race_number - raceB.race_number;
-            });
-
-            setScratches(filtered);
+            // Backend already returns sorted list
+            setScratches(response.data.scratches || []);
 
         } catch (e) {
             console.error("Error fetching scratches:", e);
-            setError("Failed to load scratches.");
+            setError("Failed to load scratches. Is the backend running?");
         } finally {
             setLoading(false);
         }
@@ -149,15 +107,15 @@ export default function Scratches() {
                                 {scratches.map((item) => (
                                     <tr key={item.id} className="hover:bg-gray-800/50 transition-colors group">
                                         <td className="p-4 text-gray-300 font-medium">
-                                            {format(new Date(item.hranalyzer_races.race_date), 'MMM d, yyyy')}
+                                            {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
                                         </td>
                                         <td className="p-4">
                                             <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-gray-800 text-gray-300 text-xs font-bold border border-gray-700">
-                                                {item.hranalyzer_races.track_code}
+                                                {item.track_code}
                                             </span>
                                         </td>
                                         <td className="p-4 text-gray-300">
-                                            Top Race {item.hranalyzer_races.race_number}
+                                            Race {item.race_number}
                                         </td>
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
@@ -165,12 +123,12 @@ export default function Scratches() {
                                                     {item.program_number}
                                                 </div>
                                                 <span className="text-white font-medium group-hover:text-yellow-400 transition-colors">
-                                                    {item.hranalyzer_horses?.horse_name || 'Unknown'}
+                                                    {item.horse_name || 'Unknown'}
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="p-4 text-gray-400">
-                                            {item.hranalyzer_trainers?.trainer_name || '-'}
+                                            {item.trainer_name || '-'}
                                         </td>
                                         <td className="p-4">
                                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-500 border border-red-500/20">

@@ -774,6 +774,80 @@ def get_claims():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/scratches', methods=['GET'])
+def get_scratches():
+    """
+    Get all scratches suitable for display
+    Query params:
+    - view: 'upcoming' (default) or 'all'
+    """
+    try:
+        supabase = get_supabase_client()
+        view_mode = request.args.get('view', 'upcoming')
+        today = date.today().isoformat()
+        
+        # Base query for scratches
+        query = supabase.table('hranalyzer_race_entries')\
+            .select('''
+                id, program_number, scratched, updated_at,
+                horse:hranalyzer_horses(horse_name),
+                trainer:hranalyzer_trainers(trainer_name),
+                race:hranalyzer_races(
+                    id, track_code, race_date, race_number, post_time, race_status,
+                    track:hranalyzer_tracks(track_name)
+                )
+            ''')\
+            .eq('scratched', True)
+            
+        # We fetch a bit more data and filter in memory if needed, 
+        # or Try to filter on the joined race date.
+        # Filtering deep nested text (race.race_date) is tricky in this client syntax without custom RPC.
+        # So we fetch most recent scratches (limit 200?) and filter.
+        
+        # Optimize: Sort by updated_at desc to get recent ones.
+        query = query.order('updated_at', desc=True).limit(500)
+        
+        response = query.execute()
+        
+        scratches = []
+        for item in response.data:
+            race = item.get('race')
+            if not race: continue
+            
+            race_date = race['race_date']
+            
+            if view_mode == 'upcoming':
+                if race_date < today:
+                    continue
+            
+            # Helper for track name
+            t_info = race.get('track')
+            track_name = t_info['track_name'] if t_info else race['track_code']
+            
+            scratches.append({
+                'id': item['id'],
+                'program_number': item['program_number'],
+                'horse_name': (item.get('horse') or {}).get('horse_name', 'Unknown'),
+                'trainer_name': (item.get('trainer') or {}).get('trainer_name', '-'),
+                'race_date': race_date,
+                'race_number': race['race_number'],
+                'track_code': race['track_code'],
+                'track_name': track_name,
+                'status': 'Scratched'
+            })
+            
+        # Sort by Date (desc), Track, Race
+        scratches.sort(key=lambda x: (x['race_date'], x['track_code'], x['race_number']), reverse=True)
+        
+        return jsonify({
+            'scratches': scratches,
+            'count': len(scratches)
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/bets', methods=['POST'])
 def place_bet():
     """Place a new bet"""
