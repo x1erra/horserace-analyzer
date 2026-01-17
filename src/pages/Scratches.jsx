@@ -38,6 +38,9 @@ export default function Scratches() {
     const [scratches, setScratches] = useState([]);
     const [error, setError] = useState(null);
     const [viewMode, setViewMode] = useState('upcoming'); // 'upcoming' or 'all'
+    const [page, setPage] = useState(1);
+    const [limit, setLimit] = useState(20);
+    const [totalPages, setTotalPages] = useState(1);
 
     const fetchScratches = async () => {
         try {
@@ -49,13 +52,17 @@ export default function Scratches() {
 
             const params = {
                 view: viewMode,
+                page: page,
+                limit: limit,
                 _t: Date.now() // cache buster
             };
 
             const response = await axios.get(endpoint, { params });
 
-            // Backend already returns sorted list
+            // Backend returns list and count
             setScratches(response.data.scratches || []);
+            const totalCount = response.data.count || 0;
+            setTotalPages(Math.ceil(totalCount / limit) || 1);
 
         } catch (e) {
             console.error("Error fetching scratches:", e);
@@ -66,8 +73,20 @@ export default function Scratches() {
     };
 
     useEffect(() => {
-        fetchScratches();
+        setPage(1); // Reset to page 1 when view mode changes
     }, [viewMode]);
+
+    useEffect(() => {
+        fetchScratches();
+    }, [viewMode, page, limit]);
+
+    const handleNextPage = () => {
+        if (page < totalPages) setPage(p => p + 1);
+    };
+
+    const handlePrevPage = () => {
+        if (page > 1) setPage(p => p - 1);
+    };
 
     return (
         <div className="space-y-6">
@@ -179,6 +198,58 @@ export default function Scratches() {
                     </div>
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {!loading && !error && scratches.length > 0 && (
+                <div className="px-4 py-3 border-t border-purple-900/50 bg-black flex flex-col sm:flex-row items-center justify-between gap-4 rounded-b-xl">
+                    <div className="flex items-center text-sm text-gray-400">
+                        <span>Show</span>
+                        <select
+                            value={limit}
+                            onChange={(e) => {
+                                setLimit(Number(e.target.value));
+                                setPage(1);
+                            }}
+                            className="mx-2 bg-black border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
+                        >
+                            <option value={10} className="bg-black">10</option>
+                            <option value={20} className="bg-black">20</option>
+                            <option value={30} className="bg-black">30</option>
+                            <option value={50} className="bg-black">50</option>
+                            <option value={100} className="bg-black">100</option>
+                        </select>
+                        <span>results per page</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handlePrevPage}
+                            disabled={page === 1}
+                            className={`px-3 py-1 rounded text-sm font-medium transition ${page === 1
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                }`}
+                        >
+                            Previous
+                        </button>
+
+                        <span className="text-sm text-gray-400">
+                            Page <span className="font-medium text-white">{page}</span> of <span className="font-medium text-white">{totalPages}</span>
+                        </span>
+
+                        <button
+                            onClick={handleNextPage}
+                            disabled={page >= totalPages}
+                            className={`px-3 py-1 rounded text-sm font-medium transition ${page >= totalPages
+                                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                                    : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
+                                }`}
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

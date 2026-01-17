@@ -50,8 +50,11 @@ def normalize_pgm(pgm: str) -> str:
     
     pgm = str(pgm).strip().upper()
     
+    # STRICTER CLEANING: Remove anything that is not alphanumeric
+    # This handles "1*", "3 (Part)", etc.
+    pgm = re.sub(r'[^A-Z0-9]', '', pgm)
+    
     # Remove leading zeros if it's numeric-ish (but keep '0' if it is just '0')
-    # Regex: replace leading zeros at start of string, but only if followed by other characters?
     # Actually just stripping leading zeros works for '01', '01A' -> '1A'
     
     # If strictly numeric, simple int conversion
@@ -60,7 +63,6 @@ def normalize_pgm(pgm: str) -> str:
         
     # If alphanumeric, try to strip leading zeros from the numeric part? 
     # E.g. "01A" -> "1A". 
-    # Let's simple regex: ^0+
     pgm = re.sub(r'^0+', '', pgm)
     
     return pgm if pgm else "0"
@@ -396,6 +398,13 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
             if "scratched" in row_str or "scr" in row_str.split():
                  logger.info(f"Skipping scratched horse in table: {horse_data['horse_name']}")
                  continue
+            
+            # GARBAGE FILTER: Check if name is a known metadata label
+            name_check = horse_data['horse_name'].lower()
+            garbage_terms = ['preliminary', 'mutuel', 'total', 'wps', 'claiming', 'footnote', 'winner', 'final time']
+            if any(term in name_check for term in garbage_terms):
+                logger.info(f"Skipping garbage row matching metadata term: {horse_data['horse_name']}")
+                continue
             
             # Helper to merge WPS if available
             # Note: We can't access race_data here directly easily unless we pass it or pass payouts map

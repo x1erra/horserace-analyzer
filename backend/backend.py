@@ -780,61 +780,89 @@ def get_scratches():
     Get all scratches suitable for display
     Query params:
     - view: 'upcoming' (default) or 'all'
+    - page: Page number (default 1)
+    - limit: Results per page (default 20)
     """
     try:
         supabase = get_supabase_client()
         view_mode = request.args.get('view', 'upcoming')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
         today = date.today().isoformat()
         
+        # Calculate offset
+        start = (page - 1) * limit
+        end = start + limit - 1
+        
         # Base query for scratches
+        # We need count='exact' to get total distinct count
         query = supabase.table('hranalyzer_race_entries')\
             .select('''
                 id, program_number, scratched, updated_at,
                 horse:hranalyzer_horses(horse_name),
                 trainer:hranalyzer_trainers(trainer_name),
-                race:hranalyzer_races(
+                race:hranalyzer_races!inner(
                     id, track_code, race_date, race_number, post_time, race_status,
                     track:hranalyzer_tracks(track_name)
                 )
-            ''')\
+            ''', count='exact')\
             .eq('scratched', True)
             
-        # We fetch a bit more data and filter in memory if needed, 
-        # or Try to filter on the joined race date.
-        # Filtering deep nested text (race.race_date) is tricky in this client syntax without custom RPC.
-        # So we fetch most recent scratches (limit 200?) and filter.
+        # Filter and Sort
+        if view_mode == 'upcoming':
+             # Upcoming: Soonest first (ASC), then Track, then Race
+             query = query.gte('race.race_date', today)\
+                .order('race_date', foreign_table='race')\
+                .order('track_code', foreign_table='race')\
+                .order('race_number', foreign_table='race')\
+                .order('id')
+        else:
+             # All History: Most recent first (DESC), then Track, then Race, then ID
+             query = query.lte('race.race_date', today)\
+                .order('race_date', desc=True, foreign_table='race')\
+                .order('track_code', foreign_table='race')\
+                .order('race_number', foreign_table='race')\
+                .order('id')
+             
+        # Apply pagination
+        response = query.range(start, end).execute()
         
-        # Optimize: Sort by updated_at desc to get recent ones.
-        query = query.order('updated_at', desc=True).limit(500)
-        
-        response = query.execute()
+        count = response.count if response.count is not None else 0
+        data = response.data
         
         scratches = []
-        for item in response.data:
-            race = item.get('race')
-            if not race: continue
+        for item in data:
+            # Safe access
+            race = item.get('race') or {}
+            track = race.get('track') or {}
+            horse = item.get('horse') or {}
+            trainer = item.get('trainer') or {}
             
-            race_date = race['race_date']
-            
-            if view_mode == 'upcoming':
-                if race_date < today:
-                    continue
-            
-            # Helper for track name
-            t_info = race.get('track')
-            track_name = t_info['track_name'] if t_info else race['track_code']
+            # Calculate time safely
+            formatted_time = "N/A"
+            if race.get('post_time'):
+                 formatted_time = race['post_time']
             
             scratches.append({
                 'id': item['id'],
+                'race_date': race.get('race_date'),
+                'track_code': race.get('track_code'),
+                'track_name': track.get('track_name', race.get('track_code')),
+                'race_number': race.get('race_number'),
+                'post_time': formatted_time,
                 'program_number': item['program_number'],
-                'horse_name': (item.get('horse') or {}).get('horse_name', 'Unknown'),
-                'trainer_name': (item.get('trainer') or {}).get('trainer_name', '-'),
-                'race_date': race_date,
-                'race_number': race['race_number'],
-                'track_code': race['track_code'],
-                'track_name': track_name,
+                'horse_name': horse.get('horse_name', 'Unknown'),
+                'trainer_name': trainer.get('trainer_name', 'Unknown'),
                 'status': 'Scratched'
             })
+            
+        return jsonify({
+            'scratches': scratches,
+            'count': count,
+            'page': page,
+            'limit': limit,
+            'total_pages': (count + limit - 1) // limit if limit > 0 else 1
+        })
             
         # Sort by Date (desc), Track, Race
         scratches.sort(key=lambda x: (x['race_date'], x['track_code'], x['race_number']), reverse=True)
