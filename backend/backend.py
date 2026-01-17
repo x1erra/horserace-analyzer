@@ -644,10 +644,14 @@ def get_race_details(race_key):
 
         # Add navigation logic (Next/Prev Race)
         # Find sibling races (same track, same date)
+        # Robustness: Strip whitespace and ensure string format
+        track_c = str(race.get('track_code', '')).strip()
+        race_d = str(race.get('race_date', ''))
+        
         siblings_response = supabase.table('hranalyzer_races')\
             .select('race_key, race_number')\
-            .eq('track_code', race['track_code'])\
-            .eq('race_date', race['race_date'])\
+            .eq('track_code', track_c)\
+            .eq('race_date', race_d)\
             .order('race_number')\
             .execute()
             

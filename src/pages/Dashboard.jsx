@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import RecentUploads from '../components/RecentUploads';
 import RaceCard from '../components/RaceCard';
+import { HiStar, HiOutlineStar } from 'react-icons/hi';
 
 // Helper component for Countdown
 const Countdown = ({ targetIso, originalTime }) => {
@@ -55,10 +56,84 @@ const Countdown = ({ targetIso, originalTime }) => {
     );
 };
 
+// Track Card Component
+const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
+    <div
+        className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between group relative overflow-hidden"
+        onClick={onClick}
+    >
+        {/* Favorite Toggle */}
+        <button
+            onClick={onToggleFavorite}
+            className={`absolute top-3 right-3 p-2 rounded-full transition-all duration-200 z-10 ${isFavorite
+                    ? 'text-yellow-500 bg-yellow-500/10'
+                    : 'text-gray-600 hover:text-yellow-500 bg-white/5 opacity-0 group-hover:opacity-100'
+                }`}
+            title={isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+        >
+            {isFavorite ? <HiStar className="w-5 h-5" /> : <HiOutlineStar className="w-5 h-5" />}
+        </button>
+
+        <div>
+            <div className="flex justify-between items-start mb-4 pr-8">
+                <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
+                <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
+                    {track.track_code}
+                </span>
+            </div>
+            <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Total Races</span>
+                    <span className="text-white font-medium">{track.total}</span>
+                </div>
+                <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                    <div
+                        className="bg-green-500 h-full"
+                        style={{ width: `${(track.completed / track.total) * 100}%` }}
+                    ></div>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500 pt-1">
+                    <span>{track.completed} Completed</span>
+                    <span>{track.upcoming} Upcoming</span>
+                </div>
+            </div>
+        </div>
+
+        {/* Additional Info: Next / Last */}
+        <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-gray-800">
+            <div>
+                <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Last Winner</span>
+                {track.last_race_winner ? (
+                    <div className="truncate" title={track.last_race_winner}>
+                        <span className="text-sm font-bold text-white block truncate">{track.last_race_winner}</span>
+                        <span className="text-[10px] text-purple-400">Race {track.last_race_number}</span>
+                    </div>
+                ) : (
+                    <span className="text-gray-600 text-xs italic">-</span>
+                )}
+            </div>
+            <div>
+                <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Next Post</span>
+                {track.next_race_iso ? (
+                    <div className="flex flex-col">
+                        <span className="text-sm font-bold text-white">
+                            {new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                        <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
+                    </div>
+                ) : (
+                    <span className="text-gray-400 text-sm">-</span>
+                )}
+            </div>
+        </div>
+    </div>
+);
+
 export default function Dashboard() {
     const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'results'
     const [todaySummary, setTodaySummary] = useState([]);
     const [races, setRaces] = useState([]);
+    const [favoriteTracks, setFavoriteTracks] = useState([]);
 
     // Filters
     const [selectedTrack, setSelectedTrack] = useState('All');
@@ -70,6 +145,10 @@ export default function Dashboard() {
 
     // Fetch summary on mount
     useEffect(() => {
+        // Load favorites from localStorage
+        const savedFavorites = JSON.parse(localStorage.getItem('favorite_tracks')) || [];
+        setFavoriteTracks(savedFavorites);
+
         const fetchSummary = async () => {
             try {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -114,6 +193,37 @@ export default function Dashboard() {
             setLoading(false);
         }
     };
+
+    const toggleFavorite = (trackName, e) => {
+        if (e) e.stopPropagation();
+
+        const isFav = favoriteTracks.includes(trackName);
+        let updated;
+        if (isFav) {
+            updated = favoriteTracks.filter(name => name !== trackName);
+        } else {
+            updated = [...favoriteTracks, trackName];
+        }
+
+        setFavoriteTracks(updated);
+        localStorage.setItem('favorite_tracks', JSON.stringify(updated));
+    };
+
+    // Separate tracks into favorites and others
+    const { favoritedTracks, remainingTracks } = useMemo(() => {
+        const favs = [];
+        const others = [];
+
+        todaySummary.forEach(track => {
+            if (favoriteTracks.includes(track.track_name)) {
+                favs.push(track);
+            } else {
+                others.push(track);
+            }
+        });
+
+        return { favoritedTracks: favs, remainingTracks: others };
+    }, [todaySummary, favoriteTracks]);
 
     // Calculate totals for overview
     const totalRacesToday = todaySummary.reduce((sum, item) => sum + item.total, 0);
@@ -193,83 +303,61 @@ export default function Dashboard() {
                 </div>
             ) : viewMode === 'overview' ? (
                 /* Overview Mode */
-                <div className="space-y-6 animate-fadeIn">
-                    <div className="flex items-center gap-2 text-purple-300">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                        <h4 className="font-semibold text-lg">Daily Overview</h4>
-                    </div>
-
-                    {todaySummary.length === 0 ? (
-                        <div className="bg-black/30 border border-purple-900/20 rounded-xl p-12 text-center">
-                            <p className="text-gray-400 mb-6">No races scheduled for today yet.</p>
-                            <Link to="/upload" className="text-purple-400 hover:text-white underline">Upload a DRF PDF</Link>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {/* Summary Cards per Track */}
-                            {todaySummary.map(track => (
-                                <div key={track.track_code} className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between" onClick={() => {
-                                    setSelectedTrack(track.track_name);
-                                    handleLoadRaces(track.track_name);
-                                }}>
-                                    <div>
-                                        <div className="flex justify-between items-start mb-4">
-                                            <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
-                                            <span className="bg-purple-900/30 text-purple-300 text-xs px-2 py-1 rounded-full font-mono">
-                                                {track.track_code}
-                                            </span>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex justify-between text-sm">
-                                                <span className="text-gray-400">Total Races</span>
-                                                <span className="text-white font-medium">{track.total}</span>
-                                            </div>
-                                            <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                                                <div
-                                                    className="bg-green-500 h-full"
-                                                    style={{ width: `${(track.completed / track.total) * 100}%` }}
-                                                ></div>
-                                            </div>
-                                            <div className="flex justify-between text-xs text-gray-500 pt-1">
-                                                <span>{track.completed} Completed</span>
-                                                <span>{track.upcoming} Upcoming</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Additional Info: Next / Last */}
-                                    <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-gray-800">
-                                        <div>
-                                            <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Last Winner</span>
-                                            {track.last_race_winner ? (
-                                                <div className="truncate" title={track.last_race_winner}>
-                                                    <span className="text-sm font-bold text-white block truncate">{track.last_race_winner}</span>
-                                                    <span className="text-[10px] text-purple-400">Race {track.last_race_number}</span>
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-600 text-xs italic">-</span>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Next Post</span>
-                                            {track.next_race_iso ? (
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-bold text-white">
-                                                        {new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                    </span>
-                                                    <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400 text-sm">-</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
+                <div className="space-y-10 animate-fadeIn">
+                    {/* Favorite Tracks Section */}
+                    {favoritedTracks.length > 0 && (
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2 text-yellow-500">
+                                <HiStar className="w-5 h-5" />
+                                <h4 className="font-semibold text-lg">Favorite Tracks</h4>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {favoritedTracks.map(track => (
+                                    <TrackCard
+                                        key={track.track_code}
+                                        track={track}
+                                        isFavorite={true}
+                                        onToggleFavorite={(e) => toggleFavorite(track.track_name, e)}
+                                        onClick={() => {
+                                            setSelectedTrack(track.track_name);
+                                            handleLoadRaces(track.track_name);
+                                        }}
+                                    />
+                                ))}
+                            </div>
                         </div>
                     )}
+
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-purple-300">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            <h4 className="font-semibold text-lg">Daily Overview</h4>
+                        </div>
+
+                        {todaySummary.length === 0 ? (
+                            <div className="bg-black/30 border border-purple-900/20 rounded-xl p-12 text-center">
+                                <p className="text-gray-400 mb-6">No races scheduled for today yet.</p>
+                                <Link to="/upload" className="text-purple-400 hover:text-white underline">Upload a DRF PDF</Link>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {remainingTracks.map(track => (
+                                    <TrackCard
+                                        key={track.track_code}
+                                        track={track}
+                                        isFavorite={false}
+                                        onToggleFavorite={(e) => toggleFavorite(track.track_name, e)}
+                                        onClick={() => {
+                                            setSelectedTrack(track.track_name);
+                                            handleLoadRaces(track.track_name);
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             ) : (
                 /* Results Mode */
