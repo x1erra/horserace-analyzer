@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS hranalyzer_changes (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   
   -- Prevent duplicates
-  CONSTRAINT unique_race_entry_change UNIQUE (race_id, entry_id, change_type, description)
+  -- Prevent duplicates (Strict)
+  CONSTRAINT unique_race_entry_change UNIQUE (race_id, entry_id, change_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_hranalyzer_changes_race ON hranalyzer_changes(race_id);

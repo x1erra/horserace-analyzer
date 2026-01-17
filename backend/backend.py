@@ -4,6 +4,8 @@ Provides endpoints for DRF PDF upload, race data retrieval, and Equibase crawlin
 """
 
 import os
+import sys
+print("Backend script starting...", file=sys.stdout, flush=True)
 import subprocess
 from datetime import date, datetime
 from flask import Flask, jsonify, request
@@ -14,8 +16,16 @@ from bet_resolution import resolve_all_pending_bets
 import traceback
 import pytz
 
-app = Flask(__name__)
-CORS(app)
+try:
+    print("Initializing Flask app...", file=sys.stdout, flush=True)
+    app = Flask(__name__)
+    CORS(app)
+    print(f"Flask app created: {app}", file=sys.stdout, flush=True)
+except Exception as e:
+    print(f"CRITICAL ERROR creating Flask app: {e}", file=sys.stdout, flush=True)
+    import traceback
+    traceback.print_exc(file=sys.stdout)
+    sys.exit(1)
 
 # Configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'uploads')
@@ -410,7 +420,7 @@ def get_filter_options():
                 # SKIP if it is cancelled! (Logic already in elif above but being safe)
                 if r['race_status'] != 'cancelled':
                     if True: # Always try to parse time for better data
-                    post_time_str = r.get('post_time')
+                        post_time_str = r.get('post_time')
                     if post_time_str:
                          try:
                              # Clean "Post Time" text if present

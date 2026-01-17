@@ -332,6 +332,7 @@ def update_changes_in_db(track_code, race_date, change_list):
 
             # 3. DEDUPLICATION / MERGE Logic
             # Check if this change already exists (same race, entry, and type)
+            # STRICT CHECK: race_id, entry_id, change_type
             query = supabase.table('hranalyzer_changes')\
                 .select('id, description')\
                 .eq('race_id', race_id)\
