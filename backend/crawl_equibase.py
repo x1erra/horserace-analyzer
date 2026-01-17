@@ -1139,65 +1139,48 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict) -> Optional[str
             return None
 
         # -------------------------------------------------------
-        # CANONICAL NAME LOOKUP (Fuzzy Match)
+        # CANONICAL NAME LOOKUP (Fuzzy Match / Race Constraint)
         # -------------------------------------------------------
         horse_id = None
         
-        # 1. Try Exact Match
-        horse_result = supabase.table('hranalyzer_horses').select('id').eq('horse_name', horse_name).execute()
+        # 1. PRIORITY: Check existing entries for THIS race first!
+        # This fixes "StayedinforHalf" (PDF) vs "Stayed in for Half" (Entry) split.
+        # We prefer the existing Entry over a new global lookup/create.
         
-        if horse_result.data and len(horse_result.data) > 0:
-            horse_id = horse_result.data[0]['id']
-        else:
-            # 2. Try Normalized Match (Fuzzy)
-            # Fetch all horses that *might* match? No, that's too expensive.
-            # Ideally we'd have a normalized column. 
-            # For now, we can check if there's a horse with the normalized name? No, names are stored display-friendly.
+        race_horses = supabase.table('hranalyzer_race_entries')\
+            .select('horse_id, hranalyzer_horses(id, horse_name)')\
+            .eq('race_id', race_id)\
+            .execute()
             
-            # Since we can't easily query by function in Supabase-py without RPC,
-            # We will assume if exact match fails, it's potentially a new horse OR a weirdly formatted existing one.
-            # But let's check strict "squeezed" match if the name looks squeezed?
-            # E.g. "StayedinforHalf"
+        found_local_match = False
+        if race_horses.data:
+            norm_target = normalize_name(horse_name)
+            candidates = []
             
-            # Optimization: Only do deep search if name looks suspicious (CamelCase without spaces?)
-            # Or just blindly create new horse.
+            for entry in race_horses.data:
+                db_horse = entry.get('hranalyzer_horses')
+                if db_horse:
+                    db_name = db_horse.get('horse_name')
+                    if normalize_name(db_name) == norm_target:
+                         candidates.append(db_horse)
             
-            # Wait, the user SPECIFICALLY asked for this fix.
-            # We can try to search for the name with spaces?
-            # "StayedinforHalf" -> "Stayed In For Half" is hard to guess.
-            # "Stayed in for Half" -> "StayedinforHalf" is easy.
+            if candidates:
+                 # Pick the best candidate (most spaces = most readable)
+                 candidates.sort(key=lambda x: x['horse_name'].count(' '), reverse=True)
+                 best_match = candidates[0]
+                 horse_id = best_match['id']
+                 found_local_match = True
+                 logger.info(f"Smart matched '{horse_name}' to existing '{best_match['horse_name']}' in race entries.")
+
+        # 2. Fallback: Standard Global Lookup if no local match
+        if not found_local_match:
+            # Try Exact Match
+            horse_result = supabase.table('hranalyzer_horses').select('id').eq('horse_name', horse_name).execute()
             
-            # The problem: Data has "StayedinforHalf" (PDF result) but DB has "Stayed in for Half" (Entry)
-            # So looking up "StayedinforHalf" fails.
-            
-            # We need to find "Stayed in for Half" in DB using "StayedinforHalf".
-            # Without a normalized column, this is hard SQL.
-            # BUT, we likely ALREADY created the entry in `crawl_entries` recently.
-            # So the horse should exist in `hranalyzer_race_entries` for this `race_id`!
-            
-            # SMART FIX: Look at existing entries for THIS race first!
-            # We have `race_id`. We can get all horse_ids and names for this race.
-            
-            race_horses = supabase.table('hranalyzer_race_entries')\
-                .select('horse_id, hranalyzer_horses(id, horse_name)')\
-                .eq('race_id', race_id)\
-                .execute()
-                
-            found_local_match = False
-            if race_horses.data:
-                norm_target = normalize_name(horse_name)
-                for entry in race_horses.data:
-                    db_horse = entry.get('hranalyzer_horses')
-                    if db_horse:
-                        db_name = db_horse.get('horse_name')
-                        if normalize_name(db_name) == norm_target:
-                            horse_id = db_horse['id']
-                            found_local_match = True
-                            logger.info(f"Fuzzy matched '{horse_name}' to existing '{db_name}' in race entries.")
-                            break
-            
-            if not found_local_match:
-                # Fallback: Just create new horse
+            if horse_result.data and len(horse_result.data) > 0:
+                horse_id = horse_result.data[0]['id']
+            else:
+                # Create new horse
                 new_horse = {'horse_name': horse_name}
                 horse_insert = supabase.table('hranalyzer_horses').insert(new_horse).execute()
                 if horse_insert.data:
