@@ -108,9 +108,16 @@ def resolve_all_pending_bets(supabase):
                         
                         # UPDATE AND CONTINUE
                         # We resolve this immediately
+                        # Refund the cost
+                        refund_amount = float(bet.get('bet_cost') or 0.0)
+                        if refund_amount == 0:
+                            # Fallback if bet_cost missing? Should use unit amount * cost calc? 
+                            # Assuming bet_cost is reliably stored.
+                            pass
+
                         update_data = {
-                            'status': new_status,
-                            'payout': 0.0,
+                            'status': 'Returned',
+                            'payout': refund_amount,
                             'updated_at': datetime.now().isoformat()
                         }
                         supabase.table('hranalyzer_bets').update(update_data).eq('id', bet['id']).execute()
@@ -118,10 +125,10 @@ def resolve_all_pending_bets(supabase):
                         updated_bets.append({
                             'id': bet['id'], 
                             'old_status': 'Pending', 
-                            'new_status': new_status,
-                            'payout': 0.0
+                            'new_status': 'Returned',
+                            'payout': refund_amount
                         })
-                        logger.info(f"Resolved bet {bet['id']} as Scratched (Early Resolution)")
+                        logger.info(f"Resolved bet {bet['id']} as Returned (Scratch Refund: {refund_amount})")
                         continue
 
 

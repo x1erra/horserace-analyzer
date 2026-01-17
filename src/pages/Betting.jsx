@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wallet, RefreshCw, Plus, Trash2, TrendingUp, DollarSign, Percent } from 'lucide-react';
+import { Wallet, RefreshCw, Plus, Trash2, TrendingUp, DollarSign, Percent, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Use environment variable for API URL (defaults to localhost if not set)
 const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -41,6 +41,9 @@ export default function Betting() {
     const [selectedRaceId, setSelectedRaceId] = useState('');
     const [raceDetails, setRaceDetails] = useState(null);
     const [loading, setLoading] = useState(false);
+
+    // Layout State
+    const [isBetFormOpen, setIsBetFormOpen] = useState(true);
 
     // Form State
     const [betType, setBetType] = useState('Win');
@@ -368,6 +371,21 @@ export default function Betting() {
         }
     };
 
+    const handleBurnFunds = (e) => {
+        e.preventDefault();
+        const amountToBurn = parseFloat(addFundsAmount);
+        if (amountToBurn > 0) {
+            setBankroll(prev => {
+                const newBalance = prev - amountToBurn;
+                return newBalance < 0 ? 0 : newBalance;
+            });
+            setIsBankModalOpen(false);
+            alert(`Successfully burned $${amountToBurn.toFixed(2)} from your wallet!`);
+        } else {
+            alert('Please enter a valid amount to burn.');
+        }
+    };
+
     return (
         <div className="space-y-8 relative">
             {/* Header Area */}
@@ -403,343 +421,6 @@ export default function Betting() {
                     </button>
                 </div>
             </div>
-
-            {/* Bank Modal */}
-            {isBankModalOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="bg-gray-900 border border-purple-500/50 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h4 className="text-xl font-bold text-white">Add Funds</h4>
-                            <button onClick={() => setIsBankModalOpen(false)} className="text-gray-400 hover:text-white">✕</button>
-                        </div>
-                        <form onSubmit={handleAddFunds} className="space-y-4">
-                            <div>
-                                <label className="block text-sm text-gray-400 mb-2">Amount to Add ($)</label>
-                                <div className="relative">
-                                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
-                                    <input
-                                        type="number"
-                                        value={addFundsAmount}
-                                        onChange={(e) => setAddFundsAmount(e.target.value)}
-                                        className="w-full bg-black border border-purple-900/50 text-white pl-8 pr-4 py-3 rounded-lg focus:border-purple-500 outline-none text-lg font-bold"
-                                        placeholder="0.00"
-                                        autoFocus
-                                        min="1"
-                                    />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                                {[100, 500, 1000].map(val => (
-                                    <button
-                                        key={val}
-                                        type="button"
-                                        onClick={() => setAddFundsAmount(val)}
-                                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded text-sm font-medium transition"
-                                    >
-                                        +${val}
-                                    </button>
-                                ))}
-                            </div>
-                            <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition shadow-[0_0_15px_rgba(34,197,94,0.3)]">
-                                Add Funds
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Performance Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Win Rate */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
-                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
-                        <TrendingUp className="w-16 h-16 text-purple-500" />
-                    </div>
-                    <div className="bg-purple-900/20 p-3 rounded-lg">
-                        <Percent className="w-6 h-6 text-purple-400" />
-                    </div>
-                    <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Win Rate</p>
-                        <p className="text-2xl font-bold text-white">{stats.winRate}%</p>
-                    </div>
-                </div>
-
-                {/* Net P&L */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
-                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
-                        <DollarSign className="w-16 h-16 text-green-500" />
-                    </div>
-                    <div className={`p-3 rounded-lg ${stats.pnl >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
-                        <DollarSign className={`w-6 h-6 ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} />
-                    </div>
-                    <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L Loop</p>
-                        <p className={`text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}
-                        </p>
-                    </div>
-                </div>
-
-                {/* Total Wagered */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4">
-                    <div className="bg-blue-900/20 p-3 rounded-lg">
-                        <Wallet className="w-6 h-6 text-blue-400" />
-                    </div>
-                    <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Total Wagered</p>
-                        <p className="text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
-                    </div>
-                </div>
-
-                {/* ROI / Reset */}
-                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex justify-between items-center pr-8">
-                    <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-lg ${parseFloat(stats.roi) >= 0 ? 'bg-indigo-900/20' : 'bg-red-900/20'}`}>
-                            <TrendingUp className={`w-6 h-6 ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`} />
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
-                            <p className={`text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
-                                {stats.roi}%
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Reset Button */}
-                    <button
-                        onClick={handleResetStats}
-                        className="text-gray-600 hover:text-red-500 transition p-2 hover:bg-red-900/20 rounded-full"
-                        title="Reset Stats & History"
-                    >
-                        <Trash2 className="w-5 h-5" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Form to Create Ticket */}
-            <form onSubmit={handleCreateTicket} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-6">
-                <h4 className="text-xl font-bold text-white mb-4 border-b border-gray-800 pb-2">Place New Bet</h4>
-
-                {/* Race Selection */}
-                <div>
-                    <label className="block text-gray-400 text-sm mb-1">Select Race (Today's Upcoming)</label>
-                    <select
-                        value={selectedRaceId}
-                        onChange={handleRaceSelect}
-                        className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                        required
-                    >
-                        <option value="">-- Select a Race --</option>
-                        {(() => {
-                            // Group races by track
-                            const grouped = races.reduce((acc, race) => {
-                                const track = race.track_code;
-                                if (!acc[track]) acc[track] = [];
-                                acc[track].push(race);
-                                return acc;
-                            }, {});
-
-                            // Sort tracks alphabetically
-                            return Object.keys(grouped).sort().map(trackCode => (
-                                <optgroup key={trackCode} label={trackCode}>
-                                    {grouped[trackCode]
-                                        .sort((a, b) => a.race_number - b.race_number)
-                                        .map(race => (
-                                            <option key={race.id} value={race.id}>
-                                                Race {race.race_number} - Post: {race.post_time}
-                                            </option>
-                                        ))}
-                                </optgroup>
-                            ));
-                        })()}
-                    </select>
-                </div>
-
-                {/* Bet Type & Amount */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-gray-400 text-sm mb-1">Bet Type</label>
-                        <select
-                            value={betType}
-                            onChange={(e) => {
-                                setBetType(e.target.value);
-                                // Reset selections on type change to avoid confusion
-                                setSelectedHorseId('');
-                                setSelectedHorseIds([]);
-                                setPosSelections({ 1: [], 2: [], 3: [] });
-                            }}
-                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                        >
-                            <option value="Win">Win</option>
-                            <option value="Win Place">Win Place</option>
-                            <option value="Win Place Show">Win Place Show</option>
-                            <option value="Place">Place</option>
-                            <option value="Place Show">Place Show</option>
-                            <option value="Show">Show</option>
-                            <option value="Exacta">Exacta (Straight)</option>
-                            <option value="Trifecta">Trifecta (Straight)</option>
-                            <option value="Exacta Box">Exacta Box</option>
-                            <option value="Trifecta Box">Trifecta Box</option>
-                            <option value="Exacta Key">Exacta Key</option>
-                            <option value="Trifecta Key">Trifecta Key</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-gray-400 text-sm mb-1">Unit Amount ($)</label>
-                        <input
-                            type="number"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                            min="1"
-                            step="1"
-                        />
-                    </div>
-                </div>
-
-                {/* Horse Selection Area */}
-                <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-800">
-                    <label className="block text-gray-300 font-bold mb-3">
-                        {isBoxBet
-                            ? `Select Horses for ${betType} (Select multiple)`
-                            : isKeyBet
-                                ? `Construct ${betType} (Select for each position)`
-                                : `Select Horse for ${betType}`
-                        }
-                    </label>
-
-                    {!raceDetails ? (
-                        <p className="text-gray-500 italic text-sm">Select a race to view horses.</p>
-                    ) : isKeyBet ? (
-                        // Position Selection Grid
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                            {[1, 2, ((betType === 'Trifecta Key' || betType === 'Trifecta') ? 3 : null)].filter(Boolean).map(pos => (
-                                <div key={pos} className="bg-black/50 p-3 rounded border border-gray-800">
-                                    <h5 className="text-purple-400 font-bold text-sm mb-2 text-center uppercase tracking-wide">
-                                        Position {pos}
-                                    </h5>
-                                    <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
-                                        {raceDetails.entries.map((entry, index) => {
-                                            const isSelected = posSelections[pos]?.includes(entry.program_number);
-                                            // Check overlapping (visual aid only, backend handles validity)
-                                            // const isUsedElsewhere = false; // Could implement
-
-                                            return (
-                                                <div
-                                                    key={entry.program_number || index}
-                                                    onClick={() => !entry.scratched && togglePosSelection(pos, entry.program_number)}
-                                                    className={`
-                                                        p-1.5 rounded flex items-center justify-between transition text-xs
-                                                        ${entry.scratched
-                                                            ? 'opacity-30 cursor-not-allowed bg-black/20'
-                                                            : 'cursor-pointer'}
-                                                        ${isSelected
-                                                            ? 'bg-purple-900 text-white font-bold border border-purple-500'
-                                                            : !entry.scratched ? 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent' : ''}
-                                                    `}
-                                                >
-                                                    <span className={entry.scratched ? 'line-through' : ''}>#{entry.program_number || 'SCR'}</span>
-                                                    <span className={`truncate w-16 text-right ${entry.scratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : isBoxBet ? (
-                        // Multi-Select Grid
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                            {raceDetails.entries.map((entry, index) => {
-                                const isSelected = selectedHorseIds.includes(entry.program_number);
-                                const isScratched = entry.scratched || entry.program_number === 'SCR' || !entry.program_number;
-
-                                return (
-                                    <div
-                                        key={entry.program_number || index}
-                                        onClick={() => !isScratched && toggleHorseSelection(entry.program_number)}
-                                        className={`
-                                            p-2 rounded border flex items-center gap-2 transition select-none
-                                            ${isScratched
-                                                ? 'opacity-30 cursor-not-allowed bg-black/20 border-transparent'
-                                                : 'cursor-pointer'}
-                                            ${isSelected
-                                                ? 'bg-purple-900/50 border-purple-500 text-white'
-                                                : !isScratched ? 'bg-black border-gray-700 text-gray-400 hover:bg-gray-800' : ''}
-                                        `}
-                                    >
-                                        <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-gray-500'}`}>
-                                            {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                                        </div>
-                                        <span className={`font-mono font-bold ${isScratched ? 'line-through' : ''}`}>#{entry.program_number || 'SCR'}</span>
-                                        <span className={`truncate text-xs ${isScratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
-                                        <span className="ml-auto text-xs text-gray-500">{isScratched ? 'SCR' : entry.morning_line_odds}</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ) : (
-                        // Single Select Dropdown
-                        <select
-                            value={selectedHorseId}
-                            onChange={(e) => setSelectedHorseId(e.target.value)}
-                            className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
-                            required
-                        >
-                            <option value="">-- Select Horse --</option>
-                            {raceDetails.entries.map(entry => (
-                                <option
-                                    key={entry.program_number || entry.horse_name}
-                                    value={entry.program_number}
-                                    disabled={entry.scratched || !entry.program_number || entry.program_number === 'SCR'}
-                                >
-                                    #{entry.program_number || 'SCR'} - {entry.horse_name} ({entry.scratched ? 'SCR' : entry.morning_line_odds})
-                                </option>
-                            ))}
-                        </select>
-                    )}
-                </div>
-
-                {/* Total Cost Display */}
-                <div className="flex justify-between items-center bg-purple-900/20 p-4 rounded-lg border border-purple-900/50">
-                    <div className="flex items-center gap-2">
-                        <span className="text-gray-400 text-sm uppercase tracking-wide">Total Cost</span>
-                        <Tooltip text={
-                            betType === 'Exacta Box'
-                                ? "Exacta Box covers all 1st & 2nd place permutations. Cost = (Horses × (Horses - 1)) × Unit Amount."
-                                : betType === 'Trifecta Box'
-                                    ? "Trifecta Box covers all 1st, 2nd & 3rd place permutations. Cost = (Horses × (Horses - 1) × (Horses - 2)) × Unit Amount."
-                                    : betType === 'Win Place Show'
-                                        ? "Win Place Show (WPS) places three separate bets on the same horse. Cost = 3 × Unit Amount."
-                                        : (betType === 'Win Place' || betType === 'Place Show')
-                                            ? "Covers two positions. Cost = 2 × Unit Amount."
-                                            : "Standard bet cost is simply the Unit Amount."
-                        }>
-                            <svg className="w-4 h-4 text-purple-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                        </Tooltip>
-                    </div>
-                    <div className="text-right">
-                        <span className={`text-2xl font-bold ${totalCost > 0 ? 'text-white' : 'text-gray-600'}`}>
-                            ${totalCost.toFixed(2)}
-                        </span>
-                        {isBoxBet && selectedHorseIds.length > 0 && (
-                            <p className="text-xs text-gray-400">
-                                {selectedHorseIds.length} horses · {Math.round(totalCost / amount)} combinations
-                            </p>
-                        )}
-                    </div>
-                </div>
-
-                <button
-                    type="submit"
-                    disabled={!isValid || !selectedRaceId}
-                    className="w-full bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white py-3 rounded-md transition duration-200 font-medium shadow-[0_0_15px_rgba(147,51,234,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    Place Bet
-                </button>
-            </form>
 
             {/* Bank Modal */}
             {isBankModalOpen && (
@@ -852,6 +533,295 @@ export default function Betting() {
                     </button>
                 </div>
             </div>
+
+            {/* Form to Create Ticket */}
+            <form onSubmit={handleCreateTicket} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-6">
+                <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
+                    <h4 className="text-xl font-bold text-white">Place New Bet</h4>
+                    <button
+                        type="button"
+                        onClick={() => setIsBetFormOpen(!isBetFormOpen)}
+                        className="text-gray-400 hover:text-white transition p-1 hover:bg-gray-800 rounded"
+                    >
+                        {isBetFormOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    </button>
+                </div>
+
+                {isBetFormOpen && (
+                    <>
+
+                        {/* Race Selection */}
+                        <div>
+                            <label className="block text-gray-400 text-sm mb-1">Select Race (Today's Upcoming)</label>
+                            <select
+                                value={selectedRaceId}
+                                onChange={handleRaceSelect}
+                                className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                                required
+                            >
+                                <option value="">-- Select a Race --</option>
+                                {(() => {
+                                    // Group races by track
+                                    const grouped = races.reduce((acc, race) => {
+                                        const track = race.track_code;
+                                        if (!acc[track]) acc[track] = [];
+                                        acc[track].push(race);
+                                        return acc;
+                                    }, {});
+
+                                    // Sort tracks alphabetically
+                                    return Object.keys(grouped).sort().map(trackCode => (
+                                        <optgroup key={trackCode} label={trackCode}>
+                                            {grouped[trackCode]
+                                                .sort((a, b) => a.race_number - b.race_number)
+                                                .map(race => (
+                                                    <option key={race.id} value={race.id}>
+                                                        Race {race.race_number} - Post: {race.post_time}
+                                                    </option>
+                                                ))}
+                                        </optgroup>
+                                    ));
+                                })()}
+                            </select>
+                        </div>
+
+                        {/* Bet Type & Amount */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Bet Type</label>
+                                <select
+                                    value={betType}
+                                    onChange={(e) => {
+                                        setBetType(e.target.value);
+                                        // Reset selections on type change to avoid confusion
+                                        setSelectedHorseId('');
+                                        setSelectedHorseIds([]);
+                                        setPosSelections({ 1: [], 2: [], 3: [] });
+                                    }}
+                                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                                >
+                                    <option value="Win">Win</option>
+                                    <option value="Win Place">Win Place</option>
+                                    <option value="Win Place Show">Win Place Show</option>
+                                    <option value="Place">Place</option>
+                                    <option value="Place Show">Place Show</option>
+                                    <option value="Show">Show</option>
+                                    <option value="Exacta">Exacta (Straight)</option>
+                                    <option value="Trifecta">Trifecta (Straight)</option>
+                                    <option value="Exacta Box">Exacta Box</option>
+                                    <option value="Trifecta Box">Trifecta Box</option>
+                                    <option value="Exacta Key">Exacta Key</option>
+                                    <option value="Trifecta Key">Trifecta Key</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-gray-400 text-sm mb-1">Unit Amount ($)</label>
+                                <input
+                                    type="number"
+                                    value={amount}
+                                    onChange={(e) => setAmount(e.target.value)}
+                                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                                    min="1"
+                                    step="1"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Horse Selection Area */}
+                        <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-800">
+                            <label className="block text-gray-300 font-bold mb-3">
+                                {isBoxBet
+                                    ? `Select Horses for ${betType} (Select multiple)`
+                                    : isKeyBet
+                                        ? `Construct ${betType} (Select for each position)`
+                                        : `Select Horse for ${betType}`
+                                }
+                            </label>
+
+                            {!raceDetails ? (
+                                <p className="text-gray-500 italic text-sm">Select a race to view horses.</p>
+                            ) : isKeyBet ? (
+                                // Position Selection Grid
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {[1, 2, ((betType === 'Trifecta Key' || betType === 'Trifecta') ? 3 : null)].filter(Boolean).map(pos => (
+                                        <div key={pos} className="bg-black/50 p-3 rounded border border-gray-800">
+                                            <h5 className="text-purple-400 font-bold text-sm mb-2 text-center uppercase tracking-wide">
+                                                Position {pos}
+                                            </h5>
+                                            <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                                {raceDetails.entries.map((entry, index) => {
+                                                    const isSelected = posSelections[pos]?.includes(entry.program_number);
+                                                    // Check overlapping (visual aid only, backend handles validity)
+                                                    // const isUsedElsewhere = false; // Could implement
+
+                                                    return (
+                                                        <div
+                                                            key={entry.program_number || index}
+                                                            onClick={() => !entry.scratched && togglePosSelection(pos, entry.program_number)}
+                                                            className={`
+                                                        p-1.5 rounded flex items-center justify-between transition text-xs
+                                                        ${entry.scratched
+                                                                    ? 'opacity-30 cursor-not-allowed bg-black/20'
+                                                                    : 'cursor-pointer'}
+                                                        ${isSelected
+                                                                    ? 'bg-purple-900 text-white font-bold border border-purple-500'
+                                                                    : !entry.scratched ? 'bg-gray-900 text-gray-400 hover:bg-gray-800 border border-transparent' : ''}
+                                                    `}
+                                                        >
+                                                            <span className={entry.scratched ? 'line-through' : ''}>#{entry.program_number || 'SCR'}</span>
+                                                            <span className={`truncate w-16 text-right ${entry.scratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : isBoxBet ? (
+                                // Multi-Select Grid
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                                    {raceDetails.entries.map((entry, index) => {
+                                        const isSelected = selectedHorseIds.includes(entry.program_number);
+                                        const isScratched = entry.scratched || entry.program_number === 'SCR' || !entry.program_number;
+
+                                        return (
+                                            <div
+                                                key={entry.program_number || index}
+                                                onClick={() => !isScratched && toggleHorseSelection(entry.program_number)}
+                                                className={`
+                                            p-2 rounded border flex items-center gap-2 transition select-none
+                                            ${isScratched
+                                                        ? 'opacity-30 cursor-not-allowed bg-black/20 border-transparent'
+                                                        : 'cursor-pointer'}
+                                            ${isSelected
+                                                        ? 'bg-purple-900/50 border-purple-500 text-white'
+                                                        : !isScratched ? 'bg-black border-gray-700 text-gray-400 hover:bg-gray-800' : ''}
+                                        `}
+                                            >
+                                                <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-purple-500 border-purple-500' : 'border-gray-500'}`}>
+                                                    {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                                </div>
+                                                <span className={`font-mono font-bold ${isScratched ? 'line-through' : ''}`}>#{entry.program_number || 'SCR'}</span>
+                                                <span className={`truncate text-xs ${isScratched ? 'line-through' : ''}`}>{entry.horse_name}</span>
+                                                <span className="ml-auto text-xs text-gray-500">{isScratched ? 'SCR' : entry.morning_line_odds}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                // Single Select Dropdown
+                                <select
+                                    value={selectedHorseId}
+                                    onChange={(e) => setSelectedHorseId(e.target.value)}
+                                    className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200"
+                                    required
+                                >
+                                    <option value="">-- Select Horse --</option>
+                                    {raceDetails.entries.map(entry => (
+                                        <option
+                                            key={entry.program_number || entry.horse_name}
+                                            value={entry.program_number}
+                                            disabled={entry.scratched || !entry.program_number || entry.program_number === 'SCR'}
+                                        >
+                                            #{entry.program_number || 'SCR'} - {entry.horse_name} ({entry.scratched ? 'SCR' : entry.morning_line_odds})
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
+                        {/* Total Cost Display */}
+                        <div className="flex justify-between items-center bg-purple-900/20 p-4 rounded-lg border border-purple-900/50">
+                            <div className="flex items-center gap-2">
+                                <span className="text-gray-400 text-sm uppercase tracking-wide">Total Cost</span>
+                                <Tooltip text={
+                                    betType === 'Exacta Box'
+                                        ? "Exacta Box covers all 1st & 2nd place permutations. Cost = (Horses × (Horses - 1)) × Unit Amount."
+                                        : betType === 'Trifecta Box'
+                                            ? "Trifecta Box covers all 1st, 2nd & 3rd place permutations. Cost = (Horses × (Horses - 1) × (Horses - 2)) × Unit Amount."
+                                            : betType === 'Win Place Show'
+                                                ? "Win Place Show (WPS) places three separate bets on the same horse. Cost = 3 × Unit Amount."
+                                                : (betType === 'Win Place' || betType === 'Place Show')
+                                                    ? "Covers two positions. Cost = 2 × Unit Amount."
+                                                    : "Standard bet cost is simply the Unit Amount."
+                                }>
+                                    <svg className="w-4 h-4 text-purple-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </Tooltip>
+                            </div>
+                            <div className="text-right">
+                                <span className={`text-2xl font-bold ${totalCost > 0 ? 'text-white' : 'text-gray-600'}`}>
+                                    ${totalCost.toFixed(2)}
+                                </span>
+                                {isBoxBet && selectedHorseIds.length > 0 && (
+                                    <p className="text-xs text-gray-400">
+                                        {selectedHorseIds.length} horses · {Math.round(totalCost / amount)} combinations
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={!isValid || !selectedRaceId}
+                        >
+                            Place Bet
+                        </button>
+                    </>
+                )}
+            </form>
+
+            {/* Bank Modal */}
+            {isBankModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="bg-gray-900 border border-purple-500/50 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h4 className="text-xl font-bold text-white">Add Funds</h4>
+                            <button onClick={() => setIsBankModalOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+                        </div>
+                        <form onSubmit={handleAddFunds} className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Amount to Add ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                                    <input
+                                        type="number"
+                                        value={addFundsAmount}
+                                        onChange={(e) => setAddFundsAmount(e.target.value)}
+                                        className="w-full bg-black border border-purple-900/50 text-white pl-8 pr-4 py-3 rounded-lg focus:border-purple-500 outline-none text-lg font-bold"
+                                        placeholder="0.00"
+                                        autoFocus
+                                        min="1"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[100, 500, 1000].map(val => (
+                                    <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() => setAddFundsAmount(val)}
+                                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded text-sm font-medium transition"
+                                    >
+                                        +${val}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <button type="submit" onClick={handleAddFunds} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                                    Add Funds
+                                </button>
+                                <button type="button" onClick={handleBurnFunds} className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-lg transition shadow-[0_0_15px_rgba(220,38,38,0.3)]">
+                                    Burn Funds
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+
             {/* Tickets Table */}
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50">
                 {/* Desktop Table View */}
