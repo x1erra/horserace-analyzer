@@ -125,7 +125,11 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                         <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                     </div>
                 ) : track.completed + track.cancelled === track.total ? (
-                    <span className="text-green-500 font-bold text-sm">COMPLETED</span>
+                    track.cancelled > 0 ? (
+                        <span className="text-red-500 font-bold text-sm">CANCELLED</span>
+                    ) : (
+                        <span className="text-green-500 font-bold text-sm">COMPLETED</span>
+                    )
                 ) : (
                     <span className="text-gray-400 text-sm">-</span>
                 )}
