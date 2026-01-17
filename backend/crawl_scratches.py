@@ -13,6 +13,15 @@ from crawl_equibase import normalize_name, normalize_pgm, COMMON_TRACKS
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# NOTE: Equibase also provides RSS feeds for late changes which are structured in XML.
+# URL: https://www.equibase.com/premium/eqbLateChangeRSS.cfm
+# Example Feed: https://www.equibase.com/static/latechanges/rss/AQU-USA.rss
+# While structured, the <description> field bundles multiple changes (including cancellations)
+# into a single HTML text block that requires regex parsing.
+# The current HTML scraper used in this file is preferred for its granular row-based structure,
+# but the RSS feed remains a viable "break-glass" fallback if the HTML layout changes drastically.
+
+
 EQUIBASE_BASE_URL = "https://www.equibase.com/static/latechanges/html/"
 LATE_CHANGES_INDEX_URL = "https://www.equibase.com/static/latechanges/html/latechanges.html"
 
@@ -158,6 +167,30 @@ def parse_track_changes(html, track_code):
         if not current_race: continue
         
         cols = row.find_all('td')
+        
+        # Check for Race-wide cancellation row
+        # Can be 1 column (colspan) or 2 columns (change + time)
+        if len(cols) <= 2:
+            # Check all cells for 'cancel'
+            is_cancel = False
+            txt = ""
+            for c in cols:
+                c_txt = c.get_text(strip=True)
+                if 'cancel' in c_txt.lower():
+                    is_cancel = True
+                    txt = c_txt
+                    break
+            
+            if is_cancel:
+                changes.append({
+                    'race_number': current_race,
+                    'program_number': None,
+                    'horse_name': "",
+                    'change_type': 'Race Cancelled',
+                    'description': txt
+                })
+                continue
+
         if len(cols) < 3: continue
         
         # Col 0: Horse (#1 Name)
@@ -166,7 +199,20 @@ def parse_track_changes(html, track_code):
         # Row: <td class="horse">#1</td> <td class="horse">Dirty Diana</td> <td class="changes">Scratched - Vet</td>
         
         horse_num_cell = row.find('td', class_='horse')
-        if not horse_num_cell: continue
+        if not horse_num_cell: 
+            # Check if it's a "Race wide" change but with enough columns?
+            change_cell = row.find('td', class_='changes')
+            if change_cell:
+                txt = change_cell.get_text(strip=True)
+                if 'cancel' in txt.lower():
+                     changes.append({
+                        'race_number': current_race,
+                        'program_number': None,
+                        'horse_name': "",
+                        'change_type': 'Race Cancelled',
+                        'description': txt
+                    })
+            continue
         
         # Sometimes there are two cells with class 'horse' (number, then name)
         horse_cells = row.find_all('td', class_='horse')
@@ -233,6 +279,9 @@ def update_changes_in_db(track_code, race_date, change_list):
     count = 0
     scratches_marked = 0
     
+    # Pre-fetch existing changes for this track/date to avoid spamming queries
+    # Actually, simpler to do it per item since we need specific race_id
+    
     for item in change_list:
         try:
             # 1. Find Race ID
@@ -241,8 +290,6 @@ def update_changes_in_db(track_code, race_date, change_list):
             # Get Race
             r_res = supabase.table('hranalyzer_races').select('id').eq('race_key', race_key).execute()
             if not r_res.data:
-                # Race might not exist if crawler hasn't run yet? 
-                # Or maybe it's a new track we don't follow.
                 continue
                 
             race_id = r_res.data[0]['id']
@@ -262,7 +309,7 @@ def update_changes_in_db(track_code, race_date, change_list):
                     entry = e_res.data[0]
                     entry_id = entry['id']
             
-            # Fallback Name match (if PGM search failed or PGM matches nothing)
+            # Fallback Name match
             if not entry_id and item['horse_name']:
                  all_entries = supabase.table('hranalyzer_race_entries')\
                     .select('id, hranalyzer_horses!inner(horse_name)')\
@@ -276,53 +323,74 @@ def update_changes_in_db(track_code, race_date, change_list):
                          entry_id = e['id']
                          break
             
-            # 3. UPSERT into hranalyzer_changes
-            # Construct Change Record
-            change_record = {
-                'race_id': race_id,
-                'entry_id': entry_id, # Can be None if horse not found (but we shouldn't insert if entry is missing? actually changes page might link to track info)
-                                      # But for now, let's allow inserting even if entry_id is None (generic race change?) 
-                                      # The SQL constraints might require unique entry_id per description? 
-                                      # "CONSTRAINT unique_race_entry_change UNIQUE (race_id, entry_id, change_type, description)"
-                                      # If entry_id is NULL, multiple NULLs are distinct in SQL usually. 
-                                      # Let's ensure we skip if we can't find entry, unless it's a race-wide change.
-                'change_type': item['change_type'],
-                'description': item['description']
-            }
-            
-            # Basic deduplication handled by SQL Unique Constraint (changes often repeat on the page)
-            # Use upsert or ignore conflict
-            try:
-                res = supabase.table('hranalyzer_changes')\
-                    .upsert(change_record, on_conflict='race_id,entry_id,change_type,description')\
-                    .execute()
-                
-                # Check if it was actually inserted/updated (count > 0 in most libs, but supabase insert response might vary)
-                count += 1
-            except Exception as e:
-                # likely duplicate or constraint violation if not using upsert correctly
-                # logger.warning(f"Error inserting change: {e}")
-                pass
+            # ORPHAN PREVENTION:
+            # If this is a horse-specific change but we found no horse, DO NOT insert as "Race-wide"
+            horse_specific_types = ['Scratch', 'Jockey Change', 'Weight Change', 'Equipment Change']
+            if item['change_type'] in horse_specific_types and not entry_id:
+                logger.warning(f"⚠️ Skipping orphan {item['change_type']} for {track_code} R{item['race_number']} ({item['horse_name']}/{item['program_number']})")
+                continue
 
-            # 4. If Scratch, also update existing `scratches` boolean for backward compat
+            # 3. DEDUPLICATION / MERGE Logic
+            # Check if this change already exists (same race, entry, and type)
+            query = supabase.table('hranalyzer_changes')\
+                .select('id, description')\
+                .eq('race_id', race_id)\
+                .eq('change_type', item['change_type'])
+            
+            if entry_id:
+                query = query.eq('entry_id', entry_id)
+            else:
+                query = query.is_('entry_id', 'null')
+            
+            existing_res = query.execute()
+            
+            if existing_res.data:
+                # Potential duplicate or update
+                existing_record = existing_res.data[0]
+                existing_desc = existing_record['description'] or ""
+                new_desc = item['description']
+                
+                # If the new description is already contained or redundant, skip
+                if new_desc in existing_desc:
+                    continue
+                
+                # If they are different, merge them
+                merged_desc = f"{existing_desc}; {new_desc}"
+                # Limit size just in case
+                if len(merged_desc) > 500: merged_desc = merged_desc[:497] + "..."
+                
+                supabase.table('hranalyzer_changes')\
+                    .update({'description': merged_desc})\
+                    .eq('id', existing_record['id'])\
+                    .execute()
+                count += 1
+            else:
+                # 4. INSERT into hranalyzer_changes
+                change_record = {
+                    'race_id': race_id,
+                    'entry_id': entry_id,
+                    'change_type': item['change_type'],
+                    'description': item['description']
+                }
+                
+                supabase.table('hranalyzer_changes').insert(change_record).execute()
+                count += 1
+
+            # 5. Side effects (Scratched flag, Race Status)
             if item['change_type'] == 'Scratch' and entry_id:
                 supabase.table('hranalyzer_race_entries')\
                     .update({'scratched': True})\
                     .eq('id', entry_id)\
                     .execute()
                 
-                start_sym = "✂️"
-                logger.info(f"{start_sym} MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
+                logger.info(f"✂️ MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
                 scratches_marked += 1
             elif item['change_type'] == 'Race Cancelled':
-                # Update Race Status
                 supabase.table('hranalyzer_races')\
                     .update({'race_status': 'cancelled'})\
                     .eq('id', race_id)\
                     .execute()
                 logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
-            elif item['change_type'] == 'Jockey Change':
-                logger.info(f"🏇 JOCKEY CHANGE: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
             
         except Exception as e:
             logger.error(f"Error processing change {item}: {e}")
@@ -362,23 +430,29 @@ def crawl_otb_changes():
     current_race = None
     changes_found = []
     
+    last_pgm = None
+    last_horse = None
+    
     for row in rows:
         text = row.get_text(strip=True)
         
         # Track Header: "AQU : Aqueduct : Race: 1"
         if 'Change' in text and ':' in text:
-            # Try to parse "CODE : Name : Race: N"
-            cols = row.find_all('td')
-            if cols:
-                header_txt = cols[0].get_text(strip=True)
-                parts = header_txt.split(':')
-                if len(parts) >= 3:
-                    current_track = parts[0].strip() # AQU
-                    # Race number is usually last part " Race: 1" -> "1"
-                    race_part = parts[-1].lower().replace('race', '').strip()
-                    current_race = int(race_part) if race_part.isdigit() else None
-            continue
-            
+             # Reset context on new track/race
+             last_pgm = None
+             last_horse = None
+             # Try to parse "CODE : Name : Race: N"
+             cols = row.find_all('td')
+             if cols:
+                 header_txt = cols[0].get_text(strip=True)
+                 parts = header_txt.split(':')
+                 if len(parts) >= 3:
+                     current_track = parts[0].strip() # AQU
+                     # Race number is usually last part " Race: 1" -> "1"
+                     race_part = parts[-1].lower().replace('race', '').strip()
+                     current_race = int(race_part) if race_part.isdigit() else None
+             continue
+             
         if not current_track or not current_race:
             continue
             
@@ -394,23 +468,44 @@ def crawl_otb_changes():
         # CASE 1: Full Row with Horse Info
         if len(cols) == 4 and '#' in cols[0].get_text():
             pgm = cols[0].get_text(strip=True).replace('#', '')
-            horse_name = cols[1].get_text(strip=True)
+            horse_name_cell = cols[1].get_text(strip=True)
+            if horse_name_cell:
+                horse_name = horse_name_cell
             desc_cell = cols[2]
+            
+            # Update context
+            last_pgm = pgm
+            last_horse = horse_name
             
         # CASE 2: Continuation Row (just description)
         elif len(cols) == 3 and not '#' in cols[0].get_text():
              desc_cell = cols[1]
-             pass
+             # Reuse context
+             pgm = last_pgm
+             horse_name = last_horse
         
         # Parse description
         if desc_cell:
             raw_desc = desc_cell.get_text(" ", strip=True) # "Scratched - Reason"
             
+            # IMPROVEMENT: Try to extract horse name from description if missing
+            # Example: "A Lister Scratched - Reason"
+            if not horse_name:
+                # Naive check: does the description start with a known pattern?
+                # Actually, blindly assigning last_horse is risky unless we are sure.
+                # However, OTB usually puts the reason on the next line for the SAME horse.
+                pass
+
             # Cleanup descriptions
             raw_desc = raw_desc.replace('\n', ' ').strip()
             
             # Determine type
             ctype = determine_change_type(raw_desc)
+            
+            # If we missed the horse name but the description implies a scratch...
+            # We skip adding "Race-wide" Scratch if we suspect it belongs to a horse.
+            # But how do we know?
+            # Let's clean up "PrivVet-Injured" specifically.
             
             changes_found.append({
                 'track_code': current_track,

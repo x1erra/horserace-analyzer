@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import TrackFilter from '../components/TrackFilter';
 
 export default function Claims() {
     const [claims, setClaims] = useState([]);
@@ -143,26 +144,28 @@ export default function Claims() {
             <h3 className="text-3xl font-bold text-white">Claims</h3>
             <p className="text-sm text-gray-400 mb-4">Review horses claimed in recent races.</p>
 
+
+
             {/* Filter bar */}
-            <div className="flex flex-col md:flex-row gap-4 mb-8">
-                <select
-                    value={selectedTrack}
-                    onChange={(e) => setSelectedTrack(e.target.value)}
-                    className="w-full md:w-auto bg-black border border-purple-900/30 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
-                >
-                    {tracks.map(track => (
-                        <option key={track} value={track}>{track}</option>
-                    ))}
-                </select>
-                <select
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full md:w-auto bg-black border border-purple-900/30 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
-                >
-                    {dates.map(date => (
-                        <option key={date} value={date}>{date}</option>
-                    ))}
-                </select>
+            <div className="flex flex-col gap-4 mb-8">
+                <TrackFilter
+                    tracks={tracks.filter(t => t !== 'All Tracks').map(t => t)}
+                    selectedTrack={selectedTrack === 'All Tracks' ? 'All' : selectedTrack}
+                    onSelectTrack={(t) => setSelectedTrack(t === 'All' ? 'All Tracks' : t)}
+                />
+
+                <div className="flex items-center gap-2">
+                    <span className="text-gray-400 text-sm">Filter by Date:</span>
+                    <select
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="bg-black border border-purple-900/30 text-white px-4 py-2 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
+                    >
+                        {dates.map(date => (
+                            <option key={date} value={date}>{date}</option>
+                        ))}
+                    </select>
+                </div>
             </div>
 
             {/* Claims count */}

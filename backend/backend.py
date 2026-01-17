@@ -380,6 +380,8 @@ def get_filter_options():
                     'total': 0,
                     'upcoming': 0,
                     'completed': 0,
+                    'cancelled': 0,
+                    'is_fully_cancelled': False,
                     'next_race_time': None,
                     'next_race_iso': None,
                     'last_race_winner': None,
@@ -399,12 +401,15 @@ def get_filter_options():
                         summary_map[name]['last_race_winner'] = winner_entry['hranalyzer_horses']['horse_name']
                     else:
                         summary_map[name]['last_race_winner'] = "Unknown"
-                        
+            elif r['race_status'] == 'cancelled':
+                summary_map[name]['cancelled'] += 1
             else:
                 summary_map[name]['upcoming'] += 1
                 
                 # Update next race time (Find the FIRST upcoming race that is in the future)
-                if True: # Always try to parse time for better data
+                # SKIP if it is cancelled! (Logic already in elif above but being safe)
+                if r['race_status'] != 'cancelled':
+                    if True: # Always try to parse time for better data
                     post_time_str = r.get('post_time')
                     if post_time_str:
                          try:
@@ -449,6 +454,12 @@ def get_filter_options():
                              # print(f"Error parsing time {post_time_str}: {e}")
                              if not summary_map[name]['next_race_time']:
                                  summary_map[name]['next_race_time'] = post_time_str
+
+
+        # Final pass for fully cancelled tracks
+        for name in summary_map:
+            if summary_map[name]['total'] > 0 and summary_map[name]['cancelled'] == summary_map[name]['total']:
+                summary_map[name]['is_fully_cancelled'] = True
 
         today_summary = sorted(list(summary_map.values()), key=lambda x: x['track_name'])
 

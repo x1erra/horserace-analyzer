@@ -115,13 +115,17 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
             </div>
             <div>
                 <span className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">Next Post</span>
-                {track.next_race_iso ? (
+                {track.is_fully_cancelled ? (
+                    <span className="text-red-500 font-bold text-sm">CANCELLED</span>
+                ) : track.next_race_iso ? (
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">
                             {new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                         </span>
                         <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                     </div>
+                ) : track.cancelled > 0 && track.completed + track.cancelled === track.total ? (
+                    <span className="text-red-500 font-bold text-sm">CANCELLED</span>
                 ) : (
                     <span className="text-gray-400 text-sm">-</span>
                 )}

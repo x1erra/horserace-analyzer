@@ -258,7 +258,10 @@ export default function RaceDetails() {
             {isCancelled && (
                 <div className="bg-red-900/20 border border-red-500/50 rounded-xl p-6 text-center animate-fadeIn">
                     <h2 className="text-3xl font-bold text-red-500 mb-2">RACE CANCELLED</h2>
-                    <p className="text-gray-300">This race has been cancelled due to weather or track conditions.</p>
+                    <p className="text-gray-300">
+                        {raceChanges.find(c => c.change_type === 'Race Cancelled')?.description ||
+                            "This race has been cancelled due to weather or track conditions."}
+                    </p>
                 </div>
             )}
 

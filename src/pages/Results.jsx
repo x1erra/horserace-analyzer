@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import TrackFilter from '../components/TrackFilter';
 
 export default function Results() {
     const [allResults, setAllResults] = useState([]);
@@ -8,6 +9,10 @@ export default function Results() {
     const [sortColumn, setSortColumn] = useState('race_date');
     const [sortDirection, setSortDirection] = useState('desc');
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedTrack, setSelectedTrack] = useState('All');
+
+    // Derived tracks list from all results
+    const tracks = ['All', ...new Set(allResults.map(r => r.track_name).filter(Boolean))].sort();
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -39,8 +44,9 @@ export default function Results() {
     // Filter and sort logic
     const sortedAndFilteredResults = allResults
         .filter(result =>
-            (result.track_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (result.winner || '').toLowerCase().includes(searchQuery.toLowerCase())
+            (selectedTrack === 'All' || result.track_name === selectedTrack) &&
+            ((result.track_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (result.winner || '').toLowerCase().includes(searchQuery.toLowerCase()))
         )
         .sort((a, b) => {
             let valA = a[sortColumn];
@@ -117,10 +123,19 @@ export default function Results() {
             <h3 className="text-3xl font-bold text-white">Race Results</h3>
             <p className="text-sm text-gray-400 mb-4">View and search past race results. Data updated daily via crawl.</p>
 
+            {/* Track Filter */}
+            <div className="mb-6">
+                <TrackFilter
+                    tracks={tracks.filter(t => t !== 'All').map(t => t)}
+                    selectedTrack={selectedTrack}
+                    onSelectTrack={setSelectedTrack}
+                />
+            </div>
+
             {/* Search Bar */}
             <input
                 type="text"
-                placeholder="Search by track or winner..."
+                placeholder="Search by winner..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition duration-200 opacity-0 animate-fadeIn" style={{ animationDelay: '50ms' }}

@@ -5,6 +5,8 @@ import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 import { AlertTriangle, Info, Shuffle, ShieldAlert } from 'lucide-react';
 
+import TrackFilter from '../components/TrackFilter';
+
 const getPostColor = (number) => {
     const num = parseInt(number);
     if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
@@ -58,8 +60,15 @@ export default function Changes() {
     const [error, setError] = useState(null);
     const [viewMode, setViewMode] = useState('upcoming'); // 'upcoming' or 'all'
     const [page, setPage] = useState(1);
-    const [limit, setLimit] = useState(20);
-    const [totalPages, setTotalPages] = useState(1);
+    const [limit, setLimit] = useState(500); // Increased limit for client-side filtering
+    const [selectedTrack, setSelectedTrack] = useState('All');
+
+    // Derived state for filtering
+    const tracks = ['All', ...new Set(changes.map(c => c.track_code).filter(Boolean))].sort();
+
+    const filteredChanges = changes.filter(change =>
+        selectedTrack === 'All' || change.track_code === selectedTrack
+    );
 
     const fetchChanges = async () => {
         try {
@@ -78,10 +87,9 @@ export default function Changes() {
 
             const response = await axios.get(endpoint, { params });
 
-            // Backend returns list and count
+            // Backend returns list
             setChanges(response.data.changes || []);
-            const totalCount = response.data.count || 0;
-            setTotalPages(Math.ceil(totalCount / limit) || 1);
+            // Pagination handling simplified since we fetch many
 
         } catch (e) {
             console.error("Error fetching changes:", e);
@@ -93,6 +101,7 @@ export default function Changes() {
 
     useEffect(() => {
         setPage(1); // Reset to page 1 when view mode changes
+        setSelectedTrack('All'); // Reset filter
     }, [viewMode]);
 
     useEffect(() => {
@@ -143,6 +152,13 @@ export default function Changes() {
                 </div>
             </div>
 
+            {/* Track Filter */}
+            <TrackFilter
+                tracks={tracks.filter(t => t !== 'All')}
+                selectedTrack={selectedTrack}
+                onSelectTrack={setSelectedTrack}
+            />
+
             {/* Content */}
             <div className="bg-black rounded-xl border border-purple-900/20 overflow-hidden shadow-xl">
                 {loading ? (
@@ -153,9 +169,9 @@ export default function Changes() {
                     <div className="p-12 text-center text-red-400">
                         {error}
                     </div>
-                ) : changes.length === 0 ? (
+                ) : filteredChanges.length === 0 ? (
                     <div className="p-12 text-center text-gray-500">
-                        No changes found for this period.
+                        No changes found matching your filters.
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -171,7 +187,7 @@ export default function Changes() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-purple-900/30">
-                                {changes.map((item) => (
+                                {filteredChanges.map((item) => (
                                     <tr key={item.id} className="hover:bg-purple-900/10 transition-colors group">
                                         <td className="p-4 text-gray-300 font-medium whitespace-nowrap">
                                             {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
@@ -231,57 +247,7 @@ export default function Changes() {
                 )}
             </div>
 
-            {/* Pagination Controls */}
-            {!loading && !error && changes.length > 0 && (
-                <div className="px-4 py-3 border-t border-purple-900/50 bg-black flex flex-col sm:flex-row items-center justify-between gap-4 rounded-b-xl">
-                    <div className="flex items-center text-sm text-gray-400">
-                        <span>Show</span>
-                        <select
-                            value={limit}
-                            onChange={(e) => {
-                                setLimit(Number(e.target.value));
-                                setPage(1);
-                            }}
-                            className="mx-2 bg-black border border-purple-900/50 text-white text-xs rounded px-2 py-1 focus:outline-none focus:border-purple-500"
-                        >
-                            <option value={10} className="bg-black">10</option>
-                            <option value={20} className="bg-black">20</option>
-                            <option value={30} className="bg-black">30</option>
-                            <option value={50} className="bg-black">50</option>
-                            <option value={100} className="bg-black">100</option>
-                        </select>
-                        <span>results per page</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={handlePrevPage}
-                            disabled={page === 1}
-                            className={`px-3 py-1 rounded text-sm font-medium transition ${page === 1
-                                ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
-                                : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
-                                }`}
-                        >
-                            Previous
-                        </button>
-
-                        <span className="text-sm text-gray-400">
-                            Page <span className="font-medium text-white">{page}</span> of <span className="font-medium text-white">{totalPages}</span>
-                        </span>
-
-                        <button
-                            onClick={handleNextPage}
-                            disabled={page >= totalPages}
-                            className={`px-3 py-1 rounded text-sm font-medium transition ${page >= totalPages
-                                ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
-                                : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
-                                }`}
-                        >
-                            Next
-                        </button>
-                    </div>
-                </div>
-            )}
+            {/* Pagination Controls Removed since we load 500 lines - client side search is simpler */}
         </div>
     );
 }
