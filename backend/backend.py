@@ -1275,6 +1275,240 @@ def trigger_crawl():
         }), 500
 
 
+# ==============================================
+# HORSES ENDPOINTS
+# ==============================================
+
+@app.route('/api/horses', methods=['GET'])
+def get_horses():
+    """
+    Get list of horses with aggregate stats.
+    Query params:
+    - search: Filter by horse name (optional)
+    - limit: Number of results (default 50)
+    - page: Page number for pagination (default 1)
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        search = request.args.get('search', '').strip()
+        limit = int(request.args.get('limit', 50))
+        page = int(request.args.get('page', 1))
+        offset = (page - 1) * limit
+        
+        # Build base query for horses
+        query = supabase.table('hranalyzer_horses').select('*', count='exact')
+        
+        if search:
+            query = query.ilike('horse_name', f'%{search}%')
+        
+        query = query.order('horse_name').range(offset, offset + limit - 1)
+        response = query.execute()
+        
+        horses_data = response.data
+        total_count = response.count or 0
+        
+        # Now get race entries for these horses to compute stats
+        horse_ids = [h['id'] for h in horses_data]
+        
+        stats_map = {}
+        if horse_ids:
+            entries_response = supabase.table('hranalyzer_race_entries')\
+                .select('''
+                    horse_id, finish_position, scratched,
+                    race:hranalyzer_races(race_date, track_code, race_status)
+                ''')\
+                .in_('horse_id', horse_ids)\
+                .execute()
+            
+            for entry in entries_response.data:
+                hid = entry['horse_id']
+                if hid not in stats_map:
+                    stats_map[hid] = {
+                        'total_races': 0,
+                        'wins': 0,
+                        'places': 0,
+                        'shows': 0,
+                        'last_race_date': None,
+                        'last_track': None
+                    }
+                
+                # Skip scratched entries
+                if entry.get('scratched'):
+                    continue
+                
+                race = entry.get('race') or {}
+                # Only count completed races
+                if race.get('race_status') != 'completed':
+                    continue
+                    
+                stats_map[hid]['total_races'] += 1
+                
+                pos = entry.get('finish_position')
+                if pos == 1:
+                    stats_map[hid]['wins'] += 1
+                elif pos == 2:
+                    stats_map[hid]['places'] += 1
+                elif pos == 3:
+                    stats_map[hid]['shows'] += 1
+                
+                # Track last race
+                race_date = race.get('race_date')
+                if race_date:
+                    if not stats_map[hid]['last_race_date'] or race_date > stats_map[hid]['last_race_date']:
+                        stats_map[hid]['last_race_date'] = race_date
+                        stats_map[hid]['last_track'] = race.get('track_code')
+        
+        # Build response
+        horses = []
+        for h in horses_data:
+            stats = stats_map.get(h['id'], {
+                'total_races': 0, 'wins': 0, 'places': 0, 'shows': 0,
+                'last_race_date': None, 'last_track': None
+            })
+            
+            total = stats['total_races']
+            win_pct = round((stats['wins'] / total) * 100, 1) if total > 0 else 0
+            
+            horses.append({
+                'id': h['id'],
+                'name': h['horse_name'],
+                'sire': h.get('sire'),
+                'dam': h.get('dam'),
+                'color': h.get('color'),
+                'sex': h.get('sex'),
+                'total_races': total,
+                'wins': stats['wins'],
+                'places': stats['places'],
+                'shows': stats['shows'],
+                'win_percentage': win_pct,
+                'last_race_date': stats['last_race_date'],
+                'last_track': stats['last_track']
+            })
+        
+        return jsonify({
+            'horses': horses,
+            'count': len(horses),
+            'total': total_count,
+            'page': page,
+            'limit': limit,
+            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/horse/<horse_id>', methods=['GET'])
+def get_horse_profile(horse_id):
+    """
+    Get detailed profile for a specific horse including race history.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get horse info
+        horse_response = supabase.table('hranalyzer_horses')\
+            .select('*')\
+            .eq('id', horse_id)\
+            .single()\
+            .execute()
+        
+        if not horse_response.data:
+            return jsonify({'error': 'Horse not found'}), 404
+        
+        horse = horse_response.data
+        
+        # Get all race entries for this horse
+        entries_response = supabase.table('hranalyzer_race_entries')\
+            .select('''
+                id, program_number, finish_position, final_odds, 
+                win_payout, place_payout, show_payout, scratched, run_comments,
+                race:hranalyzer_races(
+                    race_key, race_date, race_number, track_code, 
+                    race_type, surface, distance, purse, race_status,
+                    track:hranalyzer_tracks(track_name)
+                ),
+                jockey:hranalyzer_jockeys(jockey_name),
+                trainer:hranalyzer_trainers(trainer_name)
+            ''')\
+            .eq('horse_id', horse_id)\
+            .order('id', desc=True)\
+            .execute()
+        
+        # Process race history
+        race_history = []
+        stats = {'total': 0, 'wins': 0, 'places': 0, 'shows': 0, 'earnings': 0}
+        
+        for entry in entries_response.data:
+            race = entry.get('race') or {}
+            track = race.get('track') or {}
+            jockey = entry.get('jockey') or {}
+            trainer = entry.get('trainer') or {}
+            
+            race_entry = {
+                'race_key': race.get('race_key'),
+                'race_date': race.get('race_date'),
+                'track_code': race.get('track_code'),
+                'track_name': track.get('track_name', race.get('track_code')),
+                'race_number': race.get('race_number'),
+                'race_type': race.get('race_type'),
+                'surface': race.get('surface'),
+                'distance': race.get('distance'),
+                'purse': race.get('purse'),
+                'program_number': entry.get('program_number'),
+                'finish_position': entry.get('finish_position'),
+                'final_odds': entry.get('final_odds'),
+                'jockey_name': jockey.get('jockey_name', 'N/A'),
+                'trainer_name': trainer.get('trainer_name', 'N/A'),
+                'run_comments': entry.get('run_comments'),
+                'scratched': entry.get('scratched', False),
+                'race_status': race.get('race_status')
+            }
+            race_history.append(race_entry)
+            
+            # Compute stats from completed races
+            if race.get('race_status') == 'completed' and not entry.get('scratched'):
+                stats['total'] += 1
+                pos = entry.get('finish_position')
+                if pos == 1:
+                    stats['wins'] += 1
+                    if entry.get('win_payout'):
+                        stats['earnings'] += float(entry['win_payout'])
+                elif pos == 2:
+                    stats['places'] += 1
+                    if entry.get('place_payout'):
+                        stats['earnings'] += float(entry['place_payout'])
+                elif pos == 3:
+                    stats['shows'] += 1
+                    if entry.get('show_payout'):
+                        stats['earnings'] += float(entry['show_payout'])
+        
+        # Sort by race date descending
+        race_history.sort(key=lambda x: (x.get('race_date') or '', x.get('race_number') or 0), reverse=True)
+        
+        stats['win_percentage'] = round((stats['wins'] / stats['total']) * 100, 1) if stats['total'] > 0 else 0
+        
+        return jsonify({
+            'horse': {
+                'id': horse['id'],
+                'name': horse['horse_name'],
+                'sire': horse.get('sire'),
+                'dam': horse.get('dam'),
+                'color': horse.get('color'),
+                'sex': horse.get('sex'),
+                'foaling_year': horse.get('foaling_year')
+            },
+            'stats': stats,
+            'race_history': race_history
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 # Legacy endpoint for backwards compatibility (will be removed later)
 @app.route('/api/race-data')
 def get_race_data():

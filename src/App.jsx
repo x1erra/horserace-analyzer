@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import RaceDetails from './pages/RaceDetails.jsx';
 import Races from './pages/Races.jsx';
 import Horses from './pages/Horses.jsx';
+import HorseProfile from './pages/HorseProfile.jsx';
 import Predictions from './pages/Predictions.jsx';
 import Betting from './pages/Betting.jsx';
 import Results from './pages/Results.jsx'; // Added for Results page
@@ -34,6 +35,7 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/races" element={<Races />} />
                   <Route path="/horses" element={<Horses />} />
+                  <Route path="/horse/:id" element={<HorseProfile />} />
                   <Route path="/predictions" element={<Predictions />} />
                   <Route path="/betting" element={<Betting />} />
                   <Route path="/race/:id" element={<RaceDetails />} />

@@ -1,67 +1,192 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export default function Horses() {
     const [searchQuery, setSearchQuery] = useState('');
-    const [filteredHorses, setFilteredHorses] = useState([]);
+    const [horses, setHorses] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [debouncedSearch, setDebouncedSearch] = useState('');
 
-    // Sample horse data (replace with real API data later)
-    const allHorses = [
-        { id: 1, name: 'Thunder Bolt', age: 5, trainer: 'J. Smith', speed: 95, form: '1-2-3' },
-        { id: 2, name: 'Speed Demon', age: 4, trainer: 'A. Johnson', speed: 92, form: '2-1-4' },
-        { id: 3, name: 'Lightning Strike', age: 6, trainer: 'M. Brown', speed: 98, form: '3-3-1' },
-        { id: 4, name: 'Shadow Runner', age: 5, trainer: 'S. Lee', speed: 90, form: '4-2-2' },
-        { id: 5, name: 'Golden Hoof', age: 4, trainer: 'K. Davis', speed: 96, form: '1-4-3' },
-        { id: 6, name: 'Storm Chaser', age: 7, trainer: 'R. Wilson', speed: 93, form: '2-3-1' },
-    ];
-
-    // Filter logic
+    // Debounce search
     useEffect(() => {
-        const filtered = allHorses.filter(horse =>
-            horse.name.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-        setFilteredHorses(filtered);
+        const timer = setTimeout(() => {
+            setDebouncedSearch(searchQuery);
+            setPage(1); // Reset to first page on search
+        }, 300);
+        return () => clearTimeout(timer);
     }, [searchQuery]);
+
+    // Fetch horses from API
+    const fetchHorses = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const params = new URLSearchParams({
+                page: page.toString(),
+                limit: '24'
+            });
+            if (debouncedSearch) {
+                params.set('search', debouncedSearch);
+            }
+
+            const response = await fetch(`${API_BASE}/api/horses?${params}`);
+            if (!response.ok) throw new Error('Failed to fetch horses');
+
+            const data = await response.json();
+            setHorses(data.horses || []);
+            setTotalPages(data.total_pages || 1);
+        } catch (err) {
+            setError(err.message);
+            setHorses([]);
+        } finally {
+            setLoading(false);
+        }
+    }, [page, debouncedSearch]);
+
+    useEffect(() => {
+        fetchHorses();
+    }, [fetchHorses]);
+
+    // Format sex display
+    const formatSex = (sex) => {
+        const sexMap = { 'C': 'Colt', 'F': 'Filly', 'G': 'Gelding', 'H': 'Horse', 'M': 'Mare' };
+        return sexMap[sex] || sex || 'N/A';
+    };
 
     return (
         <div className="space-y-8">
             <h3 className="text-3xl font-bold text-white">Horse Profiles</h3>
-            <p className="text-sm text-gray-400 mb-4">Search and view detailed stats for horses.</p>
+            <p className="text-sm text-gray-400 mb-4">Search and view detailed stats for horses in our database.</p>
 
-            {/* Search bar - functional */}
+            {/* Search bar */}
             <input
                 type="text"
-                placeholder="Search horses..."
+                placeholder="Search horses by name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-black border border-purple-900/50 text-white px-4 py-3 rounded-md focus:outline-none focus:border-purple-600 transition"
             />
 
-            {/* Grid of horse cards - filtered dynamically with fade-in animation */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredHorses.length === 0 ? (
-                    <p className="text-gray-400 col-span-full text-center">No horses match your search.</p>
-                ) : (
-                    filteredHorses.map((horse, index) => (
-                        <div
-                            key={horse.id}
-                            className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn"
-                            style={{ animationDelay: `${index * 50}ms` }}
-                        >
-                            <h4 className="text-xl font-bold text-white mb-2">{horse.name}</h4>
-                            <p className="text-sm text-gray-400 mb-4">Age: {horse.age} • Trainer: {horse.trainer}</p>
-                            <div className="text-3xl font-bold text-purple-400 mb-4">Speed Rating: {horse.speed}</div>
-                            <p className="text-lg text-purple-300 mb-6">Recent Form: {horse.form}</p>
-                            <Link
-                                to={`/horse/${horse.id}`}
-                                className="w-full block bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white py-2 rounded-md transition text-center shadow-[0_0_10px_rgba(147,51,234,0.1)]"
+            {/* Loading state */}
+            {loading && (
+                <div className="text-center py-12">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+                    <p className="text-gray-400 mt-4">Loading horses...</p>
+                </div>
+            )}
+
+            {/* Error state */}
+            {error && !loading && (
+                <div className="text-center py-12">
+                    <p className="text-red-400">Error: {error}</p>
+                    <button
+                        onClick={fetchHorses}
+                        className="mt-4 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
+
+            {/* No results */}
+            {!loading && !error && horses.length === 0 && (
+                <p className="text-gray-400 text-center py-12">
+                    {debouncedSearch ? 'No horses match your search.' : 'No horses found in database.'}
+                </p>
+            )}
+
+            {/* Grid of horse cards */}
+            {!loading && !error && horses.length > 0 && (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {horses.map((horse, index) => (
+                            <div
+                                key={horse.id}
+                                className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn"
+                                style={{ animationDelay: `${index * 30}ms` }}
                             >
-                                View Profile
-                            </Link>
+                                <h4 className="text-xl font-bold text-white mb-2">{horse.name}</h4>
+                                <p className="text-sm text-gray-400 mb-3">
+                                    {formatSex(horse.sex)} {horse.color && `• ${horse.color}`}
+                                </p>
+                                {horse.sire && (
+                                    <p className="text-xs text-gray-500 mb-1">
+                                        <span className="text-gray-600">Sire:</span> {horse.sire}
+                                    </p>
+                                )}
+                                {horse.dam && (
+                                    <p className="text-xs text-gray-500 mb-3">
+                                        <span className="text-gray-600">Dam:</span> {horse.dam}
+                                    </p>
+                                )}
+
+                                {/* Stats */}
+                                <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                                    <div className="bg-gray-900/50 rounded p-2">
+                                        <div className="text-lg font-bold text-purple-400">{horse.total_races}</div>
+                                        <div className="text-xs text-gray-500">Starts</div>
+                                    </div>
+                                    <div className="bg-gray-900/50 rounded p-2">
+                                        <div className="text-lg font-bold text-green-400">{horse.wins}</div>
+                                        <div className="text-xs text-gray-500">Wins</div>
+                                    </div>
+                                    <div className="bg-gray-900/50 rounded p-2">
+                                        <div className="text-lg font-bold text-yellow-400">{horse.win_percentage}%</div>
+                                        <div className="text-xs text-gray-500">Win %</div>
+                                    </div>
+                                </div>
+
+                                {/* Record */}
+                                <p className="text-sm text-gray-400 mb-4">
+                                    Record: {horse.wins}-{horse.places}-{horse.shows}
+                                </p>
+
+                                {/* Last race info */}
+                                {horse.last_race_date && (
+                                    <p className="text-xs text-gray-500 mb-4">
+                                        Last race: {horse.last_race_date} @ {horse.last_track}
+                                    </p>
+                                )}
+
+                                <Link
+                                    to={`/horse/${horse.id}`}
+                                    className="w-full block bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white py-2 rounded-md transition text-center shadow-[0_0_10px_rgba(147,51,234,0.1)]"
+                                >
+                                    View Profile
+                                </Link>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center gap-4 mt-8">
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                className="px-4 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition"
+                            >
+                                Previous
+                            </button>
+                            <span className="text-gray-400">
+                                Page {page} of {totalPages}
+                            </span>
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                disabled={page === totalPages}
+                                className="px-4 py-2 bg-purple-900/30 text-purple-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-900/50 transition"
+                            >
+                                Next
+                            </button>
                         </div>
-                    ))
-                )}
-            </div>
+                    )}
+                </>
+            )}
         </div>
     );
 }
