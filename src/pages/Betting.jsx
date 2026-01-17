@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Wallet, RefreshCw, Plus, Trash2, TrendingUp, DollarSign, Percent } from 'lucide-react';
 
 // Use environment variable for API URL (defaults to localhost if not set)
 const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -28,7 +29,14 @@ const Tooltip = ({ text, children }) => {
 
 export default function Betting() {
     const [tickets, setTickets] = useState([]);
-    const [winRate, setWinRate] = useState(0);
+    const [stats, setStats] = useState({ winRate: 0, pnl: 0, totalWagered: 0, roi: 0 });
+    const [bankroll, setBankroll] = useState(() => {
+        const saved = localStorage.getItem('hra_bankroll');
+        return saved ? parseFloat(saved) : 1000.00;
+    });
+    const [isBankModalOpen, setIsBankModalOpen] = useState(false);
+    const [addFundsAmount, setAddFundsAmount] = useState('100');
+
     const [races, setRaces] = useState([]);
     const [selectedRaceId, setSelectedRaceId] = useState('');
     const [raceDetails, setRaceDetails] = useState(null);
@@ -58,6 +66,11 @@ export default function Betting() {
         fetchRaces();
     }, []);
 
+    // Persist bankroll
+    useEffect(() => {
+        localStorage.setItem('hra_bankroll', bankroll.toString());
+    }, [bankroll]);
+
     const fetchBets = async () => {
         try {
             const res = await fetch(`${API_BASE_URL}/bets`);
@@ -66,7 +79,7 @@ export default function Betting() {
                 // Sort by Date Desc
                 const sortedBets = data.bets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 setTickets(sortedBets);
-                updateWinRate(data.bets);
+                calculateStats(data.bets);
             }
         } catch (error) {
             console.error('Error fetching bets:', error);
@@ -188,16 +201,34 @@ export default function Betting() {
                 : posSelections[1].length > 0 && posSelections[2].length > 0 && posSelections[3].length > 0)
             : !!selectedHorseId;
 
-    const updateWinRate = (bets) => {
+    const calculateStats = (bets) => {
         const resolved = bets.filter(ticket => ticket.status !== 'Pending');
         const wins = resolved.filter(ticket => ticket.status === 'Win').length;
         const rate = resolved.length > 0 ? Math.round((wins / resolved.length) * 100) : 0;
-        setWinRate(rate);
+
+        const totalWagered = resolved.reduce((acc, t) => acc + (parseFloat(t.bet_cost) || parseFloat(t.bet_amount) || 0), 0);
+        const totalPayout = resolved.reduce((acc, t) => acc + (parseFloat(t.payout) || 0), 0);
+        const pnl = totalPayout - totalWagered;
+        const roi = totalWagered > 0 ? ((pnl / totalWagered) * 100).toFixed(1) : 0;
+
+        setStats({
+            winRate: rate,
+            pnl: pnl,
+            totalWagered: totalWagered,
+            roi: roi,
+            resolvedCount: resolved.length
+        });
     };
 
     const handleCreateTicket = async (e) => {
         e.preventDefault();
         if (!selectedRaceId || !isValid) return;
+
+        if (totalCost > bankroll) {
+            alert("Insufficient funds! Please add money to your wallet.");
+            setIsBankModalOpen(true);
+            return;
+        }
 
         // Prepare Payload
         let selectionData = null;
@@ -229,6 +260,8 @@ export default function Betting() {
             });
 
             if (res.ok) {
+                // Deduct from bankroll immediately for better UX
+                setBankroll(prev => prev - totalCost);
                 fetchBets();
                 // Reset form slightly
                 // Reset form slightly
@@ -246,12 +279,39 @@ export default function Betting() {
 
     const handleResolveBets = async () => {
         setLoading(true);
+        // Identify currently pending bets to track winnings
+        const pendingIds = tickets.filter(t => t.status === 'Pending').map(t => t.id);
+
         try {
             const res = await fetch(`${API_BASE_URL}/bets/resolve`, { method: 'POST' });
             const data = await res.json();
             if (data.success) {
                 alert(`Resolved ${data.resolved_count} bets!`);
-                fetchBets();
+
+                // Fetch updated bets to calculate winnings
+                const betsRes = await fetch(`${API_BASE_URL}/bets`);
+                const betsData = await betsRes.json();
+
+                if (betsData.bets) {
+                    // Check for new earnings from the previously pending bets
+                    let newEarnings = 0;
+                    betsData.bets.forEach(bet => {
+                        if (pendingIds.includes(bet.id) && bet.status === 'Win') {
+                            newEarnings += (parseFloat(bet.payout) || 0);
+                        }
+                    });
+
+                    if (newEarnings > 0) {
+                        setBankroll(prev => prev + newEarnings);
+                        // Optional nice alert
+                        // alert(`You won $${newEarnings.toFixed(2)}!`); 
+                    }
+
+                    // Update main state
+                    const sortedBets = betsData.bets.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    setTickets(sortedBets);
+                    calculateStats(betsData.bets);
+                }
             } else {
                 alert('Failed to resolve bets');
             }
@@ -262,6 +322,22 @@ export default function Betting() {
         }
     };
 
+    const handleResetStats = async () => {
+        if (!confirm('Are you sure you want to delete ALL betting history? This action cannot be undone.')) return;
+        try {
+            const res = await fetch(`${API_BASE_URL}/bets`, { method: 'DELETE' });
+            if (res.ok) {
+                setTickets([]);
+                calculateStats([]);
+                alert('All betting history has been deleted.');
+            } else {
+                alert('Failed to delete betting history.');
+            }
+        } catch (error) {
+            console.error('Error deleting betting history:', error);
+        }
+    };
+
     const handleDeleteBet = async (ticketId) => {
         if (!confirm('Are you sure you want to delete this bet? This action cannot be undone.')) return;
 
@@ -269,10 +345,9 @@ export default function Betting() {
             const res = await fetch(`${API_BASE_URL}/bets/${ticketId}`, { method: 'DELETE' });
             if (res.ok) {
                 // Remove from state
-                setTickets(tickets.filter(t => t.id !== ticketId));
-                // Recalculate win rate
                 const remaining = tickets.filter(t => t.id !== ticketId);
-                updateWinRate(remaining);
+                setTickets(remaining);
+                calculateStats(remaining);
             } else {
                 alert('Failed to delete bet');
             }
@@ -282,25 +357,151 @@ export default function Betting() {
     };
 
     return (
-        <div className="space-y-8">
-            <div className="flex justify-between items-center">
-                <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
-                <button
-                    onClick={handleResolveBets}
-                    disabled={loading}
-                    className="bg-black border border-purple-600 hover:bg-purple-900/20 hover:border-purple-500 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.2)] disabled:opacity-50"
-                >
-                    {loading ? 'Processing...' : 'Check for Results / Resolve Bets'}
-                </button>
+        <div className="space-y-8 relative">
+            {/* Header Area */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h3 className="text-3xl font-bold text-white">Betting Simulator</h3>
+                    <p className="text-sm text-gray-400 mt-1">Place virtual bets on upcoming races.</p>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    {/* Wallet Display */}
+                    <button
+                        onClick={() => setIsBankModalOpen(true)}
+                        className="group flex items-center gap-3 bg-gray-900 border border-purple-500/30 px-4 py-2 rounded-lg hover:bg-gray-800 transition shadow-[0_0_15px_rgba(147,51,234,0.1)]"
+                    >
+                        <div className="bg-purple-900/50 p-1.5 rounded-full group-hover:bg-purple-600 transition">
+                            <Wallet className="w-5 h-5 text-purple-200" />
+                        </div>
+                        <div className="text-left">
+                            <span className="block text-[10px] text-gray-400 uppercase tracking-widest font-bold">Wallet</span>
+                            <span className="block text-xl font-mono font-bold text-green-400">${bankroll.toFixed(2)}</span>
+                        </div>
+                        <Plus className="w-4 h-4 text-gray-500 group-hover:text-white ml-2" />
+                    </button>
+
+                    <button
+                        onClick={handleResolveBets}
+                        disabled={loading}
+                        className="bg-purple-900/20 border border-purple-600 hover:bg-purple-900/50 text-white px-4 py-3 rounded-lg transition duration-200 flex items-center gap-2 disabled:opacity-50"
+                    >
+                        {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+                        <span className="hidden md:inline">Check Results</span>
+                    </button>
+                </div>
             </div>
 
-            <p className="text-sm text-gray-400 mb-4">Place virtual bets on upcoming races. Races will disappear from selection once they start.</p>
+            {/* Bank Modal */}
+            {isBankModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="bg-gray-900 border border-purple-500/50 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h4 className="text-xl font-bold text-white">Add Funds</h4>
+                            <button onClick={() => setIsBankModalOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+                        </div>
+                        <form onSubmit={handleAddFunds} className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Amount to Add ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                                    <input
+                                        type="number"
+                                        value={addFundsAmount}
+                                        onChange={(e) => setAddFundsAmount(e.target.value)}
+                                        className="w-full bg-black border border-purple-900/50 text-white pl-8 pr-4 py-3 rounded-lg focus:border-purple-500 outline-none text-lg font-bold"
+                                        placeholder="0.00"
+                                        autoFocus
+                                        min="1"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[100, 500, 1000].map(val => (
+                                    <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() => setAddFundsAmount(val)}
+                                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded text-sm font-medium transition"
+                                    >
+                                        +${val}
+                                    </button>
+                                ))}
+                            </div>
+                            <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                                Add Funds
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
-            {/* Win Rate Stat */}
-            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50">
-                <h4 className="text-xl font-bold text-white mb-2">Your Win Rate</h4>
-                <p className="text-4xl font-bold text-purple-400">{winRate}%</p>
-                <p className="text-sm text-gray-500 mt-1">Based on {tickets.filter(t => t.status !== 'Pending').length} resolved bets</p>
+            {/* Performance Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Win Rate */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                        <TrendingUp className="w-16 h-16 text-purple-500" />
+                    </div>
+                    <div className="bg-purple-900/20 p-3 rounded-lg">
+                        <Percent className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Win Rate</p>
+                        <p className="text-2xl font-bold text-white">{stats.winRate}%</p>
+                    </div>
+                </div>
+
+                {/* Net P&L */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                        <DollarSign className="w-16 h-16 text-green-500" />
+                    </div>
+                    <div className={`p-3 rounded-lg ${stats.pnl >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
+                        <DollarSign className={`w-6 h-6 ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L Loop</p>
+                        <p className={`text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Total Wagered */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4">
+                    <div className="bg-blue-900/20 p-3 rounded-lg">
+                        <Wallet className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Total Wagered</p>
+                        <p className="text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
+                    </div>
+                </div>
+
+                {/* ROI / Reset */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex justify-between items-center pr-8">
+                    <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-lg ${parseFloat(stats.roi) >= 0 ? 'bg-indigo-900/20' : 'bg-red-900/20'}`}>
+                            <TrendingUp className={`w-6 h-6 ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`} />
+                        </div>
+                        <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
+                            <p className={`text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
+                                {stats.roi}%
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Reset Button */}
+                    <button
+                        onClick={handleResetStats}
+                        className="text-gray-600 hover:text-red-500 transition p-2 hover:bg-red-900/20 rounded-full"
+                        title="Reset Stats & History"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                </div>
             </div>
 
             {/* Form to Create Ticket */}
@@ -528,6 +729,117 @@ export default function Betting() {
                 </button>
             </form>
 
+            {/* Bank Modal */}
+            {isBankModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="bg-gray-900 border border-purple-500/50 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h4 className="text-xl font-bold text-white">Add Funds</h4>
+                            <button onClick={() => setIsBankModalOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+                        </div>
+                        <form onSubmit={handleAddFunds} className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-2">Amount to Add ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                                    <input
+                                        type="number"
+                                        value={addFundsAmount}
+                                        onChange={(e) => setAddFundsAmount(e.target.value)}
+                                        className="w-full bg-black border border-purple-900/50 text-white pl-8 pr-4 py-3 rounded-lg focus:border-purple-500 outline-none text-lg font-bold"
+                                        placeholder="0.00"
+                                        autoFocus
+                                        min="1"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[100, 500, 1000].map(val => (
+                                    <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() => setAddFundsAmount(val)}
+                                        className="bg-gray-800 hover:bg-gray-700 text-gray-300 py-2 rounded text-sm font-medium transition"
+                                    >
+                                        +${val}
+                                    </button>
+                                ))}
+                            </div>
+                            <button type="submit" className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                                Add Funds
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Performance Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Win Rate */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                        <TrendingUp className="w-16 h-16 text-purple-500" />
+                    </div>
+                    <div className="bg-purple-900/20 p-3 rounded-lg">
+                        <Percent className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Win Rate</p>
+                        <p className="text-2xl font-bold text-white">{stats.winRate}%</p>
+                    </div>
+                </div>
+
+                {/* Net P&L */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4 relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition">
+                        <DollarSign className="w-16 h-16 text-green-500" />
+                    </div>
+                    <div className={`p-3 rounded-lg ${stats.pnl >= 0 ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
+                        <DollarSign className={`w-6 h-6 ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L</p>
+                        <p className={`text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Total Wagered */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex items-center gap-4">
+                    <div className="bg-blue-900/20 p-3 rounded-lg">
+                        <Wallet className="w-6 h-6 text-blue-400" />
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Total Wagered</p>
+                        <p className="text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
+                    </div>
+                </div>
+
+                {/* ROI / Reset */}
+                <div className="bg-black rounded-xl p-5 border border-purple-900/30 flex justify-between items-center pr-8">
+                    <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-lg ${parseFloat(stats.roi) >= 0 ? 'bg-indigo-900/20' : 'bg-red-900/20'}`}>
+                            <TrendingUp className={`w-6 h-6 ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`} />
+                        </div>
+                        <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
+                            <p className={`text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
+                                {stats.roi}%
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Reset Button */}
+                    <button
+                        onClick={handleResetStats}
+                        className="text-gray-600 hover:text-red-500 transition p-2 hover:bg-red-900/20 rounded-full"
+                        title="Reset Stats & History"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                </div>
+            </div>
             {/* Tickets Table */}
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50">
                 {/* Desktop Table View */}

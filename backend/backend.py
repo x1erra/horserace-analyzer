@@ -999,6 +999,26 @@ def delete_bet(bet_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/bets', methods=['DELETE'])
+def delete_all_bets():
+    """Delete ALL bets (Reset Stats)"""
+    try:
+        supabase = get_supabase_client()
+        
+        # Delete all rows
+        # Supabase delete without filters deletes all rows? carefully check metadata
+        # Usually need a filter like .neq('id', 0) to be safe or allowed
+        response = supabase.table('hranalyzer_bets').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+        
+        return jsonify({
+            'success': True,
+            'message': 'All bets deleted'
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/bets/resolve', methods=['POST'])
 def resolve_bets():
     """
