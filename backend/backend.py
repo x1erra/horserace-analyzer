@@ -1105,8 +1105,20 @@ def get_changes():
                 
             final_list.append(winner)
 
-        # --- FILTER: Only horse-specific changes (exclude Race-wide) ---
-        final_list = [c for c in final_list if c.get('horse_name') not in (None, '', 'Race-wide', 'Race-Wide')]
+        # --- FILTER: Only horse-specific changes (exclude Race-wide) unless it's a legitimate cancellation ---
+        # Also EXCLUDE 'Wagering' type or generic wagering text to prevent "plaguing" the user
+        final_list = [
+            c for c in final_list 
+            if c.get('horse_name') not in (None, '', 'Race-wide', 'Race-Wide') 
+            or c.get('change_type') == 'Race Cancelled'
+        ]
+        
+        # Strict Wagering Filter
+        final_list = [
+            c for c in final_list
+            if c.get('change_type') != 'Wagering'
+            and 'wagering' not in (c.get('description') or '').lower()
+        ]
 
         # --- FINAL SORTING ---
         if view_mode == 'upcoming':

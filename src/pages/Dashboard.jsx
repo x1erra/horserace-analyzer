@@ -94,7 +94,10 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                     ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 pt-1">
-                    <span>{track.completed} Completed {track.cancelled > 0 && <span className="text-red-400 ml-1">({track.cancelled} Cancelled)</span>}</span>
+                    <div className="flex flex-col">
+                        <span>{track.completed} Completed</span>
+                        {track.cancelled > 0 && <span className="text-gray-600 text-[10px]">({track.cancelled} Cancelled)</span>}
+                    </div>
                     <span>{track.upcoming} Upcoming</span>
                 </div>
             </div>

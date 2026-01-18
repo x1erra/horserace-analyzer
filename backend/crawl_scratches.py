@@ -132,9 +132,14 @@ def determine_change_type(description):
     elif 'blinker' in desc_lower or 'equipment' in desc_lower:
         return 'Equipment Change'
     elif 'cancel' in desc_lower:
-        if 'wagering' in desc_lower:
+        # Use centralized validation to avoid false positives (e.g. Wagering cancelled)
+        if is_valid_cancellation(description):
+            return 'Race Cancelled'
+            
+        if 'wagering' in desc_lower or 'pool' in desc_lower:
             return 'Wagering' # New type, or return 'Other' if we don't want to track it
-        return 'Race Cancelled'
+            
+        return 'Other'
     
     return 'Other'
 
@@ -151,17 +156,24 @@ def is_valid_cancellation(text):
         
     # EXCLUSION LIST
     # 'wagering' -> "Show Wagering Cancelled"
-    # 'simulcast' -> "Simulcast Cancelled" (usually barely matters, but let's be safe)
-    # 'turf' -> "Turf Racing Cancelled" (Usually means surface change, not race cancel)
-    # 'superfecta', 'trifecta', etc are covered by 'wagering' usually, but 'Show Wagering' is the key one.
+    # 'simulcast' -> "Simulcast Cancelled"
+    # 'turf' -> "Turf Racing Cancelled"
+    # 'superfecta', 'trifecta', etc are covered by 'wagering' usually, but generic filtering is safer
     
-    # 'superfecta', 'trifecta', 'exacta', 'daily double', 'pick' are also wagering terms.
-    
-    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing', 'superfecta', 'trifecta', 'exacta', 'daily double', 'pick']
+    exclusion_keywords = [
+        'wagering', 'simulcast', 'pool', 'turf racing', 
+        'superfecta', 'trifecta', 'exacta', 'daily double', 'pick', 'quinella',
+        'win', 'place', 'show', 'omnibus'
+    ]
     
     if any(k in text_lower for k in exclusion_keywords):
         return False
         
+    # Additional Safe Guard:
+    # If the text is JUST "cancelled" (very short), we accept it.
+    # But if it's "Something Something Cancelled" and not in exclusion, we accept it.
+    # But usually "Race Cancelled" is explicit.
+    
     return True
 
 def extract_new_post_time(text):
