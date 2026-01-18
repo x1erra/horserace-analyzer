@@ -157,10 +157,29 @@ def is_valid_cancellation(text):
     
     exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing']
     
+    
+    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing']
+    
     if any(k in text_lower for k in exclusion_keywords):
         return False
         
     return True
+
+def extract_new_post_time(text):
+    """
+    Extracts new post time from string like "Post Time changed to 1:30 PM".
+    Returns formatted time string (HH:MM:SS) or None.
+    """
+    # Regex for 1:30 PM or 12:45
+    # Look for "changed to X:XX PM"
+    m = re.search(r'changed to\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)', text, re.IGNORECASE)
+    if m:
+        time_str = m.group(1).upper()
+        # Ensure AM/PM if missing (heuristic?) usually Equibase has it.
+        # If input is just 1:30, assuming PM might be risky but standard for afternoon racing.
+        # Let's try to convert to HH:MM:00 format if possible, or just return as is if flexible.
+        return time_str
+    return None
 
 def parse_track_changes(html, track_code):
     """
@@ -421,8 +440,11 @@ def parse_rss_changes(xml_content, track_code):
                 ctype = 'Weight Change'
             elif 'equipment' in remainder.lower():
                 ctype = 'Equipment Change'
+                ctype = 'Equipment Change'
             elif is_valid_cancellation(remainder):
                 ctype = 'Race Cancelled'
+            elif 'post time' in remainder.lower() and 'changed to' in remainder.lower():
+                ctype = 'Post Time Change'
             elif 'cancel' in remainder.lower(): # It has cancel but failed valid check -> Wagering/Other
                  if 'wagering' in remainder.lower():
                     ctype = 'Wagering'
@@ -587,15 +609,47 @@ def update_changes_in_db(track_code, race_date, change_list):
                 logger.info(f"✂️ MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
                 scratches_marked += 1
             elif item['change_type'] == 'Race Cancelled':
-                # SAFEGUARD: Do not cancel if race is Completed
-                if current_status == 'completed':
-                    logger.warning(f"🛡️ PREVENTED CANCELLATION for Completed Race: {track_code} R{item['race_number']}")
+                # SAFEGUARD: Do not cancel if race is Completed OR has results
+                # Check for existing results first
+                res_check = supabase.table('hranalyzer_race_entries')\
+                    .select('id')\
+                    .eq('race_id', race_id)\
+                    .in_('finish_position', [1, 2, 3])\
+                    .limit(1)\
+                    .execute()
+                    
+                has_results = len(res_check.data) > 0
+
+                if current_status == 'completed' or has_results:
+                    logger.warning(f"🛡️ PREVENTED CANCELLATION for Completed/Resulted Race: {track_code} R{item['race_number']}")
                 else:
                     supabase.table('hranalyzer_races')\
                         .update({'race_status': 'cancelled'})\
                         .eq('id', race_id)\
                         .execute()
                     logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
+                    
+            elif item['change_type'] == 'Post Time Change':
+                new_time = extract_new_post_time(item['description'])
+                if new_time:
+                    # Update status to delayed AND update post time
+                    updates = {'race_status': 'delayed', 'post_time': new_time}
+                    
+                    # Convert 1:30 PM to 24hr for postgres TIME column if needed?
+                    # Postgres TIME usually handles '01:30 PM' fine.
+                    
+                    supabase.table('hranalyzer_races')\
+                        .update(updates)\
+                        .eq('id', race_id)\
+                        .execute()
+                    logger.info(f"⏰ POST TIME DELAY: {track_code} R{item['race_number']} -> {new_time}")
+                else:
+                    # Just mark delayed if we can't parse time
+                    supabase.table('hranalyzer_races')\
+                        .update({'race_status': 'delayed'})\
+                        .eq('id', race_id)\
+                        .execute()
+                    logger.info(f"⚠️ RACE DELAYED (Time Unknown): {track_code} R{item['race_number']}")
             
         except Exception as e:
             logger.error(f"Error processing change {item}: {e}")

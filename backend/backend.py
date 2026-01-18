@@ -301,6 +301,11 @@ def get_todays_races():
             # Get pre-calculated stats
             stats = race_stats.get(race['id'], {'count': 0, 'results': []})
 
+            # Auto-correct status if results exist
+            current_status = race['race_status']
+            if len(stats['results']) > 0:
+                current_status = 'completed'
+
             races.append({
                 'race_key': race['race_key'],
                 'track_code': race['track_code'],
@@ -313,8 +318,7 @@ def get_todays_races():
                 'distance': race['distance'],
                 'purse': race['purse'],
                 'entry_count': stats['count'],
-                'race_status': race['race_status'],
-                'race_status': race['race_status'],
+                'race_status': current_status,
                 'has_claims': race['id'] in races_with_claims,
                 'results': stats['results'], # Top 3 finishers
                 'id': race['id']
@@ -388,6 +392,14 @@ def get_filter_options():
         
         for r in today_response.data:
             name = (r.get('hranalyzer_tracks') or {}).get('track_name', r['track_code'])
+            
+            # Auto-correct status if results exist
+            entries = r.get('hranalyzer_race_entries') or []
+            has_results = any(e.get('finish_position') in [1, 2, 3] for e in entries)
+            race_status = r['race_status']
+            if has_results:
+                race_status = 'completed'
+
             if name not in summary_map:
                 summary_map[name] = {
                     'track_name': name,
@@ -405,7 +417,7 @@ def get_filter_options():
             
             summary_map[name]['total'] += 1
             
-            if r['race_status'] == 'completed':
+            if race_status == 'completed':
                 summary_map[name]['completed'] += 1
                 # Update last race winner (assuming races ordered by race_number)
                 if r['race_number'] > summary_map[name]['last_race_number']:
@@ -416,14 +428,14 @@ def get_filter_options():
                         summary_map[name]['last_race_winner'] = winner_entry['hranalyzer_horses']['horse_name']
                     else:
                         summary_map[name]['last_race_winner'] = "Unknown"
-            elif r['race_status'] == 'cancelled':
+            elif race_status == 'cancelled':
                 summary_map[name]['cancelled'] += 1
             else:
                 summary_map[name]['upcoming'] += 1
                 
                 # Update next race time (Find the FIRST upcoming race that is in the future)
                 # SKIP if it is cancelled! (Logic already in elif above but being safe)
-                if r['race_status'] != 'cancelled':
+                if race_status != 'cancelled':
                     if True: # Always try to parse time for better data
                         post_time_str = r.get('post_time')
                     if post_time_str:
@@ -736,6 +748,13 @@ def get_race_details(race_key):
                 
             # Update the response JSON (dirty but effective patch without rewriting the whole dict above)
             # Actually, let's just create the dict properly.
+                
+            # Auto-correct status if results exist (User reported false CANCELLED status on races with winners)
+            has_results = any(e.get('finish_position') in [1, 2, 3] for e in entries)
+            current_status = race['race_status']
+            if has_results:
+                current_status = 'completed'
+
             return jsonify({
                 'race': {
                      'race_key': race['race_key'],
@@ -751,7 +770,7 @@ def get_race_details(race_key):
                     'distance_feet': race['distance_feet'],
                     'conditions': race['conditions'],
                     'purse': race['purse'],
-                    'race_status': race['race_status'],
+                    'race_status': current_status,
                     'data_source': race['data_source'],
                     'final_time': race['final_time'],
                     'fractional_times': race['fractional_times'],

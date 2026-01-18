@@ -91,6 +91,7 @@ export default function RaceDetails() {
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
     const isCancelled = race.race_status === 'cancelled';
+    const isDelayed = race.race_status === 'delayed';
 
     // Deduplicate entries by horse name and ensure valid data
     const uniqueEntries = entries.reduce((acc, current) => {
@@ -247,9 +248,11 @@ export default function RaceDetails() {
                             ? 'bg-blue-900/30 text-blue-400 border border-blue-900/50'
                             : isCancelled
                                 ? 'bg-red-900/30 text-red-500 border border-red-900/50 font-bold animate-pulse'
-                                : 'bg-gray-900/30 text-gray-400 border border-gray-800'
+                                : isDelayed
+                                    ? 'bg-orange-900/30 text-orange-400 border border-orange-900/50 font-bold'
+                                    : 'bg-gray-900/30 text-gray-400 border border-gray-800'
                         }`}>
-                        {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : isCancelled ? 'CANCELLED' : race.race_status}
+                        {isCompleted ? 'Completed' : isUpcoming ? 'Upcoming' : isCancelled ? 'CANCELLED' : isDelayed ? 'DELAYED' : race.race_status}
                     </span>
                 </div>
             </div>

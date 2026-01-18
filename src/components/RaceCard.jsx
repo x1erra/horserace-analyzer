@@ -54,11 +54,14 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                                 ? 'bg-blue-900/30 text-blue-400'
                                 : race.race_status === 'cancelled'
                                     ? 'bg-red-900/50 text-red-500 font-bold border border-red-900'
-                                    : 'bg-gray-900/30 text-gray-400'
+                                    : race.race_status === 'delayed'
+                                        ? 'bg-orange-900/50 text-orange-400 font-bold border border-orange-900'
+                                        : 'bg-gray-900/30 text-gray-400'
                             }`}>
                             {race.race_status === 'completed' ? 'Complete' :
                                 race.race_status === 'upcoming' ? 'Upcoming' :
-                                    race.race_status === 'cancelled' ? 'CANCELLED' : 'Past'}
+                                    race.race_status === 'cancelled' ? 'CANCELLED' :
+                                        race.race_status === 'delayed' ? 'DELAYED' : 'Past'}
                         </span>
                     )}
                     {/* Claims Tag */}
