@@ -132,6 +132,8 @@ def determine_change_type(description):
     elif 'blinker' in desc_lower or 'equipment' in desc_lower:
         return 'Equipment Change'
     elif 'cancel' in desc_lower:
+        if 'wagering' in desc_lower:
+            return 'Wagering' # New type, or return 'Other' if we don't want to track it
         return 'Race Cancelled'
     
     return 'Other'
@@ -380,8 +382,11 @@ def parse_rss_changes(xml_content, track_code):
                 ctype = 'Weight Change'
             elif 'equipment' in remainder.lower():
                 ctype = 'Equipment Change'
-            elif 'cancel' in remainder.lower(): # Just in case
-                ctype = 'Race Cancelled'
+            elif 'cancel' in remainder.lower():
+                if 'wagering' in remainder.lower():
+                    ctype = 'Wagering'
+                else:
+                    ctype = 'Race Cancelled'
             
             desc = remainder
             
