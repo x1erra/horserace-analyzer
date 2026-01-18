@@ -5,7 +5,7 @@ export default function TrackFilter({ tracks, selectedTrack, onSelectTrack }) {
                 onClick={() => onSelectTrack('All')}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${selectedTrack === 'All'
                     ? 'bg-purple-900/40 text-purple-100 border border-purple-500/40 shadow-sm'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    : 'bg-black border border-purple-500/20 text-purple-400/80 hover:bg-purple-500/10 hover:text-purple-200 hover:border-purple-500/40'
                     }`}
             >
                 All Tracks
@@ -16,7 +16,7 @@ export default function TrackFilter({ tracks, selectedTrack, onSelectTrack }) {
                     onClick={() => onSelectTrack(track)}
                     className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${selectedTrack === track
                         ? 'bg-purple-900/40 text-purple-100 border border-purple-500/40 shadow-sm'
-                        : 'bg-gray-900 border border-gray-800 text-gray-400 hover:border-purple-500/50 hover:text-purple-300'
+                        : 'bg-black border border-purple-500/20 text-purple-400/80 hover:bg-purple-500/10 hover:text-purple-200 hover:border-purple-500/40'
                         }`}
                 >
                     {track}
