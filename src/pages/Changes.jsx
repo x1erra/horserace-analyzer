@@ -137,7 +137,7 @@ export default function Changes() {
                     <p className="text-sm text-gray-400">Live updates: Scratches, Jockey Changes, and more.</p>
                 </div>
 
-                <div className="flex bg-black p-1 rounded-lg border border-purple-900/50">
+                <div className="flex bg-black p-1 rounded-lg border border-purple-900/50 w-fit">
                     <button
                         onClick={() => handleModeChange('upcoming')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition ${viewMode === 'upcoming'
