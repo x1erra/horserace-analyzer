@@ -547,10 +547,16 @@ def get_past_races():
         races = []
         for race in response.data:
             results_data = race.get('results', [])
-            # Filter for top 3 and format
+            
+            # Formatted results Top 3
             formatted_results = []
             winner_name = 'N/A'
-            winner_program_number = None
+            
+            # Prefer explicit column if populated (from backfill/crawler)
+            winner_program_number = race.get('winner_program_number')
+            
+            # Fallback calculation if column is null
+            calculated_winner_pgm = None
             
             for r in results_data:
                 pos = r.get('finish_position')
@@ -565,7 +571,11 @@ def get_past_races():
                     })
                     if pos == 1:
                         winner_name = horse_name
-                        winner_program_number = r.get('program_number')
+                        calculated_winner_pgm = r.get('program_number')
+            
+            # Use calculated if explicit is missing
+            if not winner_program_number:
+                winner_program_number = calculated_winner_pgm
             
             formatted_results.sort(key=lambda x: x['position'])
 
@@ -589,7 +599,7 @@ def get_past_races():
                 'winner_program_number': winner_program_number,
                 'results': formatted_results, # Top 3
                 'time': race.get('final_time') or 'N/A',
-                'link': race.get('equibase_chart_url') or 'N/A'
+                'link': race.get('equibase_chart_url', '#')
             })
 
         return jsonify({
@@ -885,7 +895,7 @@ def get_changes():
                 ''')
                 
             if view_mode == 'upcoming':
-                changes_query = changes_query.gte('race.race_date', today)
+                changes_query = changes_query.eq('race.race_date', today)
             else:
                 changes_query = changes_query.lt('race.race_date', today)
 
@@ -944,7 +954,7 @@ def get_changes():
             .eq('scratched', True)
             
         if view_mode == 'upcoming':
-            scratch_query = scratch_query.gte('race.race_date', today)
+            scratch_query = scratch_query.eq('race.race_date', today)
         else:
             scratch_query = scratch_query.lt('race.race_date', today)
             

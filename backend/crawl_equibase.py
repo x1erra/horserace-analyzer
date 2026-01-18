@@ -1021,6 +1021,16 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             
         race_key = f"{track_code}-{race_date.strftime('%Y%m%d')}-{race_number}"
 
+        # Find winner's program number
+        winner_program_number = None
+        if race_data.get('horses'):
+            for h in race_data['horses']:
+                # finish_position is usually int, but be safe
+                if str(h.get('finish_position')) == '1':
+                    winner_program_number = h.get('program_number')
+                    break
+
+
         # Check if race already exists
         existing = supabase.table('hranalyzer_races').select('id').eq('race_key', race_key).execute()
         if existing.data and len(existing.data) > 0:
@@ -1037,6 +1047,7 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'track_code': track_code,
             'race_date': race_date.strftime('%Y-%m-%d'),
             'race_number': race_number,
+            'winner_program_number': winner_program_number,
             # 'post_time': race_data.get('post_time'), # Handle conditionally below
             'surface': race_data.get('surface'),
             'distance': race_data.get('distance'),

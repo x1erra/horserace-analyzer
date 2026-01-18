@@ -145,7 +145,7 @@ export default function Changes() {
                             : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
-                        Upcoming
+                        Today's Races
                     </button>
                     <button
                         onClick={() => handleModeChange('history')}
