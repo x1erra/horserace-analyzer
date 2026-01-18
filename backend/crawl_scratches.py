@@ -155,10 +155,9 @@ def is_valid_cancellation(text):
     # 'turf' -> "Turf Racing Cancelled" (Usually means surface change, not race cancel)
     # 'superfecta', 'trifecta', etc are covered by 'wagering' usually, but 'Show Wagering' is the key one.
     
-    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing']
+    # 'superfecta', 'trifecta', 'exacta', 'daily double', 'pick' are also wagering terms.
     
-    
-    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing']
+    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing', 'superfecta', 'trifecta', 'exacta', 'daily double', 'pick']
     
     if any(k in text_lower for k in exclusion_keywords):
         return False
