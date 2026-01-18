@@ -4,6 +4,7 @@ import axios from 'axios';
 import RecentUploads from '../components/RecentUploads';
 import RaceCard from '../components/RaceCard';
 import { HiStar, HiOutlineStar } from 'react-icons/hi';
+import ErrorMessage from '../components/common/ErrorMessage';
 
 // Helper component for Countdown
 const Countdown = ({ targetIso, originalTime }) => {
@@ -200,7 +201,11 @@ export default function Dashboard() {
             setViewMode('results');
         } catch (err) {
             console.error("Error loading races:", err);
-            setError("Failed to load races.");
+            const errorMessage = err.response?.data?.error || err.message || "Failed to load races.";
+            setError({
+                message: errorMessage,
+                details: `Endpoint: ${err.config?.url} | Status: ${err.response?.status || 'Network Error'}`
+            });
         } finally {
             setLoading(false);
         }
@@ -307,6 +312,14 @@ export default function Dashboard() {
                     Load Races
                 </button>
             </div>
+
+            {error && (
+                <ErrorMessage
+                    message={error.message}
+                    details={error.details}
+                    onRetry={() => handleLoadRaces()}
+                />
+            )}
 
             {/* Content Area */}
             {metaLoading ? (

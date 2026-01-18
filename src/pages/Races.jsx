@@ -2,6 +2,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RaceCard from '../components/RaceCard';
+import ErrorMessage from '../components/common/ErrorMessage';
 
 export default function Races() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -164,7 +165,11 @@ export default function Races() {
 
         } catch (err) {
             console.error("Error fetching races:", err);
-            setError("Failed to load race data. Is the backend running?");
+            const errorMessage = err.response?.data?.error || err.message || "Failed to load race data.";
+            setError({
+                message: errorMessage,
+                details: `Endpoint: ${err.config?.url} | Status: ${err.response?.status || 'Network Error'}`
+            });
         } finally {
             setLoading(false);
         }
@@ -280,7 +285,13 @@ export default function Races() {
                 </button>
             </div>
 
-            {error && <div className="text-red-400 text-center p-4 bg-red-900/20 rounded-lg">{error}</div>}
+            {error && (
+                <ErrorMessage
+                    message={error.message}
+                    details={error.details}
+                    onRetry={handleSearch}
+                />
+            )}
 
             {/* Results */}
             {loading ? (
