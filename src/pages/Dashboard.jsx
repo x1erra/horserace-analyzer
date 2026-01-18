@@ -90,11 +90,11 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                 <div className="w-full bg-purple-900/20 h-1.5 rounded-full overflow-hidden border border-purple-900/30">
                     <div
                         className="bg-green-500 h-full"
-                        style={{ width: `${(track.completed / track.total) * 100}%` }}
+                        style={{ width: `${((track.completed + track.cancelled) / track.total) * 100}%` }}
                     ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 pt-1">
-                    <span>{track.completed} Completed</span>
+                    <span>{track.completed} Completed {track.cancelled > 0 && <span className="text-red-400 ml-1">({track.cancelled} Cancelled)</span>}</span>
                     <span>{track.upcoming} Upcoming</span>
                 </div>
             </div>
