@@ -187,7 +187,8 @@ export default function Changes() {
                     </div>
                 ) : (
                     <>
-                        <div className="overflow-x-auto">
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto">
                             <table className="w-full text-left text-gray-300">
                                 <thead className="bg-purple-900/30 border-b border-purple-900/50">
                                     <tr>
@@ -256,6 +257,67 @@ export default function Changes() {
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+
+                        {/* Mobile Card View */}
+                        <div className="md:hidden space-y-4 p-4">
+                            {changes.map((item) => (
+                                <div key={item.id} className="bg-purple-900/10 border border-purple-900/30 rounded-lg p-4 space-y-3">
+                                    {/* Header: Date, Track, Race */}
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-gray-400">
+                                            {item.race_date ? format(parseISO(item.race_date), 'MMM d') : '-'}
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-purple-900/30 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
+                                                {item.track_code}
+                                            </span>
+                                            <Link
+                                                to={`/race/${item.track_code}-${item.race_date?.replace(/-/g, '')}-${item.race_number}`}
+                                                state={{ from: 'changes' }}
+                                                className="text-purple-400 hover:text-purple-300 font-medium"
+                                            >
+                                                Race {item.race_number}
+                                            </Link>
+                                        </div>
+                                    </div>
+
+                                    {/* Horse Info */}
+                                    <div className="flex items-center gap-3">
+                                        {item.program_number && item.program_number !== '-' ? (
+                                            (() => {
+                                                const style = getPostColor(item.program_number);
+                                                return (
+                                                    <div
+                                                        className="w-10 h-10 rounded-md flex-shrink-0 flex items-center justify-center font-bold text-base shadow-sm leading-none"
+                                                        style={{ backgroundColor: style.bg, color: style.text }}
+                                                    >
+                                                        {item.program_number}
+                                                    </div>
+                                                );
+                                            })()
+                                        ) : (
+                                            <div className="w-10 h-10 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                                                -
+                                            </div>
+                                        )}
+                                        <span className="text-white font-lg font-bold">
+                                            {item.horse_name || 'Race-wide'}
+                                        </span>
+                                    </div>
+
+                                    {/* Change Details */}
+                                    <div className="flex items-start justify-between gap-4 pt-2 border-t border-purple-900/20">
+                                        <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
+                                            {getChangeIcon(item.change_type)}
+                                            {item.change_type}
+                                        </span>
+                                        <span className="text-gray-400 text-sm text-right flex-1 leading-tight">
+                                            {item.description || '-'}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
                         {/* Pagination Controls - Matching Results.jsx Style */}
