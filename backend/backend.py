@@ -956,43 +956,50 @@ def get_changes():
             pass
         
         # ---------------------------------------------------------------------
-        # INTELLIGENT DEDUPLICATION & NORMALIZATION
+        # BROAD NORMALIZATION & PRIORITY SELECTION
         # ---------------------------------------------------------------------
-        
-        # 1. Normalize all events into a unified structure
-        # Key: (track, date, race, identity_token, generic_type)
-        
-        normalized_map = {} # hash_key -> list of candidates
         
         def get_type_class(t):
             t = (t or "").lower()
-            if 'scratch' in t: return 'Scratch'
-            if 'jockey' in t: return 'Jockey'
-            if 'weight' in t: return 'Weight'
-            return 'Other'
+            if 'scratch' in t: return 'scratch'
+            if 'jockey' in t: return 'jockey'
+            if 'weight' in t: return 'weight'
+            if 'cancelled' in t: return 'cancelled'
+            return 'other'
 
-        for item in all_changes:
-            track = str(item.get('track_code') or "").upper()
-            r_date = str(item.get('race_date') or "")
-            r_num = str(item.get('race_number') or "")
+        def normalize_identity(item):
+            # Extract and clean PGM
+            pgm = str(item.get('program_number') or "").strip().upper().lstrip('0')
+            if pgm in ["-", "NONE", "NULL"]: pgm = ""
             
-            pgm = str(item.get('program_number') or "").strip().upper()
+            # Extract and clean Horse Name
             h_name = str(item.get('horse_name') or "").strip().lower()
-            
-            # Identity Token: PGM is king, Horse Name is fallback
-            identity = ""
-            if pgm and pgm != "-":
-                identity = f"PGM_{pgm}"
-            elif h_name and h_name not in ["", "race-wide", "unknown"]:
-                identity = h_name
-            else:
-                identity = "RACE_WIDE"
+            if h_name in ["", "race-wide", "unknown", "none", "null"]:
+                h_name = "RACE_WIDE"
                 
+            # Identity Anchor: PGM is king if it looks like a number/code, else Horse Name
+            if pgm:
+                return f"PGM_{pgm}"
+            return h_name
+
+        # Normalization Step
+        normalized_map = {} # (track, date, race, identity, type_class) -> [candidates]
+        
+        for item in all_changes:
+            track = str(item.get('track_code') or "").strip().upper()
+            r_date = str(item.get('race_date') or "").strip()[:10] # YYYY-MM-DD
+            r_num = str(item.get('race_number') or "").strip()
+            
+            identity = normalize_identity(item)
             t_class = get_type_class(item.get('change_type'))
             
-            # Grouping key for identical logical events
-            # (e.g. "Horse 5 Scratched" is one event, regardless of source)
-            event_key = f"{track}|{r_date}|{r_num}|{identity}|{t_class}"
+            # Grouping key for logical events
+            # For Race-wide messages, we include a slice of description to keep different ones separate
+            if identity == "RACE_WIDE":
+                desc_slug = (item.get('description') or "").strip()[:30].lower()
+                event_key = (track, r_date, r_num, identity, t_class, desc_slug)
+            else:
+                event_key = (track, r_date, r_num, identity, t_class)
             
             if event_key not in normalized_map:
                 normalized_map[event_key] = []
@@ -1003,84 +1010,54 @@ def get_changes():
         for event_key, candidates in normalized_map.items():
             if not candidates: continue
             
-            # If only one candidate, keep it
             if len(candidates) == 1:
                 final_list.append(candidates[0])
                 continue
                 
-            # If multiple, apply intelligence:
-            # A) Prefer Detailed over Generic:
-            #    Sort by description length and source priority
-            def score_candidate(c):
-                s = 0
-                desc = (c.get('description') or "").lower()
-                src = c.get('_source')
+            # Final Selection Strategy: LONGEST TEXT WINS
+            # This is the most creative and final solution to ensure 
+            # "Scratched - Vet" always hides "Scratched".
+            def final_ranking(c):
+                desc = (c.get('description') or "").strip()
                 
-                if src == 'changes': s += 100
-                if "reason unavailable" in desc: s -= 50
-                if desc == "scratched": s -= 80
+                # Length of the text description is the ultimate master
+                # but we still prefer 'changes' source as a sub-tie-breaker
+                src_score = 50 if c.get('_source') == 'changes' else 0
                 
-                s += len(desc) # Tie breaker: detail
-                return s
+                # Penalize "Reason Unavailable" specifically as it's filler
+                if "reason unavailable" in desc.lower():
+                    length_score = len(desc) - 20
+                else:
+                    length_score = len(desc)
+                    
+                return (length_score, src_score)
             
-            candidates.sort(key=score_candidate, reverse=True)
+            candidates.sort(key=final_ranking, reverse=True)
             
-            # B) String Subsumption Filtering:
-            #    If Candidate B's description exists entirely inside Candidate A's,
-            #    and Candidate A is ranked higher (or equal), discard Candidate B.
-            
-            best_candidates = []
-            seen_descriptions = []
-            
-            for cand in candidates:
-                curr_desc = (cand.get('description') or "").lower().strip()
-                
-                # Check if this description is just a subset of something we already accepted
-                is_subset = False
-                for accepted_desc in seen_descriptions:
-                    if curr_desc in accepted_desc:
-                        is_subset = True
-                        break
-                
-                if not is_subset:
-                    # Also check reverse: if previously accepted one is subset of THIS one
-                    # (Shouldn't happen often due to sorting, but let's be safe)
-                    best_candidates.append(cand)
-                    seen_descriptions.append(curr_desc)
-            
-            # Usually we only want ONE entry per event type (one scratch entry per horse)
-            # but if they are fundamentally different (e.g. Scratched vs Jockey Change),
-            # they were already separated by event_key (t_class).
-            # We take the top 1 after subsumption.
-            if best_candidates:
-                final_list.append(best_candidates[0])
+            # Select the absolute winner (highest informational content)
+            final_list.append(candidates[0])
 
         # --- FINAL SORTING ---
-
-        
-        # --- Sort combined results ---
         if view_mode == 'upcoming':
-            # Upcoming: soonest first
             final_list.sort(key=lambda x: (
-                x.get('race_date') or '',
-                x.get('track_code') or '',
-                x.get('race_number') or 0,
-                x.get('horse_name') or ''
+                str(x.get('race_date') or ''),
+                str(x.get('track_code') or ''),
+                int(str(x.get('race_number') or 0)),
+                normalize_identity(x)
             ))
         else:
-            # History: most recent first
             final_list.sort(key=lambda x: (
-                x.get('race_date') or '',
-                x.get('track_code') or '',
-                x.get('race_number') or 0,
-                x.get('horse_name') or ''
+                str(x.get('race_date') or ''),
+                str(x.get('track_code') or ''),
+                int(str(x.get('race_number') or 0)),
+                normalize_identity(x)
             ), reverse=True)
         
         # --- Pagination ---
         total_count = len(final_list)
-        paginated_changes = final_list[start:end+1]
+        # Fix: end is start + limit, so [start:end] gives exactly 'limit' results.
+        paginated_changes = final_list[start:end]
         
-        # Remove internal _source field
         for c in paginated_changes:
             c.pop('_source', None)
             
@@ -1093,6 +1070,7 @@ def get_changes():
         })
 
     except Exception as e:
+        import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
