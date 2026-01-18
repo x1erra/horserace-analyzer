@@ -70,10 +70,15 @@ def trigger_crawl_changes():
     """
     try:
         from crawl_scratches import crawl_late_changes
-        count = crawl_late_changes()
+        
+        reset_param = request.args.get('reset') or request.json.get('reset')
+        should_reset = str(reset_param).lower() == 'true'
+        
+        count = crawl_late_changes(reset_first=should_reset)
+        
         return jsonify({
             'success': True,
-            'message': f'Crawled changes successfully',
+            'message': f'Crawled changes successfully (Reset={should_reset})',
             'changes_processed': count
         })
     except Exception as e:

@@ -579,8 +579,35 @@ def crawl_otb_changes():
             main_table = t
             break
             
-    if not main_table: return 0
+    today = date.today() # Target date
+    
+    # 1. Validate Date
+    if 'Race Date:' not in main_table.get_text():
+        logger.warning("OTB: Could not find Race Date header.")
+        return 0
         
+    # Extract date text "Race Date: 01/18/2026"
+    date_valid = False
+    try:
+        import re
+        txt = main_table.get_text()
+        m = re.search(r'Race Date:\s*(\d{1,2}/\d{1,2}/\d{4})', txt)
+        if m:
+            page_date_str = m.group(1)
+            # Parse MM/DD/YYYY
+            page_date = datetime.strptime(page_date_str, '%m/%d/%Y').date()
+            if page_date == today:
+                date_valid = True
+            else:
+                logger.warning(f"OTB: Stale date found. Page: {page_date}, Expected: {today}. SKIPPING OTB.")
+                return 0
+    except Exception as e:
+        logger.warning(f"OTB: Date validation error: {e}")
+        return 0
+        
+    if not date_valid:
+        return 0
+
     rows = main_table.find_all('tr')
     
     current_track = None
@@ -622,6 +649,9 @@ def crawl_otb_changes():
             last_horse = horse_name
             
         elif len(cols) == 3 and not '#' in cols[0].get_text():
+             # Strict check: preventing spillover if this row lacks structure
+             # Only assume spillover if last_horse is set AND this row looks like a continuation
+             # But OTB format for "Reason" alone usually implies it belongs to above.
              desc_cell = cols[1]
              pgm = last_pgm
              horse_name = last_horse
@@ -652,14 +682,25 @@ def crawl_otb_changes():
     return total_saved
 
 
-def crawl_late_changes():
+def crawl_late_changes(reset_first=False):
     """
     Main entry point for crawling changes.
     """
-    logger.info("Starting Crawl: Equibase Late Changes")
+    logger.info(f"Starting Crawl: Equibase Late Changes (Reset={reset_first})")
     
     total_changes_processed = 0
     today = date.today()
+    
+    # Reset Logic
+    if reset_first:
+        # We need a list of active tracks to reset.
+        # We'll use the same active track discovery logic.
+        pass # Will be handled inside the discovery loop or separate query?
+        # Actually better to do it per track as we find them valid?
+        # No, reset implies "I want a clean slate". 
+        # But we only know *active* tracks for today from DB races.
+        # So we query active tracks first.
+
     
     # 0. CHECK RSS FEEDS (Primary method now due to Equibase blocking)
     logger.info("Checking RSS feeds for active tracks...")
@@ -683,6 +724,11 @@ def crawl_late_changes():
                     active_tracks.add(parts[0])
         
         logger.info(f"Active tracks to scan: {list(active_tracks)}")
+        
+        # EXECUTE RESET if requested
+        if reset_first:
+            for trk in active_tracks:
+                reset_scratches_for_date(trk, today)
         
         for trk in active_tracks:
             cnt = process_rss_for_track(trk)
@@ -726,6 +772,51 @@ def crawl_late_changes():
         logger.error(f"OTB Crawl failed: {e}")
         
     return total_changes_processed
+
+def reset_scratches_for_date(track_code, race_date):
+    """
+    Hard reset scratches for a track/date. 
+    Used when we suspect 'ghost scratches' from bad crawl data.
+    """
+    logger.info(f"RESETTING SCRATCHES for {track_code} on {race_date}")
+    supabase = get_supabase_client()
+    
+    try:
+        race_date_str = race_date.strftime('%Y-%m-%d')
+        
+        # 1. Get relevant race IDs
+        races = supabase.table('hranalyzer_races')\
+            .select('id')\
+            .eq('track_code', track_code)\
+            .eq('race_date', race_date_str)\
+            .execute()
+            
+        race_ids = [r['id'] for r in races.data]
+        if not race_ids:
+            logger.warning("No races found to reset.")
+            return
+            
+        # 2. Un-scratch ALL entries in these races
+        supabase.table('hranalyzer_race_entries')\
+            .update({'scratched': False})\
+            .in_('race_id', race_ids)\
+            .execute()
+            
+        # 3. Delete detailed 'Scratch' changes from hranalyzer_changes
+        # keeping 'Jockey Change' etc. might be desired, but if the source was bad, maybe not?
+        # Safe approach: Delete ONLY 'Scratch' type changes created automatically.
+        # But 'description' is consistent.
+        
+        supabase.table('hranalyzer_changes')\
+            .delete()\
+            .in_('race_id', race_ids)\
+            .eq('change_type', 'Scratch')\
+            .execute()
+            
+        logger.info(f"Successfully reset scratches for {len(race_ids)} races.")
+        
+    except Exception as e:
+        logger.error(f"Failed to reset scratches: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
