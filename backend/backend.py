@@ -888,7 +888,7 @@ def get_changes():
                 'id': item['id'], # Use entry ID for these
                 'race_id': race.get('id'),
                 'track_code': race.get('track_code'),
-                'race_date': race.get('race_date'),
+                'race_date': str(race.get('race_date')),
                 'race_number': race.get('race_number'),
                 'program_number': item.get('program_number'),
                 'horse_name': horse.get('horse_name'),
@@ -901,56 +901,50 @@ def get_changes():
             all_changes.append(change)
             
         # --- SOURCE 2: New Changes from hranalyzer_changes table ---
-        changes_query = supabase.table('hranalyzer_changes')\
-            .select('''
-                id,
-                change_type,
-                description,
-                change_time,
-                entry:hranalyzer_race_entries(
-                    program_number,
-                    horse:hranalyzer_horses(horse_name)
-                ),
-                race:hranalyzer_races!inner(
+        try:
+            changes_query = supabase.table('hranalyzer_changes')\
+                .select('''
                     id,
-                    track_code, 
-                    race_date, 
-                    race_number,
-                    post_time
-                )
-            ''')
-            
-        if view_mode == 'upcoming':
-            changes_query = changes_query.gte('race.race_date', today)
-        else:
-            changes_query = changes_query.lt('race.race_date', today)
+                    change_type,
+                    description,
+                    change_time,
+                    entry:hranalyzer_race_entries(
+                        program_number,
+                        horse:hranalyzer_horses(horse_name)
+                    ),
+                    race:hranalyzer_races!inner(
+                        id,
+                        track_code, 
+                        race_date, 
+                        race_number,
+                        post_time
+                    )
+                ''')
+                
+            if view_mode == 'upcoming':
+                changes_query = changes_query.gte('race.race_date', today)
+            else:
+                changes_query = changes_query.lt('race.race_date', today)
 
-        # Apply Track Filter
-        if track_filter != 'All':
-            changes_query = changes_query.eq('race.track_code', track_filter)
+            # Apply Track Filter
+            if track_filter != 'All':
+                changes_query = changes_query.eq('race.track_code', track_filter)
 
-        changes_response = changes_query.execute()
-
+            changes_response = changes_query.execute()
             
             for item in changes_response.data or []:
                 race = item.get('race') or {}
-                track = race.get('track') or {}
                 entry = item.get('entry') or {}
                 horse = entry.get('horse') or {}
-                trainer = entry.get('trainer') or {}
-                
-                formatted_time = race.get('post_time', 'N/A')
                 
                 all_changes.append({
                     'id': item['id'],
-                    'race_date': race.get('race_date'),
+                    'race_date': str(race.get('race_date')),
                     'track_code': race.get('track_code'),
-                    'track_name': track.get('track_name', race.get('track_code')),
                     'race_number': race.get('race_number'),
-                    'post_time': formatted_time,
+                    'post_time': race.get('post_time', 'N/A'),
                     'program_number': entry.get('program_number', '-'),
                     'horse_name': horse.get('horse_name', 'Race-wide'),
-                    'trainer_name': trainer.get('trainer_name', '-'),
                     'change_type': item['change_type'],
                     'description': item['description'],
                     'change_time': item['change_time'],
@@ -958,6 +952,7 @@ def get_changes():
                 })
         except Exception as e:
             # hranalyzer_changes table might not exist yet, that's OK
+            print(f"DEBUG: Error fetching hranalyzer_changes: {e}")
             pass
         
         # --- DEDUPLICATION LOGIC ---
@@ -989,21 +984,22 @@ def get_changes():
             # C) Length as tie breaker for detail (more words usually means more info)
             score += len(desc) / 50
             
-            # Newness as final tie breaker
-            # We don't have update time for all easily here without parsing Iso, so we rely on sort stability or logic below
             return score
 
-        # Map: "track-race-horse_name" -> [entries]
-        # or "track-race-pgm" if available
         grouped = {}
-        
         non_deduped = []
         
+        for item in all_changes:
             # Extract and Normalize names for better grouping
             h_name = item.get('horse_name') or ""
             pgm = item.get('program_number') or ""
             clean_h_name = h_name.strip().lower()
             clean_pgm = pgm.strip().upper()
+            
+            # Construct unique race identifier for the key
+            # Ensure race_date is strictly stringified for comparison
+            r_date_str = str(item.get('race_date') or "")
+            r_key = f"{item.get('track_code')}-{r_date_str}-{item.get('race_number')}"
             
             is_generic = (not clean_h_name or clean_h_name in ["race-wide", "unknown"]) and clean_pgm in ["-", ""]
             

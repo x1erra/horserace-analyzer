@@ -82,9 +82,9 @@ export default function Changes() {
 
     // Fetch changes
     useEffect(() => {
-        const fetchChanges = async () => {
+        const fetchChanges = async (isBackground = false) => {
             try {
-                setLoading(true);
+                if (!isBackground) setLoading(true);
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
                 const response = await axios.get(`${baseUrl}/api/changes`, {
@@ -110,8 +110,8 @@ export default function Changes() {
 
         fetchChanges();
 
-        // Refresh every minute
-        const interval = setInterval(fetchChanges, 60000);
+        // Refresh every minute - silent background refresh
+        const interval = setInterval(() => fetchChanges(true), 60000);
         return () => clearInterval(interval);
 
     }, [viewMode, selectedTrack, currentPage, itemsPerPage]);
