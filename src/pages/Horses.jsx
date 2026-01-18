@@ -107,7 +107,7 @@ export default function Horses() {
                         {horses.map((horse, index) => (
                             <div
                                 key={horse.id}
-                                className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn"
+                                className="bg-black rounded-xl shadow-md p-6 hover:shadow-xl transition border border-purple-900/50 opacity-0 animate-fadeIn flex flex-col h-full"
                                 style={{ animationDelay: `${index * 30}ms` }}
                             >
                                 <h4 className="text-xl font-bold text-white mb-2">{horse.name}</h4>
@@ -155,7 +155,7 @@ export default function Horses() {
 
                                 <Link
                                     to={`/horse/${horse.id}`}
-                                    className="w-full block bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white py-2 rounded-md transition text-center shadow-[0_0_10px_rgba(147,51,234,0.1)]"
+                                    className="mt-auto w-full block bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-purple-300 hover:text-white py-2 rounded-md transition text-center shadow-[0_0_10px_rgba(147,51,234,0.1)]"
                                 >
                                     View Profile
                                 </Link>
@@ -250,7 +250,8 @@ export default function Horses() {
                         </div>
                     )}
                 </>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }
