@@ -138,6 +138,30 @@ def determine_change_type(description):
     
     return 'Other'
 
+def is_valid_cancellation(text):
+    """
+    Centralized validation for race cancellations.
+    Returns True if this is a legitimate race cancellation, False if it's wagering or other noise.
+    """
+    if not text: return False
+    text_lower = text.lower()
+    
+    if 'cancel' not in text_lower:
+        return False
+        
+    # EXCLUSION LIST
+    # 'wagering' -> "Show Wagering Cancelled"
+    # 'simulcast' -> "Simulcast Cancelled" (usually barely matters, but let's be safe)
+    # 'turf' -> "Turf Racing Cancelled" (Usually means surface change, not race cancel)
+    # 'superfecta', 'trifecta', etc are covered by 'wagering' usually, but 'Show Wagering' is the key one.
+    
+    exclusion_keywords = ['wagering', 'simulcast', 'pool', 'turf racing']
+    
+    if any(k in text_lower for k in exclusion_keywords):
+        return False
+        
+    return True
+
 def parse_track_changes(html, track_code):
     """
     Parse the changes table for a specific track.
@@ -188,10 +212,11 @@ def parse_track_changes(html, track_code):
             txt = ""
             for c in cols:
                 c_txt = c.get_text(strip=True)
-                if 'cancel' in c_txt.lower():
+                if is_valid_cancellation(c_txt):
                     is_cancel = True
                     txt = c_txt
                     break
+        
             
             if is_cancel:
                 changes.append({
@@ -216,7 +241,7 @@ def parse_track_changes(html, track_code):
             change_cell = row.find('td', class_='changes')
             if change_cell:
                 txt = change_cell.get_text(strip=True)
-                if 'cancel' in txt.lower():
+                if is_valid_cancellation(txt):
                      changes.append({
                         'race_number': current_race,
                         'program_number': None,
@@ -268,7 +293,7 @@ def parse_track_changes(html, track_code):
     all_headers = target_table.find_all('th', class_='race')
     for h in all_headers:
         txt = h.get_text(strip=True)
-        if 'cancel' in txt.lower():
+        if is_valid_cancellation(txt):
             # Extract race number
             m = re.search(r'Race:?\s*(\d+)', txt, re.IGNORECASE)
             if m:
@@ -329,13 +354,27 @@ def parse_rss_changes(xml_content, track_code):
             
             m_cancel = re.search(r'Race\s*(\d+):.*?Race Cancelled.*?- (.*)', line, re.IGNORECASE | re.DOTALL)
             if m_cancel:
-                changes.append({
-                    'race_number': int(m_cancel.group(1)),
-                    'program_number': None,
-                    'horse_name': "",
-                    'change_type': 'Race Cancelled',
-                    'description': m_cancel.group(2).strip()
-                })
+                desc = m_cancel.group(2).strip()
+                # Double check with validator just in case regex was too greedy
+                if is_valid_cancellation(line) or is_valid_cancellation(desc):
+                   changes.append({
+                       'race_number': int(m_cancel.group(1)),
+                       'program_number': None,
+                       'horse_name': "",
+                       'change_type': 'Race Cancelled',
+                       'description': desc
+                   })
+                else:
+                    # It matched regex but failed validation? 
+                    # Maybe "Race 1: Race Cancelled - Show Wagering Cancelled" ??
+                    # Log it as Other just in case
+                     changes.append({
+                       'race_number': int(m_cancel.group(1)),
+                       'program_number': None,
+                       'horse_name': "",
+                       'change_type': 'Wagering' if 'wagering' in desc.lower() else 'Other',
+                       'description': desc
+                   })
                 continue
                 
             # 2. Scratch
@@ -382,11 +421,13 @@ def parse_rss_changes(xml_content, track_code):
                 ctype = 'Weight Change'
             elif 'equipment' in remainder.lower():
                 ctype = 'Equipment Change'
-            elif 'cancel' in remainder.lower():
-                if 'wagering' in remainder.lower():
+            elif is_valid_cancellation(remainder):
+                ctype = 'Race Cancelled'
+            elif 'cancel' in remainder.lower(): # It has cancel but failed valid check -> Wagering/Other
+                 if 'wagering' in remainder.lower():
                     ctype = 'Wagering'
-                else:
-                    ctype = 'Race Cancelled'
+                 else:
+                    ctype = 'Other'
             
             desc = remainder
             
@@ -431,11 +472,13 @@ def update_changes_in_db(track_code, race_date, change_list):
             race_key = f"{track_code}-{race_date.strftime('%Y%m%d')}-{item['race_number']}"
             
             # Get Race
-            r_res = supabase.table('hranalyzer_races').select('id').eq('race_key', race_key).execute()
+            r_res = supabase.table('hranalyzer_races').select('id, race_status').eq('race_key', race_key).execute()
             if not r_res.data:
                 continue
                 
-            race_id = r_res.data[0]['id']
+            race_obj = r_res.data[0]
+            race_id = race_obj['id']
+            current_status = race_obj.get('race_status', 'open')
             
             # 2. Find Entry to mark
             entry_id = None
@@ -544,11 +587,15 @@ def update_changes_in_db(track_code, race_date, change_list):
                 logger.info(f"✂️ MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
                 scratches_marked += 1
             elif item['change_type'] == 'Race Cancelled':
-                supabase.table('hranalyzer_races')\
-                    .update({'race_status': 'cancelled'})\
-                    .eq('id', race_id)\
-                    .execute()
-                logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
+                # SAFEGUARD: Do not cancel if race is Completed
+                if current_status == 'completed':
+                    logger.warning(f"🛡️ PREVENTED CANCELLATION for Completed Race: {track_code} R{item['race_number']}")
+                else:
+                    supabase.table('hranalyzer_races')\
+                        .update({'race_status': 'cancelled'})\
+                        .eq('id', race_id)\
+                        .execute()
+                    logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
             
         except Exception as e:
             logger.error(f"Error processing change {item}: {e}")
