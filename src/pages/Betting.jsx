@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Wallet, RefreshCw, Plus, Trash2, TrendingUp, DollarSign, Percent, ChevronDown, ChevronUp } from 'lucide-react';
+import { getPostColor } from '../utils/saddleCloth';
 
 // Use environment variable for API URL (defaults to localhost if not set)
 const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -880,14 +881,38 @@ export default function Betting() {
                                         <td className="p-4">
                                             {ticket.selection ? (
                                                 <div className="flex flex-wrap gap-1">
-                                                    {ticket.selection.map((num, idx) => (
-                                                        <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700 text-white">
-                                                            #{Array.isArray(num) ? num.join(',') : num}
-                                                        </span>
-                                                    ))}
+                                                    {ticket.selection.map((num, idx) => {
+                                                        const pgm = Array.isArray(num) ? num[0] : num; // Simplify array handling if needed, or map properly
+                                                        // Actually, ticket.selection for Box/Key might be [ [1,2], [3], [4] ] or similar?
+                                                        // Let's look at how it was rendered before: 
+                                                        // #{Array.isArray(num) ? num.join(',') : num}
+
+                                                        // For now, let's just style individual numbers if they are simple, or keep the grey box for complex
+                                                        // BUT the user mostly cares about WIN bets which are single numbers.
+
+                                                        const displayVal = Array.isArray(num) ? num.join(',') : num;
+                                                        const style = !Array.isArray(num) ? getPostColor(num) : { bg: '#1f2937', text: '#fff' };
+
+                                                        return (
+                                                            <span key={`${idx}-${displayVal}`}
+                                                                className="text-xs px-1.5 py-0.5 rounded border border-gray-700 font-bold"
+                                                                style={{ backgroundColor: style.bg, color: style.text }}
+                                                            >
+                                                                #{displayVal}
+                                                            </span>
+                                                        );
+                                                    })}
                                                 </div>
                                             ) : (
-                                                <span className="text-purple-300 font-mono">#{ticket.horse_number} {ticket.horse_name}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
+                                                        style={{ ...getPostColor(ticket.horse_number) }}
+                                                    >
+                                                        {ticket.horse_number}
+                                                    </div>
+                                                    <span className="text-purple-300 font-mono text-sm">{ticket.horse_name}</span>
+                                                </div>
                                             )}
                                         </td>
                                         <td className="p-4 text-sm text-gray-300">{ticket.bet_type}</td>
@@ -963,14 +988,29 @@ export default function Betting() {
                                     <div className="text-xs text-gray-500 uppercase mb-1">Selection</div>
                                     {ticket.selection ? (
                                         <div className="flex flex-wrap gap-1">
-                                            {ticket.selection.map((num, idx) => (
-                                                <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700 text-white">
-                                                    #{Array.isArray(num) ? num.join(',') : num}
-                                                </span>
-                                            ))}
+                                            {ticket.selection.map((num, idx) => {
+                                                const displayVal = Array.isArray(num) ? num.join(',') : num;
+                                                const style = !Array.isArray(num) ? getPostColor(num) : { bg: '#1f2937', text: '#fff' };
+                                                return (
+                                                    <span key={`${idx}-${displayVal}`}
+                                                        className="text-xs px-1.5 py-0.5 rounded border border-gray-700 font-bold"
+                                                        style={{ backgroundColor: style.bg, color: style.text }}
+                                                    >
+                                                        #{displayVal}
+                                                    </span>
+                                                );
+                                            })}
                                         </div>
                                     ) : (
-                                        <span className="text-purple-300 font-mono text-sm">#{ticket.horse_number} {ticket.horse_name}</span>
+                                        <div className="flex items-center gap-2">
+                                            <div
+                                                className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
+                                                style={{ ...getPostColor(ticket.horse_number) }}
+                                            >
+                                                {ticket.horse_number}
+                                            </div>
+                                            <span className="text-purple-300 font-mono text-sm">{ticket.horse_name}</span>
+                                        </div>
                                     )}
                                 </div>
 
