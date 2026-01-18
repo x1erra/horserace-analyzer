@@ -8,7 +8,7 @@ import Horses from './pages/Horses.jsx';
 import HorseProfile from './pages/HorseProfile.jsx';
 import Predictions from './pages/Predictions.jsx';
 import Betting from './pages/Betting.jsx';
-import Results from './pages/Results.jsx'; // Added for Results page
+// import Results from './pages/Results.jsx'; // DISABLED - keeping code but not in use
 import Upload from './pages/Upload.jsx'; // Added for Upload page
 import Claims from './pages/Claims.jsx'; // Added for Claims page
 import Changes from './pages/Changes.jsx'; // Renamed from Scratches
@@ -39,7 +39,7 @@ function App() {
                   <Route path="/predictions" element={<Predictions />} />
                   <Route path="/betting" element={<Betting />} />
                   <Route path="/race/:id" element={<RaceDetails />} />
-                  <Route path="/results" element={<Results />} /> {/* New route */}
+                  {/* <Route path="/results" element={<Results />} /> */} {/* DISABLED - Results page not in use */}
                   <Route path="/claims" element={<Claims />} /> {/* New route */}
                   <Route path="/changes" element={<Changes />} /> {/* Renamed route */}
                   <Route path="/upload" element={<Upload />} /> {/* New route */}

@@ -86,7 +86,7 @@ export default function Horses() {
                     <p className="text-red-400">Error: {error}</p>
                     <button
                         onClick={fetchHorses}
-                        className="mt-4 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition"
+                        className="mt-4 px-4 py-2 bg-purple-900/40 text-purple-100 border border-purple-500/40 rounded hover:bg-purple-800/50 transition"
                     >
                         Retry
                     </button>
@@ -202,8 +202,8 @@ export default function Horses() {
                                                 key={pageNum}
                                                 onClick={() => setPage(pageNum)}
                                                 className={`w-10 py-2 rounded text-sm transition ${page === pageNum
-                                                        ? 'bg-purple-600 text-white'
-                                                        : 'bg-purple-900/30 text-purple-300 hover:bg-purple-900/50'
+                                                    ? 'bg-purple-900/50 text-purple-100 border border-purple-500/40'
+                                                    : 'bg-purple-900/30 text-purple-300 hover:bg-purple-900/50'
                                                     }`}
                                             >
                                                 {pageNum}

@@ -3,6 +3,35 @@ import axios from 'axios';
 import { Link } from 'react-router-dom';
 import TrackFilter from '../components/TrackFilter';
 
+const getPostColor = (number) => {
+    const num = parseInt(number);
+    if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
+
+    switch (num) {
+        case 1: return { bg: '#EF4444', text: '#FFFFFF' }; // Red
+        case 2: return { bg: '#FFFFFF', text: '#000000' }; // White
+        case 3: return { bg: '#3B82F6', text: '#FFFFFF' }; // Blue
+        case 4: return { bg: '#EAB308', text: '#000000' }; // Yellow
+        case 5: return { bg: '#22C55E', text: '#FFFFFF' }; // Green
+        case 6: return { bg: '#000000', text: '#FACC15' }; // Black with Yellow text
+        case 7: return { bg: '#F97316', text: '#000000' }; // Orange with Black text
+        case 8: return { bg: '#EC4899', text: '#000000' }; // Pink with Black text
+        case 9: return { bg: '#06B6D4', text: '#000000' }; // Turquoise with Black text
+        case 10: return { bg: '#A855F7', text: '#FFFFFF' }; // Purple
+        case 11: return { bg: '#9CA3AF', text: '#FFFFFF' }; // Grey
+        case 12: return { bg: '#84CC16', text: '#000000' }; // Lime with Black text
+        case 13: return { bg: '#78350F', text: '#FFFFFF' }; // Brown
+        case 14: return { bg: '#831843', text: '#FFFFFF' }; // Maroon
+        case 15: return { bg: '#C3B091', text: '#000000' }; // Khaki
+        case 16: return { bg: '#60A5FA', text: '#FFFFFF' }; // Copen Blue
+        case 17: return { bg: '#1E3A8A', text: '#FFFFFF' }; // Navy
+        case 18: return { bg: '#14532D', text: '#FFFFFF' }; // Forest Green
+        case 19: return { bg: '#0EA5E9', text: '#FFFFFF' }; // Moonstone
+        case 20: return { bg: '#D946EF', text: '#FFFFFF' }; // Fuschia
+        default: return { bg: '#374151', text: '#FFFFFF' };
+    }
+};
+
 export default function Claims() {
     const [claims, setClaims] = useState([]);
     const [filteredClaims, setFilteredClaims] = useState([]);
@@ -179,46 +208,46 @@ export default function Claims() {
             <div className="bg-black rounded-xl shadow-md overflow-hidden border border-purple-900/50">
                 {/* Desktop Table View */}
                 <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-purple-900/20 border-b border-purple-900/30 text-purple-300 text-sm uppercase">
+                    <table className="w-full text-left text-gray-300">
+                        <thead className="bg-purple-900/30 border-b border-purple-900/50">
+                            <tr>
                                 <th
-                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('race_date')}
                                 >
-                                    Date {sortConfig.key === 'race_date' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    Date {sortConfig.key === 'race_date' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
                                 <th
-                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('track_name')}
                                 >
-                                    Track {sortConfig.key === 'track_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    Track {sortConfig.key === 'track_name' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
                                 <th
-                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('race_number')}
                                 >
-                                    Race {sortConfig.key === 'race_number' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    Race {sortConfig.key === 'race_number' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
                                 <th
-                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('horse_name')}
                                 >
-                                    Horse {sortConfig.key === 'horse_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    Horse {sortConfig.key === 'horse_name' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
                                 <th
-                                    className="p-4 font-semibold cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('new_owner')}
                                 >
-                                    New Owner / Trainer {sortConfig.key === 'new_owner' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    New Owner / Trainer {sortConfig.key === 'new_owner' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
                                 <th
-                                    className="p-4 font-semibold text-right cursor-pointer hover:text-purple-400 transition select-none"
+                                    className="p-4 text-right cursor-pointer hover:bg-purple-900/50 transition select-none"
                                     onClick={() => handleSort('claim_price')}
                                 >
-                                    Price {sortConfig.key === 'claim_price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                    Price {sortConfig.key === 'claim_price' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
-                                <th className="p-4 font-semibold text-center">Action</th>
+                                <th className="p-4 text-center">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-purple-900/20">
@@ -236,34 +265,66 @@ export default function Claims() {
                                     </td>
                                 </tr>
                             ) : (
-                                currentItems.map((claim, index) => (
-                                    <tr
-                                        key={claim.id || index}
-                                        className="hover:bg-purple-900/10 transition text-gray-300"
-                                    >
-                                        <td className="p-4 whitespace-nowrap">{claim.race_date}</td>
-                                        <td className="p-4 whitespace-nowrap">{claim.track_name}</td>
-                                        <td className="p-4 whitespace-nowrap">Race {claim.race_number}</td>
-                                        <td className="p-4 font-medium text-white">{claim.horse_name}</td>
-                                        <td className="p-4">
-                                            <div className="text-sm">
-                                                <span className="text-gray-500">Owner:</span> {claim.new_owner || 'N/A'}<br />
-                                                <span className="text-gray-500">Trainer:</span> {claim.new_trainer || 'N/A'}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-right font-mono text-green-400">
-                                            {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
-                                        </td>
-                                        <td className="p-4 text-center">
-                                            <Link
-                                                to={`/race/${claim.race_key}`}
-                                                className="text-purple-400 hover:text-purple-300 text-sm font-medium"
-                                            >
-                                                View Race
-                                            </Link>
-                                        </td>
-                                    </tr>
-                                ))
+                                currentItems.map((claim, index) => {
+                                    const horseStyle = claim.program_number ? getPostColor(claim.program_number) : null;
+                                    return (
+                                        <tr
+                                            key={claim.id || index}
+                                            className="hover:bg-purple-900/10 transition group"
+                                        >
+                                            <td className="p-4 text-gray-300 font-medium whitespace-nowrap">{claim.race_date}</td>
+                                            <td className="p-4">
+                                                <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-purple-900/20 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
+                                                    {claim.track_code || claim.track_name}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 whitespace-nowrap">
+                                                <Link
+                                                    to={`/race/${claim.race_key}`}
+                                                    className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                                                >
+                                                    Race {claim.race_number}
+                                                </Link>
+                                            </td>
+                                            <td className="p-4">
+                                                <div className="flex items-center gap-3">
+                                                    {horseStyle ? (
+                                                        <div
+                                                            className="w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                            style={{ backgroundColor: horseStyle.bg, color: horseStyle.text }}
+                                                        >
+                                                            {claim.program_number}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="w-8 h-8 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                                                            -
+                                                        </div>
+                                                    )}
+                                                    <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
+                                                        {claim.horse_name}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-4">
+                                                <div className="text-sm">
+                                                    <span className="text-gray-500">Owner:</span> {claim.new_owner || 'N/A'}<br />
+                                                    <span className="text-gray-500">Trainer:</span> {claim.new_trainer || 'N/A'}
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-right font-mono text-green-400">
+                                                {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <Link
+                                                    to={`/race/${claim.race_key}`}
+                                                    className="text-purple-400 hover:text-purple-300 hover:underline text-sm font-medium"
+                                                >
+                                                    View Race
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>

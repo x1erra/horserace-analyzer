@@ -141,7 +141,7 @@ export default function Changes() {
                     <button
                         onClick={() => handleModeChange('upcoming')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition ${viewMode === 'upcoming'
-                            ? 'bg-purple-600 text-white shadow-lg'
+                            ? 'bg-purple-900/40 text-purple-100 border border-purple-500/40 shadow-sm'
                             : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
@@ -150,7 +150,7 @@ export default function Changes() {
                     <button
                         onClick={() => handleModeChange('history')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition ${viewMode === 'history'
-                            ? 'bg-purple-600 text-white shadow-lg'
+                            ? 'bg-purple-900/40 text-purple-100 border border-purple-500/40 shadow-sm'
                             : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
@@ -195,7 +195,7 @@ export default function Changes() {
                                         <th className="p-4">Track</th>
                                         <th className="p-4">Race</th>
                                         <th className="p-4">Horse</th>
-                                        <th className="p-4">Type</th>
+                                        <th className="p-4 text-center">Type</th>
                                         <th className="p-4">Details</th>
                                     </tr>
                                 </thead>
@@ -243,8 +243,8 @@ export default function Changes() {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="p-4">
-                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
+                                            <td className="p-4 text-center">
+                                                <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
                                                     {getChangeIcon(item.change_type)}
                                                     {item.change_type}
                                                 </span>

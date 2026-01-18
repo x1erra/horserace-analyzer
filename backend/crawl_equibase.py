@@ -35,9 +35,14 @@ COMMON_TRACKS = [
 def normalize_name(name: str) -> str:
     """
     Normalize name for more reliable mapping (strip non-alphanumeric, lowercase)
+    Also removes country codes/suffixes like (IRE), (GB), etc.
     """
     if not name:
         return ""
+    
+    # Remove parens and content inside them (e.g. "Horse Name (IRE)" -> "Horse Name")
+    name = re.sub(r'\s*\(.*?\)', '', name)
+    
     return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
 
 
@@ -1270,9 +1275,31 @@ def insert_exotic_payout(supabase, race_id: int, payout_data: Dict):
 def insert_claim(supabase, race_id: int, claim_data: Dict):
     """Insert claim data"""
     try:
+        horse_name = claim_data.get('horse_name')
+        
+        # Lookup program_number from race entries for this horse
+        program_number = None
+        try:
+            entries = supabase.table('hranalyzer_race_entries')\
+                .select('program_number, hranalyzer_horses(horse_name)')\
+                .eq('race_id', race_id)\
+                .execute()
+            
+            if entries.data:
+                norm_claim = normalize_name(horse_name)
+                for entry in entries.data:
+                    db_horse = entry.get('hranalyzer_horses') or {}
+                    db_name = db_horse.get('horse_name', '')
+                    if normalize_name(db_name) == norm_claim:
+                        program_number = entry.get('program_number')
+                        break
+        except Exception as e:
+            logger.debug(f"Could not lookup program_number for claim: {e}")
+        
         claim_insert = {
             'race_id': race_id,
-            'horse_name': claim_data.get('horse_name'),
+            'horse_name': horse_name,
+            'program_number': program_number,
             'new_trainer_name': claim_data.get('new_trainer'),
             'new_owner_name': claim_data.get('new_owner'),
             'claim_price': claim_data.get('claim_price')
@@ -1282,7 +1309,7 @@ def insert_claim(supabase, race_id: int, claim_data: Dict):
         # Unique constraint is (race_id, horse_name)
         supabase.table('hranalyzer_claims').upsert(claim_insert, on_conflict='race_id, horse_name').execute()
         
-        logger.info(f"Upserted claim for {claim_data.get('horse_name')} with price {claim_insert['claim_price']}")
+        logger.info(f"Upserted claim for {horse_name} (Pgm #{program_number}) with price {claim_insert['claim_price']}")
         
     except Exception as e:
         logger.error(f"Error inserting/updating claim: {e}")

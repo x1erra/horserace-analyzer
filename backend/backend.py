@@ -550,6 +550,7 @@ def get_past_races():
             # Filter for top 3 and format
             formatted_results = []
             winner_name = 'N/A'
+            winner_program_number = None
             
             for r in results_data:
                 pos = r.get('finish_position')
@@ -564,6 +565,7 @@ def get_past_races():
                     })
                     if pos == 1:
                         winner_name = horse_name
+                        winner_program_number = r.get('program_number')
             
             formatted_results.sort(key=lambda x: x['position'])
 
@@ -584,6 +586,7 @@ def get_past_races():
                 'data_source': race['data_source'],
                 'id': race['id'],
                 'winner': winner_name,
+                'winner_program_number': winner_program_number,
                 'results': formatted_results, # Top 3
                 'time': race.get('final_time') or 'N/A',
                 'link': race.get('equibase_chart_url') or 'N/A'
@@ -803,6 +806,7 @@ def get_claims():
                 'track_name': track_name,
                 'race_number': race['race_number'],
                 'horse_name': item['horse_name'],
+                'program_number': item.get('program_number'),
                 'new_trainer': item['new_trainer_name'],
                 'new_owner': item['new_owner_name'],
                 'claim_price': item['claim_price']
@@ -1058,6 +1062,9 @@ def get_changes():
             
             # Select the absolute winner (highest informational content)
             final_list.append(candidates[0])
+
+        # --- FILTER: Only horse-specific changes (exclude Race-wide) ---
+        final_list = [c for c in final_list if c.get('horse_name') not in (None, '', 'Race-wide', 'Race-Wide')]
 
         # --- FINAL SORTING ---
         if view_mode == 'upcoming':

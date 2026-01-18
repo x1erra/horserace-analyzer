@@ -59,19 +59,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         <HiOutlineFlag className="w-6 h-6" />
                         Races
                     </NavLink>
-                    <NavLink
-                        to="/results"
-                        onClick={onClose}
-                        className={({ isActive }) =>
-                            `flex items-center gap-3 p-3 rounded-lg transition-all ${isActive
-                                ? 'bg-purple-900/60 text-purple-100 border-l-4 border-purple-500 rounded-l-none shadow-[inset_0_0_10px_rgba(147,51,234,0.1)]'
-                                : 'text-gray-400 hover:text-white hover:bg-purple-900/30'
-                            }`
-                        }
-                    >
-                        <HiOutlineDocumentText className="w-6 h-6" />
-                        Results
-                    </NavLink>
+                    {/* Results NavLink removed - page disabled but code retained */}
                     <NavLink
                         to="/claims"
                         onClick={onClose}

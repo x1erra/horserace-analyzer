@@ -849,7 +849,7 @@ export default function Betting() {
                 {/* Desktop Table View */}
                 <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-left text-gray-300">
-                        <thead className="bg-purple-900/50">
+                        <thead className="bg-purple-900/30 border-b border-purple-900/50">
                             <tr>
                                 <th className="p-4">Date</th>
                                 <th className="p-4">Track/Race</th>
@@ -861,27 +861,27 @@ export default function Betting() {
                                 <th className="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody className="divide-y divide-purple-900/20">
                             {tickets.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" className="p-4 text-center text-gray-400">No tickets found.</td>
+                                    <td colSpan="8" className="p-8 text-center text-gray-500 italic">No tickets found.</td>
                                 </tr>
                             ) : (
                                 tickets.map((ticket, index) => (
-                                    <tr key={ticket.id || index} className="border-t border-purple-900/50 hover:bg-purple-900/20 transition duration-200">
-                                        <td className="p-4 text-sm text-gray-500">{new Date(ticket.created_at).toLocaleDateString()}</td>
+                                    <tr key={ticket.id || index} className="hover:bg-purple-900/10 transition duration-200 group">
+                                        <td className="p-4 text-gray-300 font-medium whitespace-nowrap">{new Date(ticket.created_at).toLocaleDateString()}</td>
                                         <td className="p-4">
                                             {ticket.hranalyzer_races ? (
-                                                <span className="font-medium text-white">
+                                                <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-purple-900/20 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
                                                     {ticket.hranalyzer_races.track_code} R{ticket.hranalyzer_races.race_number}
                                                 </span>
-                                            ) : 'Unknown'}
+                                            ) : <span className="text-gray-500">Unknown</span>}
                                         </td>
                                         <td className="p-4">
                                             {ticket.selection ? (
                                                 <div className="flex flex-wrap gap-1">
                                                     {ticket.selection.map((num, idx) => (
-                                                        <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700">
+                                                        <span key={`${idx}-${Array.isArray(num) ? num.join(',') : num}`} className="bg-gray-800 text-xs px-1.5 py-0.5 rounded border border-gray-700 text-white">
                                                             #{Array.isArray(num) ? num.join(',') : num}
                                                         </span>
                                                     ))}
@@ -890,12 +890,13 @@ export default function Betting() {
                                                 <span className="text-purple-300 font-mono">#{ticket.horse_number} {ticket.horse_name}</span>
                                             )}
                                         </td>
-                                        <td className="p-4 text-sm">{ticket.bet_type}</td>
-                                        <td className="p-4 text-sm">${ticket.bet_cost || ticket.bet_amount}</td>
+                                        <td className="p-4 text-sm text-gray-300">{ticket.bet_type}</td>
+                                        <td className="p-4 text-sm text-gray-300">${ticket.bet_cost || ticket.bet_amount}</td>
                                         <td className="p-4">
                                             <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
                                                 ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
-                                                    'bg-yellow-900 text-yellow-200'
+                                                    ticket.status === 'Returned' ? 'bg-orange-900 text-orange-200' :
+                                                        'bg-yellow-900 text-yellow-200'
                                                 }`}>
                                                 {ticket.status}
                                             </span>
