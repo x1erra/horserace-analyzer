@@ -955,125 +955,107 @@ def get_changes():
             print(f"DEBUG: Error fetching hranalyzer_changes: {e}")
             pass
         
-        # --- DEDUPLICATION LOGIC ---
-        # Group by horse/entry and select the best one
+        # ---------------------------------------------------------------------
+        # INTELLIGENT DEDUPLICATION & NORMALIZATION
+        # ---------------------------------------------------------------------
         
-        # Helper to score quality of an entry
-        def get_entry_score(e):
-            score = 0
-            desc = (e.get('description') or "").lower()
-            src = e.get('_source')
-            ctype = (e.get('change_type') or "").lower()
-            
-            # Prefer changes table (more detail) unless empty
-            if src == 'changes': score += 10
-            
-            # Prefer explicit types
-            if 'scratch' in ctype: score += 5
-            elif 'jockey' in ctype: score += 5
-            
-            # Prefer specific reasons over generic ones
-            # A) Generic "Scratched" is lowest priority
-            if desc == "scratched":
-                score -= 20
-            
-            # B) "Reason Unavailable" is low priority
-            if "reason unavailable" in desc:
-                score -= 10
-            
-            # C) Length as tie breaker for detail (more words usually means more info)
-            score += len(desc) / 50
-            
-            return score
+        # 1. Normalize all events into a unified structure
+        # Key: (track, date, race, identity_token, generic_type)
+        
+        normalized_map = {} # hash_key -> list of candidates
+        
+        def get_type_class(t):
+            t = (t or "").lower()
+            if 'scratch' in t: return 'Scratch'
+            if 'jockey' in t: return 'Jockey'
+            if 'weight' in t: return 'Weight'
+            return 'Other'
 
-        grouped = {}
-        non_deduped = []
-        
         for item in all_changes:
-            # Extract and Normalize names for better grouping
-            h_name = item.get('horse_name') or ""
-            pgm = item.get('program_number') or ""
-            clean_h_name = h_name.strip().lower()
-            clean_pgm = pgm.strip().upper()
+            track = str(item.get('track_code') or "").upper()
+            r_date = str(item.get('race_date') or "")
+            r_num = str(item.get('race_number') or "")
             
-            # Construct unique race identifier for the key
-            # Ensure race_date is strictly stringified for comparison
-            r_date_str = str(item.get('race_date') or "")
-            r_key = f"{item.get('track_code')}-{r_date_str}-{item.get('race_number')}"
+            pgm = str(item.get('program_number') or "").strip().upper()
+            h_name = str(item.get('horse_name') or "").strip().lower()
             
-            is_generic = (not clean_h_name or clean_h_name in ["race-wide", "unknown"]) and clean_pgm in ["-", ""]
-            
-            if is_generic:
-                non_deduped.append(item)
-                continue
-                
-            # Entity Key: Use PGM if available as it is more stable, but Horse Name is good fallback
-            e_key = None
-            if clean_pgm and clean_pgm != "-":
-                e_key = f"PGM_{clean_pgm}"
-            elif clean_h_name:
-                e_key = clean_h_name
+            # Identity Token: PGM is king, Horse Name is fallback
+            identity = ""
+            if pgm and pgm != "-":
+                identity = f"PGM_{pgm}"
+            elif h_name and h_name not in ["", "race-wide", "unknown"]:
+                identity = h_name
             else:
-                non_deduped.append(item)
-                continue
+                identity = "RACE_WIDE"
                 
-            full_key = f"{r_key}|{e_key}"
+            t_class = get_type_class(item.get('change_type'))
             
-            if full_key not in grouped: grouped[full_key] = []
-            grouped[full_key].append(item)
+            # Grouping key for identical logical events
+            # (e.g. "Horse 5 Scratched" is one event, regardless of source)
+            event_key = f"{track}|{r_date}|{r_num}|{identity}|{t_class}"
             
-        # Process groups
+            if event_key not in normalized_map:
+                normalized_map[event_key] = []
+            normalized_map[event_key].append(item)
+
         final_list = []
         
-        # Add back non-deduped (race-wide)
-        # Optional: dedup identical race-wide messages (e.g. Cancelled - Weather appearing twice)
-        seen_generics = set()
-        for x in non_deduped:
-            # distinctive sig: track-race-desc
-            sig = f"{x['track_code']}-{x['race_number']}-{x['description']}-{x['change_type']}"
-            if sig not in seen_generics:
-                final_list.append(x)
-                seen_generics.add(sig)
-        
-        for key, group in grouped.items():
-            if len(group) == 1:
-                final_list.append(group[0])
-            else:
-                # Select best
-                # Sort by Score (Desc), then Time (Desc)
-                # For Time, we need to handle None
-                group.sort(key=lambda x: (
-                    get_entry_score(x),
-                    x.get('change_time') or x.get('race_date') or ''
-                ), reverse=True)
+        for event_key, candidates in normalized_map.items():
+            if not candidates: continue
+            
+            # If only one candidate, keep it
+            if len(candidates) == 1:
+                final_list.append(candidates[0])
+                continue
                 
-                best = group[0]
+            # If multiple, apply intelligence:
+            # A) Prefer Detailed over Generic:
+            #    Sort by description length and source priority
+            def score_candidate(c):
+                s = 0
+                desc = (c.get('description') or "").lower()
+                src = c.get('_source')
                 
-                # Merge logic? Currently just selecting best is usually enough for "Scratched" vs "Scratched - Vet"
-                # If we have multiple DISTINCT types (e.g. Jockey Change AND Weight Change for same horse), we should keep BOTH.
+                if src == 'changes': s += 100
+                if "reason unavailable" in desc: s -= 50
+                if desc == "scratched": s -= 80
                 
-                # Sub-group by Change Type Classification
-                # Types: Scratch, Jockey, Weight, Other
-                # We only want to dedup "Scratch" vs "Scratch". A "Jockey Change" should show up alongside a "Scratch" (rare but possible).
+                s += len(desc) # Tie breaker: detail
+                return s
+            
+            candidates.sort(key=score_candidate, reverse=True)
+            
+            # B) String Subsumption Filtering:
+            #    If Candidate B's description exists entirely inside Candidate A's,
+            #    and Candidate A is ranked higher (or equal), discard Candidate B.
+            
+            best_candidates = []
+            seen_descriptions = []
+            
+            for cand in candidates:
+                curr_desc = (cand.get('description') or "").lower().strip()
                 
-                sub_grouped = {}
-                for g in group:
-                    ctype = g['change_type']
-                    # Normalize types
-                    if 'Scratch' in ctype: ctype = 'Scratch'
-                    elif 'Jockey' in ctype: ctype = 'Jockey'
-                    elif 'Weight' in ctype: ctype = 'Weight'
-                    
-                    if ctype not in sub_grouped: sub_grouped[ctype] = []
-                    sub_grouped[ctype].append(g)
-                    
-                for sub_type, candidates in sub_grouped.items():
-                    # Now pick best of this sub-type
-                    candidates.sort(key=lambda x: (
-                        get_entry_score(x),
-                        x.get('change_time') or ''
-                    ), reverse=True)
-                    final_list.append(candidates[0])
+                # Check if this description is just a subset of something we already accepted
+                is_subset = False
+                for accepted_desc in seen_descriptions:
+                    if curr_desc in accepted_desc:
+                        is_subset = True
+                        break
+                
+                if not is_subset:
+                    # Also check reverse: if previously accepted one is subset of THIS one
+                    # (Shouldn't happen often due to sorting, but let's be safe)
+                    best_candidates.append(cand)
+                    seen_descriptions.append(curr_desc)
+            
+            # Usually we only want ONE entry per event type (one scratch entry per horse)
+            # but if they are fundamentally different (e.g. Scratched vs Jockey Change),
+            # they were already separated by event_key (t_class).
+            # We take the top 1 after subsumption.
+            if best_candidates:
+                final_list.append(best_candidates[0])
+
+        # --- FINAL SORTING ---
 
         
         # --- Sort combined results ---
