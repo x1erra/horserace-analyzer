@@ -995,9 +995,14 @@ def get_changes():
         # BROAD NORMALIZATION & PRIORITY SELECTION
         # ---------------------------------------------------------------------
         
-        def get_type_class(t):
-            t = (t or "").lower()
-            if 'scratch' in t: return 'scratch'
+        def get_type_class(item):
+            t = (item.get('change_type') or "").lower()
+            desc = (item.get('description') or "").lower()
+            
+            # Helper: Is this effectively a scratch?
+            is_scratch_related = 'scratch' in t or ('scratch' in desc and 'reason' in desc)
+            
+            if is_scratch_related: return 'scratch'
             if 'jockey' in t: return 'jockey'
             if 'weight' in t: return 'weight'
             if 'cancelled' in t: return 'cancelled'
@@ -1027,7 +1032,7 @@ def get_changes():
             r_num = str(item.get('race_number') or "").strip()
             
             identity = normalize_identity(item)
-            t_class = get_type_class(item.get('change_type'))
+            t_class = get_type_class(item)
             
             # Grouping key for logical events
             # For Race-wide messages, we include a slice of description to keep different ones separate
@@ -1047,31 +1052,34 @@ def get_changes():
             if not candidates: continue
             
             if len(candidates) == 1:
-                final_list.append(candidates[0])
+                # If single candidate is effectively a scratch but labeled "Other", fix it for UI
+                c = candidates[0]
+                if get_type_class(c) == 'scratch' and c.get('change_type') == 'Other':
+                     c['change_type'] = 'Scratch'
+                final_list.append(c)
                 continue
                 
-            # Final Selection Strategy: LONGEST TEXT WINS
-            # This is the most creative and final solution to ensure 
-            # "Scratched - Vet" always hides "Scratched".
+            # Final Selection Strategy: LATEST TIME WINS
+            # User wants the most recently created entry to be the source of truth.
             def final_ranking(c):
-                desc = (c.get('description') or "").strip()
-                
-                # Length of the text description is the ultimate master
-                # but we still prefer 'changes' source as a sub-tie-breaker
-                src_score = 50 if c.get('_source') == 'changes' else 0
-                
-                # Penalize "Reason Unavailable" specifically as it's filler
-                if "reason unavailable" in desc.lower():
-                    length_score = len(desc) - 20
-                else:
-                    length_score = len(desc)
-                    
-                return (length_score, src_score)
+                # Parse timestamp
+                ts = c.get('change_time')
+                if not ts:
+                    return "" # Low priority
+                return str(ts)
             
+            # Sort by time descending (latest first)
             candidates.sort(key=final_ranking, reverse=True)
             
-            # Select the absolute winner (highest informational content)
-            final_list.append(candidates[0])
+            # Select the winner (latest)
+            winner = candidates[0]
+            
+            # If the winner is a scratch-related update (e.g. "Other" reason change),
+            # ensure it displays as a standardized "Scratch" alert in the UI.
+            if get_type_class(winner) == 'scratch' and winner.get('change_type') == 'Other':
+                winner['change_type'] = 'Scratch'
+                
+            final_list.append(winner)
 
         # --- FILTER: Only horse-specific changes (exclude Race-wide) ---
         final_list = [c for c in final_list if c.get('horse_name') not in (None, '', 'Race-wide', 'Race-Wide')]
