@@ -977,12 +977,17 @@ def get_changes():
             if 'scratch' in ctype: score += 5
             elif 'jockey' in ctype: score += 5
             
-            # Prefer specific reasons over "unavailable"
-            if "reason unavailable" in desc: score -= 5
-            if "scratched" == desc: score -= 5 # Generic default
+            # Prefer specific reasons over generic ones
+            # A) Generic "Scratched" is lowest priority
+            if desc == "scratched":
+                score -= 20
             
-            # Length as tie breaker for detail
-            score += len(desc) / 100
+            # B) "Reason Unavailable" is low priority
+            if "reason unavailable" in desc:
+                score -= 10
+            
+            # C) Length as tie breaker for detail (more words usually means more info)
+            score += len(desc) / 50
             
             # Newness as final tie breaker
             # We don't have update time for all easily here without parsing Iso, so we rely on sort stability or logic below
@@ -994,33 +999,25 @@ def get_changes():
         
         non_deduped = []
         
-        for item in all_changes:
-            # If it's a Race-wide change (no horse), keep it (maybe dedup identicals later)
-            h_name = item.get('horse_name')
-            pgm = item.get('program_number')
+            # Extract and Normalize names for better grouping
+            h_name = item.get('horse_name') or ""
+            pgm = item.get('program_number') or ""
+            clean_h_name = h_name.strip().lower()
+            clean_pgm = pgm.strip().upper()
             
-            is_generic = h_name in ["Race-wide", "", None] and pgm in ["-", None]
+            is_generic = (not clean_h_name or clean_h_name in ["race-wide", "unknown"]) and clean_pgm in ["-", ""]
             
             if is_generic:
                 non_deduped.append(item)
                 continue
                 
-            # Create a key
-            # Use Horse Name primarily as PGM might be missing in some feeds or "-", 
-            # but PGM is better if we have it.
-            # actually, let's use a composite key: RaceID (track-date-num) + Horse
-            
-            # constructing unique race identifier
-            r_key = f"{item['track_code']}-{item['race_date']}-{item['race_number']}"
-            
-            # Entity Key
+            # Entity Key: Use PGM if available as it is more stable, but Horse Name is good fallback
             e_key = None
-            if h_name and h_name != "Unknown":
-                e_key = h_name
-            elif pgm and pgm != "-":
-                e_key = f"PGM_{pgm}"
+            if clean_pgm and clean_pgm != "-":
+                e_key = f"PGM_{clean_pgm}"
+            elif clean_h_name:
+                e_key = clean_h_name
             else:
-                # Fallback, treat as unique/generic
                 non_deduped.append(item)
                 continue
                 
