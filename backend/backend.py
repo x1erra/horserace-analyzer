@@ -849,8 +849,79 @@ def get_changes():
         
         all_changes = []
         
-        # --- SOURCE 1: Existing Scratches from hranalyzer_race_entries ---
-        # These are simple boolean flags
+        # =======================================================================
+        # DEDUPLICATION FIX: Fetch detailed changes FIRST (Source 2), then
+        # skip generic entries from Source 1 if a detailed scratch exists.
+        # =======================================================================
+        
+        # Set to track entry_ids that have detailed scratch records
+        entries_with_detailed_scratches = set()
+        
+        # --- SOURCE 2 (FIRST): Detailed Changes from hranalyzer_changes table ---
+        try:
+            changes_query = supabase.table('hranalyzer_changes')\
+                .select('''
+                    id,
+                    entry_id,
+                    change_type,
+                    description,
+                    created_at,
+                    entry:hranalyzer_race_entries(
+                        id,
+                        program_number,
+                        horse:hranalyzer_horses(horse_name)
+                    ),
+                    race:hranalyzer_races!inner(
+                        id,
+                        track_code, 
+                        race_date, 
+                        race_number,
+                        post_time
+                    )
+                ''')
+                
+            if view_mode == 'upcoming':
+                changes_query = changes_query.gte('race.race_date', today)
+            else:
+                changes_query = changes_query.lt('race.race_date', today)
+
+            # Apply Track Filter
+            if track_filter != 'All':
+                changes_query = changes_query.eq('race.track_code', track_filter)
+
+            changes_response = changes_query.execute()
+            
+            for item in changes_response.data or []:
+                race = item.get('race') or {}
+                entry = item.get('entry') or {}
+                horse = entry.get('horse') or {}
+                
+                # Track entry_ids that have detailed scratch records
+                if item.get('change_type') == 'Scratch' and item.get('entry_id'):
+                    entries_with_detailed_scratches.add(item['entry_id'])
+                
+                all_changes.append({
+                    'id': item['id'],
+                    'race_id': race.get('id'),
+                    'race_date': str(race.get('race_date')),
+                    'track_code': race.get('track_code'),
+                    'race_number': race.get('race_number'),
+                    'post_time': race.get('post_time', 'N/A'),
+                    'program_number': entry.get('program_number', '-'),
+                    'horse_name': horse.get('horse_name', 'Race-wide'),
+                    'change_type': item['change_type'],
+                    'description': item['description'],
+                    'change_time': item.get('created_at'),
+                    '_source': 'changes'
+                })
+
+        except Exception as e:
+            # hranalyzer_changes table might not exist yet, that's OK
+            print(f"DEBUG: Error fetching hranalyzer_changes: {e}")
+            pass
+        
+        # --- SOURCE 1 (SECOND): Generic Scratches from hranalyzer_race_entries ---
+        # ONLY add entries that don't already have detailed scratch records
         scratch_query = supabase.table('hranalyzer_race_entries')\
             .select('''
                 id,
@@ -880,12 +951,18 @@ def get_changes():
         scratch_response = scratch_query.execute()
         
         for item in scratch_response.data or []:
+            entry_id = item['id']
+            
+            # SKIP if this entry already has a detailed scratch in hranalyzer_changes
+            if entry_id in entries_with_detailed_scratches:
+                continue
+                
             race = item.get('race') or {}
             horse = item.get('horse') or {}
             
             # Construct a standardized change object
             change = {
-                'id': item['id'], # Use entry ID for these
+                'id': entry_id,
                 'race_id': race.get('id'),
                 'track_code': race.get('track_code'),
                 'race_date': str(race.get('race_date')),
@@ -894,66 +971,11 @@ def get_changes():
                 'horse_name': horse.get('horse_name'),
                 'change_type': 'Scratch',
                 'description': 'Scratched',
-                'change_time': item.get('updated_at'), # Use updated_at as proxy
+                'change_time': item.get('updated_at'),
                 'post_time': race.get('post_time'),
-                '_source': 'entries' # distinct source
+                '_source': 'entries'
             }
             all_changes.append(change)
-            
-        # --- SOURCE 2: New Changes from hranalyzer_changes table ---
-        try:
-            changes_query = supabase.table('hranalyzer_changes')\
-                .select('''
-                    id,
-                    change_type,
-                    description,
-                    change_time,
-                    entry:hranalyzer_race_entries(
-                        program_number,
-                        horse:hranalyzer_horses(horse_name)
-                    ),
-                    race:hranalyzer_races!inner(
-                        id,
-                        track_code, 
-                        race_date, 
-                        race_number,
-                        post_time
-                    )
-                ''')
-                
-            if view_mode == 'upcoming':
-                changes_query = changes_query.gte('race.race_date', today)
-            else:
-                changes_query = changes_query.lt('race.race_date', today)
-
-            # Apply Track Filter
-            if track_filter != 'All':
-                changes_query = changes_query.eq('race.track_code', track_filter)
-
-            changes_response = changes_query.execute()
-            
-            for item in changes_response.data or []:
-                race = item.get('race') or {}
-                entry = item.get('entry') or {}
-                horse = entry.get('horse') or {}
-                
-                all_changes.append({
-                    'id': item['id'],
-                    'race_date': str(race.get('race_date')),
-                    'track_code': race.get('track_code'),
-                    'race_number': race.get('race_number'),
-                    'post_time': race.get('post_time', 'N/A'),
-                    'program_number': entry.get('program_number', '-'),
-                    'horse_name': horse.get('horse_name', 'Race-wide'),
-                    'change_type': item['change_type'],
-                    'description': item['description'],
-                    'change_time': item['change_time'],
-                    '_source': 'changes'
-                })
-        except Exception as e:
-            # hranalyzer_changes table might not exist yet, that's OK
-            print(f"DEBUG: Error fetching hranalyzer_changes: {e}")
-            pass
         
         # ---------------------------------------------------------------------
         # BROAD NORMALIZATION & PRIORITY SELECTION
@@ -1057,6 +1079,7 @@ def get_changes():
         total_count = len(final_list)
         # Fix: end is start + limit, so [start:end] gives exactly 'limit' results.
         paginated_changes = final_list[start:end]
+
         
         for c in paginated_changes:
             c.pop('_source', None)
