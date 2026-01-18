@@ -1,7 +1,56 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
+import { format, parseISO } from 'date-fns';
+import { AlertTriangle, Info, Shuffle, ShieldAlert } from 'lucide-react';
 import TrackFilter from '../components/TrackFilter';
-import { ShieldAlert, Shuffle, Info } from 'lucide-react';
+
+const getPostColor = (number) => {
+    const num = parseInt(number);
+    if (isNaN(num)) return { bg: '#374151', text: '#FFFFFF' };
+
+    switch (num) {
+        case 1: return { bg: '#EF4444', text: '#FFFFFF' }; // Red
+        case 2: return { bg: '#FFFFFF', text: '#000000' }; // White
+        case 3: return { bg: '#3B82F6', text: '#FFFFFF' }; // Blue
+        case 4: return { bg: '#EAB308', text: '#000000' }; // Yellow
+        case 5: return { bg: '#22C55E', text: '#FFFFFF' }; // Green
+        case 6: return { bg: '#000000', text: '#FACC15' }; // Black with Yellow text
+        case 7: return { bg: '#F97316', text: '#000000' }; // Orange with Black text
+        case 8: return { bg: '#EC4899', text: '#000000' }; // Pink with Black text
+        case 9: return { bg: '#06B6D4', text: '#000000' }; // Turquoise with Black text
+        case 10: return { bg: '#A855F7', text: '#FFFFFF' }; // Purple
+        case 11: return { bg: '#9CA3AF', text: '#FFFFFF' }; // Grey
+        case 12: return { bg: '#84CC16', text: '#000000' }; // Lime with Black text
+        case 13: return { bg: '#78350F', text: '#FFFFFF' }; // Brown
+        case 14: return { bg: '#831843', text: '#FFFFFF' }; // Maroon
+        case 15: return { bg: '#C3B091', text: '#000000' }; // Khaki
+        case 16: return { bg: '#60A5FA', text: '#FFFFFF' }; // Copen Blue
+        case 17: return { bg: '#1E3A8A', text: '#FFFFFF' }; // Navy
+        case 18: return { bg: '#14532D', text: '#FFFFFF' }; // Forest Green
+        case 19: return { bg: '#0EA5E9', text: '#FFFFFF' }; // Moonstone
+        case 20: return { bg: '#D946EF', text: '#FFFFFF' }; // Fuschia
+        default: return { bg: '#374151', text: '#FFFFFF' };
+    }
+};
+
+const getChangeIcon = (type) => {
+    switch (type) {
+        case 'Scratch': return <ShieldAlert className="w-4 h-4 text-red-500" />;
+        case 'Jockey Change': return <Shuffle className="w-4 h-4 text-blue-400" />;
+        case 'Equipment Change': return <Info className="w-4 h-4 text-yellow-400" />;
+        default: return <Info className="w-4 h-4 text-gray-400" />;
+    }
+};
+
+const getChangeColor = (type) => {
+    switch (type) {
+        case 'Scratch': return 'bg-red-500/10 text-red-500 border-red-500/20';
+        case 'Jockey Change': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+        case 'Equipment Change': return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+        default: return 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+    }
+};
 
 export default function Changes() {
     const [changes, setChanges] = useState([]);
@@ -80,12 +129,6 @@ export default function Changes() {
 
     const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
-    // Format time helper
-    const formatTime = (isoString) => {
-        if (!isoString) return '-';
-        return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-
     return (
         <div className="space-y-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -98,8 +141,8 @@ export default function Changes() {
                     <button
                         onClick={() => handleModeChange('upcoming')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition ${viewMode === 'upcoming'
-                                ? 'bg-purple-600 text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
+                            ? 'bg-purple-600 text-white shadow-lg'
+                            : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
                         Upcoming
@@ -107,8 +150,8 @@ export default function Changes() {
                     <button
                         onClick={() => handleModeChange('history')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition ${viewMode === 'history'
-                                ? 'bg-purple-600 text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
+                            ? 'bg-purple-600 text-white shadow-lg'
+                            : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
                             }`}
                     >
                         History
@@ -148,7 +191,7 @@ export default function Changes() {
                             <table className="w-full text-left text-gray-300">
                                 <thead className="bg-purple-900/30 border-b border-purple-900/50">
                                     <tr>
-                                        <th className="p-4">Time</th>
+                                        <th className="p-4">Date</th>
                                         <th className="p-4">Track</th>
                                         <th className="p-4">Race</th>
                                         <th className="p-4">Horse</th>
@@ -159,34 +202,55 @@ export default function Changes() {
                                 <tbody className="divide-y divide-purple-900/20">
                                     {changes.map((item) => (
                                         <tr key={item.id} className="hover:bg-purple-900/10 transition-colors group">
-                                            <td className="p-4 text-purple-400 font-mono text-sm">
-                                                {formatTime(item.change_time)}
+                                            <td className="p-4 text-gray-300 font-medium whitespace-nowrap">
+                                                {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
                                             </td>
-                                            <td className="p-4 font-bold text-white">{item.track_code}</td>
                                             <td className="p-4">
-                                                <span className="bg-purple-900/40 px-2 py-1 rounded text-xs font-mono text-purple-300 border border-purple-500/20">
-                                                    R{item.race_number}
+                                                <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-purple-900/20 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
+                                                    {item.track_code}
                                                 </span>
                                             </td>
-                                            <td className="p-4">
-                                                <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
-                                                    {item.horse_name || 'Race-wide'}
-                                                </span>
-                                                {item.program_number && (
-                                                    <span className="ml-2 text-xs text-gray-500">#{item.program_number}</span>
-                                                )}
+                                            <td className="p-4 whitespace-nowrap">
+                                                <Link
+                                                    to={`/race/${item.track_code}-${item.race_date?.replace(/-/g, '')}-${item.race_number}`}
+                                                    state={{ from: 'changes' }}
+                                                    className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                                                >
+                                                    Race {item.race_number}
+                                                </Link>
                                             </td>
                                             <td className="p-4">
-                                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${item.change_type === 'Scratch' ? 'bg-red-900/40 text-red-400 border border-red-500/30' :
-                                                        item.change_type === 'Jockey Change' ? 'bg-blue-900/40 text-blue-400 border border-blue-500/30' :
-                                                            item.change_type === 'Race Cancelled' ? 'bg-red-950/60 text-red-500 border border-red-600/50 animate-pulse' :
-                                                                'bg-gray-800 text-gray-400'
-                                                    }`}>
+                                                <div className="flex items-center gap-3">
+                                                    {item.program_number && item.program_number !== '-' ? (
+                                                        (() => {
+                                                            const style = getPostColor(item.program_number);
+                                                            return (
+                                                                <div
+                                                                    className="w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center font-bold text-sm shadow-sm leading-none"
+                                                                    style={{ backgroundColor: style.bg, color: style.text }}
+                                                                >
+                                                                    {item.program_number}
+                                                                </div>
+                                                            );
+                                                        })()
+                                                    ) : (
+                                                        <div className="w-8 h-8 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
+                                                            -
+                                                        </div>
+                                                    )}
+                                                    <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
+                                                        {item.horse_name || 'Race-wide'}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
+                                                    {getChangeIcon(item.change_type)}
                                                     {item.change_type}
                                                 </span>
                                             </td>
-                                            <td className="p-4 text-gray-400 text-sm max-w-xs truncate" title={item.description}>
-                                                {item.description}
+                                            <td className="p-4 text-gray-400 text-sm max-w-xs break-words">
+                                                {item.description || '-'}
                                             </td>
                                         </tr>
                                     ))}
