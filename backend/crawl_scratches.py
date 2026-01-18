@@ -632,10 +632,24 @@ def update_changes_in_db(track_code, race_date, change_list):
                 has_results = len(res_check.data) > 0
 
                 if current_status == 'completed' or has_results:
-                    logger.warning(f"🛡️ PREVENTED CANCELLATION for Completed/Resulted Race: {track_code} R{item['race_number']}")
-                else:
+                    logger.warning(f"🛡️ PREVENTED CANCELLATION STATUS for Completed/Resulted Race: {track_code} R{item['race_number']} (Flagged is_cancelled=True)")
+                    # Still set the flag for record keeping
                     supabase.table('hranalyzer_races')\
-                        .update({'race_status': 'cancelled'})\
+                        .update({
+                            'is_cancelled': True, 
+                            'cancellation_reason': item['description']
+                        })\
+                        .eq('id', race_id)\
+                        .execute()
+                else:
+                    # No results? Then it is truly cancelled.
+                    # Update status AND flag
+                    supabase.table('hranalyzer_races')\
+                        .update({
+                            'race_status': 'cancelled',
+                            'is_cancelled': True,
+                            'cancellation_reason': item['description']
+                        })\
                         .eq('id', race_id)\
                         .execute()
                     logger.info(f"🚫 RACE CANCELLED: {track_code} R{item['race_number']} ({item['description']})")
