@@ -905,12 +905,17 @@ export default function Betting() {
                                                 </div>
                                             ) : (
                                                 <div className="flex items-center gap-2">
-                                                    <div
-                                                        className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
-                                                        style={{ ...getPostColor(ticket.horse_number) }}
-                                                    >
-                                                        {ticket.horse_number}
-                                                    </div>
+                                                    {(() => {
+                                                        const style = getPostColor(ticket.horse_number);
+                                                        return (
+                                                            <div
+                                                                className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
+                                                                style={{ backgroundColor: style.bg, color: style.text }}
+                                                            >
+                                                                {ticket.horse_number}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <span className="text-purple-300 font-mono text-sm">{ticket.horse_name}</span>
                                                 </div>
                                             )}
@@ -1003,12 +1008,17 @@ export default function Betting() {
                                         </div>
                                     ) : (
                                         <div className="flex items-center gap-2">
-                                            <div
-                                                className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
-                                                style={{ ...getPostColor(ticket.horse_number) }}
-                                            >
-                                                {ticket.horse_number}
-                                            </div>
+                                            {(() => {
+                                                const style = getPostColor(ticket.horse_number);
+                                                return (
+                                                    <div
+                                                        className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
+                                                        style={{ backgroundColor: style.bg, color: style.text }}
+                                                    >
+                                                        {ticket.horse_number}
+                                                    </div>
+                                                );
+                                            })()}
                                             <span className="text-purple-300 font-mono text-sm">{ticket.horse_name}</span>
                                         </div>
                                     )}
