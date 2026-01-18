@@ -824,35 +824,46 @@ def get_changes():
     Get all race changes (scratches, jockey changes, etc.)
     Query params:
     - view: 'upcoming' (default) or 'all'
+    - mode: 'upcoming' (default) or 'history'
     - page: Page number (default 1)
     - limit: Results per page (default 20)
+    - track: Filter by track code (e.g., 'SA', 'DMR')
     
     This endpoint merges data from:
     1. hranalyzer_race_entries (existing scratches with scratched=True)
     2. hranalyzer_changes (new changes table for jockey changes, etc.)
     """
     try:
-        supabase = get_supabase_client()
-        view_mode = request.args.get('view', 'upcoming')
+        # Get query parameters
+        view_mode = request.args.get('mode', 'upcoming') # 'upcoming' or 'history'
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
+        track_filter = request.args.get('track', 'All') # New track filter
+        
+        start = (page - 1) * limit
+        end = start + limit
+        
         today = date.today().isoformat()
         
-        # Calculate offset
-        start = (page - 1) * limit
-        end = start + limit - 1
+        supabase = get_supabase_client()
         
         all_changes = []
         
         # --- SOURCE 1: Existing Scratches from hranalyzer_race_entries ---
+        # These are simple boolean flags
         scratch_query = supabase.table('hranalyzer_race_entries')\
             .select('''
-                id, program_number, scratched, updated_at,
+                id,
+                program_number,
+                scratched,
+                updated_at,
                 horse:hranalyzer_horses(horse_name),
-                trainer:hranalyzer_trainers(trainer_name),
                 race:hranalyzer_races!inner(
-                    id, track_code, race_date, race_number, post_time, race_status,
-                    track:hranalyzer_tracks(track_name)
+                    id, 
+                    track_code, 
+                    race_date, 
+                    race_number,
+                    post_time
                 )
             ''')\
             .eq('scratched', True)
@@ -860,56 +871,66 @@ def get_changes():
         if view_mode == 'upcoming':
             scratch_query = scratch_query.gte('race.race_date', today)
         else:
-            scratch_query = scratch_query.lte('race.race_date', today)
-        
+            scratch_query = scratch_query.lt('race.race_date', today)
+            
+        # Apply Track Filter
+        if track_filter != 'All':
+            scratch_query = scratch_query.eq('race.track_code', track_filter)
+            
         scratch_response = scratch_query.execute()
         
         for item in scratch_response.data or []:
             race = item.get('race') or {}
-            track = race.get('track') or {}
             horse = item.get('horse') or {}
-            trainer = item.get('trainer') or {}
             
-            formatted_time = race.get('post_time', 'N/A')
-            
-            all_changes.append({
-                'id': item['id'],
-                'race_date': race.get('race_date'),
+            # Construct a standardized change object
+            change = {
+                'id': item['id'], # Use entry ID for these
+                'race_id': race.get('id'),
                 'track_code': race.get('track_code'),
-                'track_name': track.get('track_name', race.get('track_code')),
+                'race_date': race.get('race_date'),
                 'race_number': race.get('race_number'),
-                'post_time': formatted_time,
-                'program_number': item.get('program_number', '-'),
-                'horse_name': horse.get('horse_name', 'Unknown'),
-                'trainer_name': trainer.get('trainer_name', '-'),
+                'program_number': item.get('program_number'),
+                'horse_name': horse.get('horse_name'),
                 'change_type': 'Scratch',
                 'description': 'Scratched',
-                'change_time': item.get('updated_at'),
-                '_source': 'entries'  # For deduplication
-            })
-        
-        # --- SOURCE 2: New Changes from hranalyzer_changes table ---
-        try:
-            changes_query = supabase.table('hranalyzer_changes')\
-                .select('''
-                    id, change_type, description, change_time,
-                    entry:hranalyzer_race_entries(
-                        program_number,
-                        horse:hranalyzer_horses(horse_name),
-                        trainer:hranalyzer_trainers(trainer_name)
-                    ),
-                    race:hranalyzer_races!inner(
-                        id, track_code, race_date, race_number, post_time, race_status,
-                        track:hranalyzer_tracks(track_name)
-                    )
-                ''')
-                
-            if view_mode == 'upcoming':
-                changes_query = changes_query.gte('race.race_date', today)
-            else:
-                changes_query = changes_query.lte('race.race_date', today)
+                'change_time': item.get('updated_at'), # Use updated_at as proxy
+                'post_time': race.get('post_time'),
+                '_source': 'entries' # distinct source
+            }
+            all_changes.append(change)
             
-            changes_response = changes_query.execute()
+        # --- SOURCE 2: New Changes from hranalyzer_changes table ---
+        changes_query = supabase.table('hranalyzer_changes')\
+            .select('''
+                id,
+                change_type,
+                description,
+                change_time,
+                entry:hranalyzer_race_entries(
+                    program_number,
+                    horse:hranalyzer_horses(horse_name)
+                ),
+                race:hranalyzer_races!inner(
+                    id,
+                    track_code, 
+                    race_date, 
+                    race_number,
+                    post_time
+                )
+            ''')
+            
+        if view_mode == 'upcoming':
+            changes_query = changes_query.gte('race.race_date', today)
+        else:
+            changes_query = changes_query.lt('race.race_date', today)
+
+        # Apply Track Filter
+        if track_filter != 'All':
+            changes_query = changes_query.eq('race.track_code', track_filter)
+
+        changes_response = changes_query.execute()
+
             
             for item in changes_response.data or []:
                 race = item.get('race') or {}
@@ -939,25 +960,150 @@ def get_changes():
             # hranalyzer_changes table might not exist yet, that's OK
             pass
         
+        # --- DEDUPLICATION LOGIC ---
+        # Group by horse/entry and select the best one
+        
+        # Helper to score quality of an entry
+        def get_entry_score(e):
+            score = 0
+            desc = (e.get('description') or "").lower()
+            src = e.get('_source')
+            ctype = (e.get('change_type') or "").lower()
+            
+            # Prefer changes table (more detail) unless empty
+            if src == 'changes': score += 10
+            
+            # Prefer explicit types
+            if 'scratch' in ctype: score += 5
+            elif 'jockey' in ctype: score += 5
+            
+            # Prefer specific reasons over "unavailable"
+            if "reason unavailable" in desc: score -= 5
+            if "scratched" == desc: score -= 5 # Generic default
+            
+            # Length as tie breaker for detail
+            score += len(desc) / 100
+            
+            # Newness as final tie breaker
+            # We don't have update time for all easily here without parsing Iso, so we rely on sort stability or logic below
+            return score
+
+        # Map: "track-race-horse_name" -> [entries]
+        # or "track-race-pgm" if available
+        grouped = {}
+        
+        non_deduped = []
+        
+        for item in all_changes:
+            # If it's a Race-wide change (no horse), keep it (maybe dedup identicals later)
+            h_name = item.get('horse_name')
+            pgm = item.get('program_number')
+            
+            is_generic = h_name in ["Race-wide", "", None] and pgm in ["-", None]
+            
+            if is_generic:
+                non_deduped.append(item)
+                continue
+                
+            # Create a key
+            # Use Horse Name primarily as PGM might be missing in some feeds or "-", 
+            # but PGM is better if we have it.
+            # actually, let's use a composite key: RaceID (track-date-num) + Horse
+            
+            # constructing unique race identifier
+            r_key = f"{item['track_code']}-{item['race_date']}-{item['race_number']}"
+            
+            # Entity Key
+            e_key = None
+            if h_name and h_name != "Unknown":
+                e_key = h_name
+            elif pgm and pgm != "-":
+                e_key = f"PGM_{pgm}"
+            else:
+                # Fallback, treat as unique/generic
+                non_deduped.append(item)
+                continue
+                
+            full_key = f"{r_key}|{e_key}"
+            
+            if full_key not in grouped: grouped[full_key] = []
+            grouped[full_key].append(item)
+            
+        # Process groups
+        final_list = []
+        
+        # Add back non-deduped (race-wide)
+        # Optional: dedup identical race-wide messages (e.g. Cancelled - Weather appearing twice)
+        seen_generics = set()
+        for x in non_deduped:
+            # distinctive sig: track-race-desc
+            sig = f"{x['track_code']}-{x['race_number']}-{x['description']}-{x['change_type']}"
+            if sig not in seen_generics:
+                final_list.append(x)
+                seen_generics.add(sig)
+        
+        for key, group in grouped.items():
+            if len(group) == 1:
+                final_list.append(group[0])
+            else:
+                # Select best
+                # Sort by Score (Desc), then Time (Desc)
+                # For Time, we need to handle None
+                group.sort(key=lambda x: (
+                    get_entry_score(x),
+                    x.get('change_time') or x.get('race_date') or ''
+                ), reverse=True)
+                
+                best = group[0]
+                
+                # Merge logic? Currently just selecting best is usually enough for "Scratched" vs "Scratched - Vet"
+                # If we have multiple DISTINCT types (e.g. Jockey Change AND Weight Change for same horse), we should keep BOTH.
+                
+                # Sub-group by Change Type Classification
+                # Types: Scratch, Jockey, Weight, Other
+                # We only want to dedup "Scratch" vs "Scratch". A "Jockey Change" should show up alongside a "Scratch" (rare but possible).
+                
+                sub_grouped = {}
+                for g in group:
+                    ctype = g['change_type']
+                    # Normalize types
+                    if 'Scratch' in ctype: ctype = 'Scratch'
+                    elif 'Jockey' in ctype: ctype = 'Jockey'
+                    elif 'Weight' in ctype: ctype = 'Weight'
+                    
+                    if ctype not in sub_grouped: sub_grouped[ctype] = []
+                    sub_grouped[ctype].append(g)
+                    
+                for sub_type, candidates in sub_grouped.items():
+                    # Now pick best of this sub-type
+                    candidates.sort(key=lambda x: (
+                        get_entry_score(x),
+                        x.get('change_time') or ''
+                    ), reverse=True)
+                    final_list.append(candidates[0])
+
+        
         # --- Sort combined results ---
         if view_mode == 'upcoming':
             # Upcoming: soonest first
-            all_changes.sort(key=lambda x: (
+            final_list.sort(key=lambda x: (
                 x.get('race_date') or '',
                 x.get('track_code') or '',
-                x.get('race_number') or 0
+                x.get('race_number') or 0,
+                x.get('horse_name') or ''
             ))
         else:
             # History: most recent first
-            all_changes.sort(key=lambda x: (
+            final_list.sort(key=lambda x: (
                 x.get('race_date') or '',
                 x.get('track_code') or '',
-                x.get('race_number') or 0
+                x.get('race_number') or 0,
+                x.get('horse_name') or ''
             ), reverse=True)
         
         # --- Pagination ---
-        total_count = len(all_changes)
-        paginated_changes = all_changes[start:end+1]
+        total_count = len(final_list)
+        paginated_changes = final_list[start:end+1]
         
         # Remove internal _source field
         for c in paginated_changes:
