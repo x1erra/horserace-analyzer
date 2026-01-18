@@ -70,14 +70,24 @@ def check_db_scratches(track_code, race_date):
         )
     ''').order('created_at', desc=True).limit(20).execute()
     
+    found_meyer = False
+    
     for row in res.data:
         entry = row.get('entry') or {}
         horse = entry.get('horse') or {}
         race = entry.get('race') or {}
         
+        h_name = horse.get('horse_name', 'Unknown')
+        if 'Meyer' in h_name:
+            found_meyer = True
+            print(f"!!! FOUND MEYER: {row}")
+            
         if race.get('track_code') == track_code:
-            print(f"[{row['created_at']}] {race.get('track_code')} R{race.get('race_number')} #{entry.get('program_number')} {horse.get('horse_name')} - {row['change_type']}: {row['description']}")
+            print(f"[{row['created_at']}] {race.get('track_code')} R{race.get('race_number')} #{entry.get('program_number')} {h_name} - {row['change_type']}: {row['description']}")
+
+    if not found_meyer:
+        print("\n>>> CONFIRMED: 'Meyer' NOT found in recent DB entries.")
 
 if __name__ == "__main__":
-    check_otb_deep()
+    # check_otb_deep()
     check_db_scratches("GP", date.today().isoformat())

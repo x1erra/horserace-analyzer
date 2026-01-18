@@ -802,15 +802,11 @@ def reset_scratches_for_date(track_code, race_date):
             .in_('race_id', race_ids)\
             .execute()
             
-        # 3. Delete detailed 'Scratch' changes from hranalyzer_changes
-        # keeping 'Jockey Change' etc. might be desired, but if the source was bad, maybe not?
-        # Safe approach: Delete ONLY 'Scratch' type changes created automatically.
-        # But 'description' is consistent.
-        
+        # 3. Delete ALL detailed changes from hranalyzer_changes for these races
+        # This ensures we remove stale "Jockey Changes", "Owner Changes", etc. that are no longer valid.
         supabase.table('hranalyzer_changes')\
             .delete()\
             .in_('race_id', race_ids)\
-            .eq('change_type', 'Scratch')\
             .execute()
             
         logger.info(f"Successfully reset scratches for {len(race_ids)} races.")
