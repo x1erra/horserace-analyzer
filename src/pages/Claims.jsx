@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import TrackFilter from '../components/TrackFilter';
@@ -50,27 +50,34 @@ export default function Claims() {
         setCurrentPage(1);
     }, [selectedTrack, selectedDate, sortConfig]);
 
-    useEffect(() => {
-        const fetchClaims = async () => {
-            try {
-                setLoading(true);
-                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-                const response = await axios.get(`${baseUrl}/api/claims?limit=200`);
+    const fetchClaims = useCallback(async (isAutoRefresh = false) => {
+        try {
+            if (!isAutoRefresh) setLoading(true);
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+            const response = await axios.get(`${baseUrl}/api/claims?limit=200`);
 
-                if (response.data && response.data.claims) {
-                    setClaims(response.data.claims);
-                }
-                setError(null);
-            } catch (err) {
-                console.error("Error fetching claims:", err);
-                setError("Failed to load claims data.");
-            } finally {
-                setLoading(false);
+            if (response.data && response.data.claims) {
+                setClaims(response.data.claims);
             }
-        };
-
-        fetchClaims();
+            setError(null);
+        } catch (err) {
+            console.error("Error fetching claims:", err);
+            setError("Failed to load claims data.");
+        } finally {
+            if (!isAutoRefresh) setLoading(false);
+        }
     }, []);
+
+    useEffect(() => {
+        fetchClaims();
+
+        // Auto-refresh every 2 minutes (120000 ms)
+        const intervalId = setInterval(() => {
+            fetchClaims(true);
+        }, 120000);
+
+        return () => clearInterval(intervalId);
+    }, [fetchClaims]);
 
     // Filter and Sort logic
     useEffect(() => {
@@ -170,8 +177,28 @@ export default function Claims() {
 
     return (
         <div className="space-y-8">
-            <h3 className="text-3xl font-bold text-white">Claims</h3>
-            <p className="text-sm text-gray-400 mb-4">Review horses claimed in recent races.</p>
+            <div className="flex justify-between items-start">
+                <div>
+                    <h3 className="text-3xl font-bold text-white">Claims</h3>
+                    <p className="text-sm text-gray-400 mb-4">Review horses claimed in recent races.</p>
+                </div>
+
+                <button
+                    onClick={fetchClaims}
+                    disabled={loading}
+                    className="flex items-center gap-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-200 px-4 py-2 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium group"
+                >
+                    <svg
+                        className={`w-4 h-4 ${loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+            </div>
 
 
 
