@@ -7,6 +7,7 @@ import subprocess
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, date
+from email.utils import parsedate_to_datetime
 from supabase_client import get_supabase_client
 from crawl_equibase import normalize_name, normalize_pgm, COMMON_TRACKS
 
@@ -201,6 +202,55 @@ def parse_track_changes(html, track_code):
     if not html: return changes
     
     soup = BeautifulSoup(html, 'html.parser')
+
+    # 1. DATE VALIDATION
+    # Look for date in header or body
+    # Example: "Late Changes for Thursday, January 22, 2026"
+    page_date_valid = False
+    
+    # Check common date headers
+    # <span class="header-date">...</span> or just text search
+    try:
+        text_content = soup.get_text()
+        # Regex for "Changes for [Day], [Month] [Day], [Year]" or "MM/DD/YYYY"
+        # Equibase often puts date in a header like <h3>Current Late Changes - Jan 22, 2026</h3>
+        
+        # We need to match today's date
+        today = date.today()
+        
+        # Strategy: Search for today's formatted string variants
+        # 1. "January 22, 2026"
+        fmt1 = today.strftime("%B %d, %Y") 
+        # 2. "Jan 22, 2026"
+        fmt2 = today.strftime("%b %d, %Y")
+        # 3. "01/22/2026"
+        fmt3 = today.strftime("%m/%d/%Y")
+        
+        if fmt1 in text_content or fmt2 in text_content or fmt3 in text_content:
+            page_date_valid = True
+        else:
+            # Fallback: Try to parse ANY date and see if it mismatches
+            # If we find a date that is NOT today, we reject.
+            # If we find NO date, we proceed with caution (or reject? specific pages usually have date).
+            # Let's be permissive if no date found (could be fragment), but strict if date FOUND and WRONG.
+            
+            # Look for explicit date patterns near the top
+            header_text = text_content[:1000] # First 1000 chars
+            
+            # Check for patterns like "Jan 21, 2026" when today is Jan 22
+            found_dates = re.findall(r'([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})', header_text)
+            for m in found_dates:
+                try:
+                    d_str = f"{m[0]} {m[1]}, {m[2]}"
+                    d_obj = datetime.strptime(d_str, "%b %d, %Y").date()
+                    if d_obj != today:
+                        logger.warning(f"❌ STALE HTML DETECTED for {track_code}: Found {d_str}, Expected {today}")
+                        return [] # Reject entirely
+                except: pass
+                
+    except Exception as e:
+        logger.warning(f"Date validation error in HTML: {e}")
+
     
     # Table usually has id="fullChanges" or similar, but let's be robust
     tables = soup.find_all('table')
@@ -357,12 +407,39 @@ def fetch_rss_feed(track_code):
 def parse_rss_changes(xml_content, track_code):
     """
     Parse RSS XML to extract changes.
+    Validates <pubDate> to ensure relevance.
     """
     soup = BeautifulSoup(xml_content, 'html.parser') # xml parser missing, fallback to html.parser
     items = soup.find_all('item')
     changes = []
     
+    today = date.today()
+    
     for item in items:
+        # DATE VALIDATION
+        # <pubDate>Thu, 22 Jan 2026 09:30:00 EST</pubDate>
+        pub_date_str = item.pubdate.text if item.pubdate else None
+        if not pub_date_str:
+            # Fallback: try finding it in description or assume current if RSS cache is trusted?
+            # Better to skip if uncertain to avoid the bug.
+            # But sometimes pubDate is missing. Check channel?
+            pass
+        else:
+            try:
+                # Use email.utils to parse RFC 2822
+                dt = parsedate_to_datetime(pub_date_str)
+                # Convert to local date (or just compare date part if tz issue)
+                # If dt is TZ aware, great.
+                if dt.date() != today:
+                    logger.debug(f"Skipping stale RSS item dated {dt.date()}")
+                    continue
+            except Exception as e:
+                logger.warning(f"Failed to parse RSS date '{pub_date_str}': {e}")
+                # Use caution: if we can't parse date, do we skip? 
+                # Given the bug (stale data), we should probably SKIP or check description for date.
+                # Let's SKIP to be safe.
+                continue
+
         desc = item.description.text if item.description else ""
         # Description contains multiple lines separated by <br/> (encoded or not)
         # BeautifulSoup XML parser might decode it.
