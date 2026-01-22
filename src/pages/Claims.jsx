@@ -52,7 +52,10 @@ export default function Claims() {
 
     const fetchClaims = useCallback(async (isAutoRefresh = false) => {
         try {
-            if (!isAutoRefresh) setLoading(true);
+            // Strict check to ensure MouseEvents from button clicks don't trigger "auto-refresh" mode
+            const showLoading = isAutoRefresh !== true;
+
+            if (showLoading) setLoading(true);
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
             const response = await axios.get(`${baseUrl}/api/claims?limit=200`);
 
@@ -64,7 +67,7 @@ export default function Claims() {
             console.error("Error fetching claims:", err);
             setError("Failed to load claims data.");
         } finally {
-            if (!isAutoRefresh) setLoading(false);
+            if (isAutoRefresh !== true) setLoading(false);
         }
     }, []);
 
@@ -184,7 +187,7 @@ export default function Claims() {
                 </div>
 
                 <button
-                    onClick={fetchClaims}
+                    onClick={() => fetchClaims()}
                     disabled={loading}
                     className="flex items-center gap-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-200 px-4 py-2 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium group"
                 >
