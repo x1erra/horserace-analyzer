@@ -99,7 +99,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         <GiHorseHead className="w-6 h-6" />
                         Horses
                     </NavLink>
-                    <NavLink
+                    {/* <NavLink
                         to="/predictions"
                         onClick={onClose}
                         className={({ isActive }) =>
@@ -111,7 +111,7 @@ export default function Sidebar({ isOpen, onClose }) {
                     >
                         <HiOutlineSparkles className="w-6 h-6" />
                         Predictions
-                    </NavLink>
+                    </NavLink> */}
                     <NavLink
                         to="/betting"
                         onClick={onClose}
