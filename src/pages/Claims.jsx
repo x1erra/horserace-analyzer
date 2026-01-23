@@ -167,11 +167,17 @@ export default function Claims() {
     const tracks = ['All Tracks', ...new Set(claims.map(c => c.track_name || c.track_code).filter(Boolean))].sort();
     const dates = ['All Dates', ...new Set(claims.map(c => c.race_date).filter(Boolean))].sort().reverse();
 
-    if (loading) {
+    // Initial loading state only (if no data yet)
+    if (loading && claims.length === 0) {
         return (
-            <div className="text-white text-center p-20">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-                <p className="mt-4">Loading claims...</p>
+            <div className="flex flex-col items-center justify-center min-h-[400px] text-white">
+                <div className="relative">
+                    <div className="w-16 h-16 rounded-full border-4 border-purple-900/20 border-t-purple-500 animate-spin"></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full bg-purple-500/10 blur-xl animate-pulse"></div>
+                    </div>
+                </div>
+                <p className="mt-6 text-gray-400 font-medium animate-pulse tracking-wide uppercase text-xs">Initializing Claims...</p>
             </div>
         );
     }
@@ -280,18 +286,18 @@ export default function Claims() {
                                 <th className="p-4 text-center">Action</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-purple-900/20">
-                            {loading ? (
+                        <tbody className="divide-y divide-purple-900/20 relative">
+                            {currentItems.length === 0 ? (
                                 <tr>
-                                    <td colSpan="7" className="p-8 text-center text-gray-500">
-                                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                                        <p>Loading claims...</p>
-                                    </td>
-                                </tr>
-                            ) : currentItems.length === 0 ? (
-                                <tr>
-                                    <td colSpan="7" className="p-8 text-center text-gray-500">
-                                        No claims found matching your filters.
+                                    <td colSpan="7" className="p-12 text-center text-gray-500">
+                                        {loading ? (
+                                            <div className="flex flex-col items-center gap-3">
+                                                <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin"></div>
+                                                <span>Fetching claims...</span>
+                                            </div>
+                                        ) : (
+                                            "No claims found matching your filters."
+                                        )}
                                     </td>
                                 </tr>
                             ) : (
@@ -362,14 +368,16 @@ export default function Claims() {
 
                 {/* Mobile Card View */}
                 <div className="md:hidden">
-                    {loading ? (
-                        <div className="p-8 text-center text-gray-500">
-                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500 mb-2"></div>
-                            <p>Loading claims...</p>
-                        </div>
-                    ) : currentItems.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500">
-                            No claims found matching your filters.
+                    {currentItems.length === 0 ? (
+                        <div className="p-12 text-center text-gray-500">
+                            {loading ? (
+                                <div className="flex flex-col items-center gap-3">
+                                    <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin"></div>
+                                    <span>Fetching claims...</span>
+                                </div>
+                            ) : (
+                                "No claims found matching your filters."
+                            )}
                         </div>
                     ) : (
                         <div className="divide-y divide-purple-900/20">
