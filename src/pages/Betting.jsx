@@ -411,6 +411,7 @@ export default function Betting() {
                 }
             } catch (error) {
                 console.error('Error adding funds:', error);
+                alert(`Error adding funds: ${error.message}`);
             }
         } else {
             alert('Please enter a valid amount.');
