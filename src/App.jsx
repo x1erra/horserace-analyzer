@@ -27,7 +27,7 @@ function App() {
           <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
           {/* Main Content */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <PullToRefresh>
               <Header onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
               <main className="p-4 md:p-8 bg-black">
