@@ -30,7 +30,7 @@ function App() {
           <div className="flex-1">
             <PullToRefresh>
               <Header onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
-              <main className="p-8 bg-black">
+              <main className="p-4 md:p-8 bg-black">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/races" element={<Races />} />

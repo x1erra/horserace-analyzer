@@ -186,16 +186,16 @@ export default function Claims() {
 
     return (
         <div className="space-y-8">
-            <div className="flex justify-between items-start">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h3 className="text-3xl font-bold text-white">Claims</h3>
-                    <p className="text-sm text-gray-400 mb-4">Review horses claimed in recent races.</p>
+                    <p className="text-sm text-gray-400 mb-4 sm:mb-0">Review horses claimed in recent races.</p>
                 </div>
 
                 <button
                     onClick={() => fetchClaims()}
                     disabled={loading}
-                    className="flex items-center gap-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-200 px-4 py-2 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium group"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 bg-purple-900/30 hover:bg-purple-900/50 text-purple-200 px-4 py-2 rounded-lg border border-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium group"
                 >
                     <svg
                         className={`w-4 h-4 ${loading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`}
