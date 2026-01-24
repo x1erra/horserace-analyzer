@@ -31,10 +31,7 @@ const Tooltip = ({ text, children }) => {
 export default function Betting() {
     const [tickets, setTickets] = useState([]);
     const [stats, setStats] = useState({ winRate: 0, pnl: 0, totalWagered: 0, roi: 0 });
-    const [bankroll, setBankroll] = useState(() => {
-        const saved = localStorage.getItem('hra_bankroll');
-        return saved ? parseFloat(saved) : 1000.00;
-    });
+    const [bankroll, setBankroll] = useState(0);
     const [isBankModalOpen, setIsBankModalOpen] = useState(false);
     const [addFundsAmount, setAddFundsAmount] = useState('100');
 
@@ -71,12 +68,24 @@ export default function Betting() {
     useEffect(() => {
         fetchBets();
         fetchRaces();
+        fetchWallet();
     }, []);
 
+    const fetchWallet = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/wallet`);
+            const data = await res.json();
+            if (data.balance !== undefined) {
+                setBankroll(data.balance);
+            }
+        } catch (error) {
+            console.error('Error fetching wallet:', error);
+        }
+    };
+
     // Persist bankroll
-    useEffect(() => {
-        localStorage.setItem('hra_bankroll', bankroll.toString());
-    }, [bankroll]);
+    // Persist bankroll REMOVED
+
 
     // Persist bet form open/close state
     useEffect(() => {
@@ -280,8 +289,13 @@ export default function Betting() {
             });
 
             if (res.ok) {
-                // Deduct from bankroll immediately for better UX
-                setBankroll(prev => prev - totalCost);
+                const data = await res.json();
+                // Update balance from response
+                if (data.new_balance !== undefined) {
+                    setBankroll(data.new_balance);
+                } else {
+                    fetchWallet();
+                }
                 fetchBets();
                 // Reset form slightly
                 // Reset form slightly
@@ -290,7 +304,8 @@ export default function Betting() {
                 else setSelectedHorseId('');
                 alert('Bet placed successfully!');
             } else {
-                alert('Failed to place bet');
+                const err = await res.json();
+                alert(`Failed to place bet: ${err.error || 'Unknown error'}`);
             }
         } catch (error) {
             console.error('Error placing bet:', error);
@@ -322,9 +337,9 @@ export default function Betting() {
                     });
 
                     if (newEarnings > 0) {
-                        setBankroll(prev => prev + newEarnings);
-                        // Optional nice alert
-                        // alert(`You won $${newEarnings.toFixed(2)}!`); 
+                        // Refresh wallet from server as it should be credited there
+                        fetchWallet();
+                        alert(`You won $${newEarnings.toFixed(2)}!`);
                     }
 
                     // Update main state
@@ -376,28 +391,53 @@ export default function Betting() {
         }
     };
 
-    const handleAddFunds = (e) => {
+    const handleAddFunds = async (e) => {
         e.preventDefault();
         const amountToAdd = parseFloat(addFundsAmount);
         if (amountToAdd > 0) {
-            setBankroll(prev => prev + amountToAdd);
-            setIsBankModalOpen(false);
-            alert(`Successfully added $${amountToAdd.toFixed(2)} to your wallet!`);
+            try {
+                const res = await fetch(`${API_BASE_URL}/wallet/transaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'deposit', amount: amountToAdd })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    setBankroll(data.balance);
+                    setIsBankModalOpen(false);
+                    alert(`Successfully added $${amountToAdd.toFixed(2)} to your wallet!`);
+                } else {
+                    alert('Failed to add funds');
+                }
+            } catch (error) {
+                console.error('Error adding funds:', error);
+            }
         } else {
             alert('Please enter a valid amount.');
         }
     };
 
-    const handleBurnFunds = (e) => {
+    const handleBurnFunds = async (e) => {
         e.preventDefault();
         const amountToBurn = parseFloat(addFundsAmount);
         if (amountToBurn > 0) {
-            setBankroll(prev => {
-                const newBalance = prev - amountToBurn;
-                return newBalance < 0 ? 0 : newBalance;
-            });
-            setIsBankModalOpen(false);
-            alert(`Successfully burned $${amountToBurn.toFixed(2)} from your wallet!`);
+            try {
+                const res = await fetch(`${API_BASE_URL}/wallet/transaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'withdraw', amount: amountToBurn })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    setBankroll(data.balance);
+                    setIsBankModalOpen(false);
+                    alert(`Successfully burned $${amountToBurn.toFixed(2)} from your wallet!`);
+                } else {
+                    alert(`Failed to burn funds: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error burning funds:', error);
+            }
         } else {
             alert('Please enter a valid amount to burn.');
         }

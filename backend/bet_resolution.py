@@ -317,6 +317,27 @@ def resolve_all_pending_bets(supabase):
                                 else:
                                     payout = 0
 
+                    if new_status in ['Win', 'Returned'] and payout > 0:
+                         # CREDIT WALLET
+                         try:
+                             user_ref = 'default_user'
+                             w_res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+                             if w_res.data:
+                                 wallet = w_res.data
+                                 new_bal = float(wallet['balance']) + float(payout)
+                                 supabase.table('hranalyzer_wallets').update({'balance': new_bal}).eq('id', wallet['id']).execute()
+                                 
+                                 # Log
+                                 supabase.table('hranalyzer_transactions').insert({
+                                     'wallet_id': wallet['id'],
+                                     'amount': payout,
+                                     'transaction_type': 'Payout' if new_status == 'Win' else 'Refund',
+                                     'reference_id': bet['id'],
+                                     'description': f'{new_status} Payout for Bet {bet["id"]}'
+                                 }).execute()
+                         except Exception as e:
+                             logger.error(f"Failed to credit wallet for bet {bet['id']}: {e}")
+
                     # Update bet
                     update_data = {
                         'status': new_status,

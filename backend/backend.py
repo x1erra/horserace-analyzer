@@ -1330,9 +1330,107 @@ def get_scratches():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+# ==============================================
+# WALLET ENDPOINTS
+# ==============================================
+
+@app.route('/api/wallet', methods=['GET'])
+def get_wallet():
+    """Get current wallet balance"""
+    try:
+        supabase = get_supabase_client()
+        # Default user for single player
+        user_ref = 'default_user'
+        
+        # Get or Create
+        res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).execute()
+        
+        if not res.data:
+            # Auto-create if missing (and if SQL table exists)
+            try:
+                # Attempt insert
+                init_data = {'user_ref': user_ref, 'balance': 1000.00}
+                res = supabase.table('hranalyzer_wallets').insert(init_data).execute()
+            except Exception as e:
+                # If table missing or error
+                print(f"Error creating wallet: {e}")
+                return jsonify({'balance': 1000.00, 'is_mock': True})
+        
+        wallet = res.data[0]
+        return jsonify({
+            'balance': float(wallet['balance']),
+            'currency': 'USD'
+        })
+    except Exception as e:
+        traceback.print_exc()
+        # Fallback for resiliency
+        return jsonify({'balance': 1000.00, 'error': str(e)}), 500
+
+
+@app.route('/api/wallet/transaction', methods=['POST'])
+def wallet_transaction():
+    """
+    Manually add or burn funds
+    Body: { "type": "deposit"|"withdraw", "amount": 100.0 }
+    """
+    try:
+        supabase = get_supabase_client()
+        data = request.get_json()
+        trans_type = data.get('type')
+        amount = float(data.get('amount', 0))
+        
+        if amount <= 0:
+            return jsonify({'error': 'Amount must be positive'}), 400
+
+        user_ref = 'default_user'
+        
+        # Get current wallet
+        res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+        if not res.data:
+            return jsonify({'error': 'Wallet not found'}), 404
+        
+        wallet = res.data
+        current_bal = float(wallet['balance'])
+        new_bal = current_bal
+        
+        if trans_type == 'deposit':
+            new_bal += amount
+        elif trans_type == 'withdraw':
+            if current_bal < amount:
+                return jsonify({'error': 'Insufficient funds'}), 400
+            new_bal -= amount
+        else:
+            return jsonify({'error': 'Invalid transaction type'}), 400
+            
+        # Update
+        update_res = supabase.table('hranalyzer_wallets').update({'balance': new_bal}).eq('id', wallet['id']).execute()
+        
+        # Log Transaction
+        try:
+             supabase.table('hranalyzer_transactions').insert({
+                 'wallet_id': wallet['id'],
+                 'amount': amount if trans_type == 'deposit' else -amount,
+                 'transaction_type': trans_type.capitalize(),
+                 'description': f'Manual {trans_type}'
+             }).execute()
+        except Exception as e:
+            print(f"Transaction log failed: {e}")
+
+        return jsonify({
+            'success': True,
+            'balance': new_bal,
+            'message': f'Successfully {trans_type}ed ${amount}'
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/bets', methods=['POST'])
 def place_bet():
-    """Place a new bet"""
+    """Place a new bet and deduct funds"""
     try:
         data = request.get_json()
         race_id = data.get('race_id')
@@ -1412,6 +1510,35 @@ def place_bet():
         race = supabase.table('hranalyzer_races').select('id, race_status').eq('id', race_id).single().execute()
         if not race.data:
             return jsonify({'error': 'Race not found'}), 404
+            
+        # ---------------------------------------------------------
+        # WALLET DEDUCTION
+        # ---------------------------------------------------------
+        user_ref = 'default_user'
+        wallet_res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+        
+        if not wallet_res.data:
+            # Try create? Or Error
+            # Let's auto-create for smoother UX if first time
+             try:
+                init_data = {'user_ref': user_ref, 'balance': 1000.00}
+                item = supabase.table('hranalyzer_wallets').insert(init_data).execute()
+                wallet = item.data[0]
+             except:
+                return jsonify({'error': 'Wallet not configured'}), 500
+        else:
+            wallet = wallet_res.data
+            
+        current_bal = float(wallet['balance'])
+        
+        if current_bal < cost:
+            return jsonify({'error': f'Insufficient funds. Cost: ${cost:.2f}, Balance: ${current_bal:.2f}'}), 400
+            
+        # Deduct funds
+        new_bal = current_bal - cost
+        supabase.table('hranalyzer_wallets').update({'balance': new_bal}).eq('id', wallet['id']).execute()
+        
+        # ---------------------------------------------------------
 
         # Insert bet
         bet = {
@@ -1426,10 +1553,24 @@ def place_bet():
         }
         
         response = supabase.table('hranalyzer_bets').insert(bet).execute()
+        bet_data = response.data[0]
+        
+        # Log Transaction
+        try:
+             supabase.table('hranalyzer_transactions').insert({
+                 'wallet_id': wallet['id'],
+                 'amount': -cost,
+                 'transaction_type': 'Bet',
+                 'reference_id': bet_data['id'],
+                 'description': f'Bet on Race'
+             }).execute()
+        except:
+            pass
         
         return jsonify({
             'success': True,
-            'bet': response.data[0]
+            'bet': bet_data,
+            'new_balance': new_bal
         })
         
     except Exception as e:
