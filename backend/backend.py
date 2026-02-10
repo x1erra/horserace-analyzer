@@ -369,7 +369,6 @@ def get_filter_options():
         today = date.today().isoformat()
         
         # Determine the target date for the summary
-        # If 'date' parameter provided, use it. Otherwise default to today.
         target_summary_date = request.args.get('date', today)
 
         # 1. Get all distinct dates
@@ -378,11 +377,10 @@ def get_filter_options():
             .order('race_date', desc=True)\
             .execute()
         
-        # Filter out future dates (ensure no future forward-filled dates appear in past filters)
         all_unique_dates = set(r['race_date'] for r in dates_response.data)
         unique_dates = sorted([d for d in all_unique_dates if d <= today], reverse=True)
 
-        # 2. Get all distinct tracks (for historical filter)
+        # 2. Get all distinct tracks
         tracks_response = supabase.table('hranalyzer_races')\
             .select('track_code, hranalyzer_tracks(track_name)')\
             .execute()
@@ -409,13 +407,9 @@ def get_filter_options():
             
         summary_map = {}
         
-        # Get current time for comparison
-        now_utc = datetime.now(pytz.utc)
-        
         for r in today_response.data:
             name = (r.get('hranalyzer_tracks') or {}).get('track_name', r['track_code'])
             
-            # Auto-correct status if results exist
             entries = r.get('hranalyzer_race_entries') or []
             has_results = any(e.get('finish_position') in [1, 2, 3] for e in entries)
             race_status = r['race_status']
@@ -441,10 +435,8 @@ def get_filter_options():
             
             if race_status == 'completed':
                 summary_map[name]['completed'] += 1
-                # Update last race winner (assuming races ordered by race_number)
                 if r['race_number'] > summary_map[name]['last_race_number']:
                     summary_map[name]['last_race_number'] = r['race_number']
-                    # Find winner
                     winner_entry = next((e for e in r.get('hranalyzer_race_entries', []) if e['finish_position'] == 1), None)
                     if winner_entry and winner_entry.get('hranalyzer_horses'):
                         summary_map[name]['last_race_winner'] = winner_entry['hranalyzer_horses']['horse_name']
@@ -454,45 +446,38 @@ def get_filter_options():
                 summary_map[name]['cancelled'] += 1
             else:
                 summary_map[name]['upcoming'] += 1
-                
-                # Update next race time (Find the FIRST upcoming race that is in the future)
-                # SKIP if it is cancelled! (Logic already in elif above but being safe)
                 if race_status != 'cancelled':
-                    if True: # Always try to parse time for better data
-                        post_time_str = r.get('post_time')
-                        if post_time_str:
-                            try:
-                                # Clean "Post Time" text if present
-                                clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
-                                clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
+                    post_time_str = r.get('post_time')
+                    if post_time_str:
+                        try:
+                            clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
+                            clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
+                            
+                            pt = None
+                            for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
+                                try:
+                                    pt = datetime.strptime(clean_time_str, fmt).time()
+                                    break
+                                except ValueError:
+                                    continue
+                            
+                            if pt:
+                                target_dt = datetime.strptime(target_summary_date, "%Y-%m-%d").date()
+                                dt = datetime.combine(target_dt, pt)
                                 
-                                # Parse TIME
-                                pt = None
-                                for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
-                                    try:
-                                        pt = datetime.strptime(clean_time_str, fmt).time()
-                                        break
-                                    except ValueError:
-                                        continue
+                                tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
+                                if not tz_name: tz_name = 'America/New_York'
                                 
-                                if pt:
-                                    target_dt = datetime.strptime(target_summary_date, "%Y-%m-%d").date()
-                                    dt = datetime.combine(target_dt, pt)
-                                    
-                                    tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
-                                    if not tz_name: tz_name = 'America/New_York'
-                                    
-                                    local_tz = pytz.timezone(tz_name)
-                                    localized = local_tz.localize(dt)
-                                    
-                                    if summary_map[name]['next_race_iso'] is None:
-                                        summary_map[name]['next_race_iso'] = localized.isoformat()
-                                    summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
-                            except Exception:
-                                if not summary_map.get(name, {}).get('next_race_time'):
-                                    summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
+                                local_tz = pytz.timezone(tz_name)
+                                localized = local_tz.localize(dt)
+                                
+                                if summary_map[name]['next_race_iso'] is None:
+                                    summary_map[name]['next_race_iso'] = localized.isoformat()
+                                summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
+                        except Exception:
+                            if not summary_map.get(name, {}).get('next_race_time'):
+                                summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
 
-        # Final pass for fully cancelled tracks
         for name in summary_map:
             if summary_map[name]['total'] > 0 and summary_map[name]['cancelled'] == summary_map[name]['total']:
                 summary_map[name]['is_fully_cancelled'] = True
@@ -506,6 +491,8 @@ def get_filter_options():
         })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
