@@ -460,47 +460,37 @@ def get_filter_options():
                 if race_status != 'cancelled':
                     if True: # Always try to parse time for better data
                         post_time_str = r.get('post_time')
-                    if post_time_str:
-                         try:
-                             # Clean "Post Time" text if present
-                             clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
-                             clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
-                             
-                             # Parse TIME
-                             pt = None
-                             for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
-                                 try:
-                                     pt = datetime.strptime(clean_time_str, fmt).time()
-                                     break
-                                 except ValueError:
-                                     continue
-                             
-                             if pt:
-                                 target_dt = datetime.strptime(target_summary_date, "%Y-%m-%d").date()
-                                 dt = datetime.combine(target_dt, pt)
-                                 
-                                 tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
-                                 if not tz_name: tz_name = 'America/New_York'
-                                 
-                                 local_tz = pytz.timezone(tz_name)
-                                 localized = local_tz.localize(dt)
-                                 
-                                 # Logic: We want the EARLIEST upcoming race
-                                 # Since the loop is ordered by race_number, we usually just take the first one we find
-                                 # However, if we already have a next_race_iso, check if this one is earlier?
-                                 # Actually, the user wants the "Next Post".
-                                 # If we have multiple upcoming races, which one is "Next"? The one with the lowest race number usually.
-                                 # But if Race 1 is technically "upcoming" (not resulted) but time is 1 PM and now it is 5 PM,
-                                 # showing Race 1 as "Next Post" with "Post Time" (past) is correct data-wise (it IS the next unresolved race).
-                                 # The crawler needs to fix the status. Ideally backend shows "Next *Scheduled* Post".
-                                 
-                                 if summary_map[name]['next_race_iso'] is None:
-                                     summary_map[name]['next_race_iso'] = localized.isoformat()
-                                 summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
-                         except Exception as e:
-                             if not summary_map.get(name, {}).get('next_race_time'):
-                                 summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
-
+                        if post_time_str:
+                            try:
+                                # Clean "Post Time" text if present
+                                clean_time_str = post_time_str.replace("Post Time", "").replace("Post time", "").strip()
+                                clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
+                                
+                                # Parse TIME
+                                pt = None
+                                for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
+                                    try:
+                                        pt = datetime.strptime(clean_time_str, fmt).time()
+                                        break
+                                    except ValueError:
+                                        continue
+                                
+                                if pt:
+                                    target_dt = datetime.strptime(target_summary_date, "%Y-%m-%d").date()
+                                    dt = datetime.combine(target_dt, pt)
+                                    
+                                    tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
+                                    if not tz_name: tz_name = 'America/New_York'
+                                    
+                                    local_tz = pytz.timezone(tz_name)
+                                    localized = local_tz.localize(dt)
+                                    
+                                    if summary_map[name]['next_race_iso'] is None:
+                                        summary_map[name]['next_race_iso'] = localized.isoformat()
+                                    summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
+                            except Exception:
+                                if not summary_map.get(name, {}).get('next_race_time'):
+                                    summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
 
         # Final pass for fully cancelled tracks
         for name in summary_map:
