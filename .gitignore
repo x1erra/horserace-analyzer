@@ -48,3 +48,8 @@ DRF/*.pdf
 # Docker
 *.tar
 docker-compose.override.yml
+
+# Temporary Environments and Libs
+temp_venv/
+venv_backfill/
+libs/

@@ -52,7 +52,7 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'version': '1.0.2'
+            'version': '1.0.3'
         })
     except Exception as e:
         traceback.print_exc()
@@ -60,6 +60,24 @@ def health_check():
             'status': 'unhealthy',
             'error': str(e)
         }), 500
+
+
+def format_to_12h(time_str):
+    """Convert 24h time string (HH:MM:SS) to 12h format (I:MM PM)"""
+    if not time_str or time_str == 'N/A' or time_str == 'TBD':
+        return time_str
+    
+    # Remove "Post Time" if present
+    clean_time = str(time_str).replace("Post Time", "").replace("Post time", "").strip()
+    clean_time = clean_time.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
+
+    for fmt in ["%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M%p"]:
+        try:
+            pt = datetime.strptime(clean_time, fmt)
+            return pt.strftime("%-I:%M %p")
+        except ValueError:
+            continue
+    return time_str
 
 
 @app.route('/api/crawl-changes', methods=['POST'])
@@ -312,7 +330,7 @@ def get_todays_races():
                 'track_name': track_name,
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
-                'post_time': race['post_time'],
+                'post_time': format_to_12h(race['post_time']),
                 'race_type': race['race_type'],
                 'surface': race['surface'],
                 'distance': race['distance'],
@@ -349,6 +367,10 @@ def get_filter_options():
     try:
         supabase = get_supabase_client()
         today = date.today().isoformat()
+        
+        # Determine the target date for the summary
+        # If 'date' parameter provided, use it. Otherwise default to today.
+        target_summary_date = request.args.get('date', today)
 
         # 1. Get all distinct dates
         dates_response = supabase.table('hranalyzer_races')\
@@ -378,10 +400,10 @@ def get_filter_options():
                 'code': unique_tracks[name]
             })
 
-        # 3. Get detailed summary for TODAY
+        # 3. Get detailed summary for the TARGET DATE
         today_response = supabase.table('hranalyzer_races')\
             .select('*, hranalyzer_tracks(track_name, timezone), hranalyzer_race_entries(finish_position, hranalyzer_horses(horse_name))')\
-            .eq('race_date', today)\
+            .eq('race_date', target_summary_date)\
             .order('race_number')\
             .execute()
             
@@ -454,8 +476,8 @@ def get_filter_options():
                                      continue
                              
                              if pt:
-                                 today_dt = datetime.strptime(today, "%Y-%m-%d").date()
-                                 dt = datetime.combine(today_dt, pt)
+                                 target_dt = datetime.strptime(target_summary_date, "%Y-%m-%d").date()
+                                 dt = datetime.combine(target_dt, pt)
                                  
                                  tz_name = r.get('hranalyzer_tracks', {}).get('timezone', 'America/New_York')
                                  if not tz_name: tz_name = 'America/New_York'
@@ -474,13 +496,10 @@ def get_filter_options():
                                  
                                  if summary_map[name]['next_race_iso'] is None:
                                      summary_map[name]['next_race_iso'] = localized.isoformat()
-                                     summary_map[name]['next_race_time'] = localized.strftime("%I:%M %p").lstrip('0')
-                                     summary_map[name]['timezone'] = tz_name
-                                 
+                                 summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
                          except Exception as e:
-                             # print(f"Error parsing time {post_time_str}: {e}")
-                             if not summary_map[name]['next_race_time']:
-                                 summary_map[name]['next_race_time'] = post_time_str
+                             if not summary_map.get(name, {}).get('next_race_time'):
+                                 summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
 
 
         # Final pass for fully cancelled tracks
@@ -534,7 +553,7 @@ def get_past_races():
             .lte('race_date', today)\
             .order('race_date', desc=True)\
             .order('race_number', desc=False)\
-            .in_('race_status', ['completed', 'past_drf_only'])
+            .in_('race_status', ['completed', 'past_drf_only', 'cancelled'])
 
         # Filter the results join to only include top 3
         # Note: Supabase/PostgREST 'in' filter on joined resource syntax might vary or apply to all. 
@@ -602,7 +621,7 @@ def get_past_races():
                 'track_name': (race.get('track') or {}).get('track_name', race['track_code']),
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
-                'post_time': race['post_time'],
+                'post_time': format_to_12h(race['post_time']),
                 'race_type': race['race_type'],
                 'surface': race['surface'],
                 'distance': race['distance'],
@@ -1295,7 +1314,7 @@ def get_scratches():
             # Calculate time safely
             formatted_time = "N/A"
             if race.get('post_time'):
-                 formatted_time = race['post_time']
+                 formatted_time = format_to_12h(race['post_time'])
             
             scratches.append({
                 'id': item['id'],

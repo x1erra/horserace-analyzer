@@ -124,7 +124,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                 ) : track.next_race_iso ? (
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">
-                            {new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            {track.next_race_time}
                         </span>
                         <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                     </div>
@@ -149,14 +149,16 @@ export default function Dashboard() {
     const [favoriteTracks, setFavoriteTracks] = useState([]);
 
     // Filters
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [selectedTrack, setSelectedTrack] = useState('All');
     const [selectedStatus, setSelectedStatus] = useState('All'); // 'All' | 'Upcoming' | 'Completed'
+    const [availableDates, setAvailableDates] = useState([]);
 
     const [loading, setLoading] = useState(false);
     const [metaLoading, setMetaLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Fetch summary on mount
+    // Fetch summary on mount or date change
     useEffect(() => {
         // Load favorites from localStorage
         const savedFavorites = JSON.parse(localStorage.getItem('favorite_tracks')) || [];
@@ -165,9 +167,12 @@ export default function Dashboard() {
         const fetchSummary = async () => {
             try {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-                const response = await axios.get(`${baseUrl}/api/filter-options`);
+                const response = await axios.get(`${baseUrl}/api/filter-options`, {
+                    params: { date: selectedDate }
+                });
                 if (response.data) {
                     setTodaySummary(response.data.today_summary || []);
+                    setAvailableDates(response.data.dates || []);
                 }
             } catch (err) {
                 console.error("Error fetching summary:", err);
@@ -176,7 +181,7 @@ export default function Dashboard() {
             }
         };
         fetchSummary();
-    }, []);
+    }, [selectedDate]);
 
     const handleLoadRaces = async (trackOverride = null, statusOverride = null) => {
         try {
@@ -268,7 +273,19 @@ export default function Dashboard() {
 
             {/* Filter Bar */}
             <div className="bg-black/50 p-4 rounded-xl border border-purple-900/20 flex flex-col md:flex-row gap-4 items-end">
-                <div className="w-full md:w-auto flex-1 grid grid-cols-2 gap-4">
+                <div className="w-full md:w-auto flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase tracking-wider">Date</label>
+                        <select
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
+                        >
+                            {availableDates.map(d => (
+                                <option key={d} value={d}>{d === new Date().toISOString().split('T')[0] ? `Today (${d})` : d}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div>
                         <label className="block text-xs font-semibold text-gray-500 mb-1 ml-1 uppercase tracking-wider">Track</label>
                         <select

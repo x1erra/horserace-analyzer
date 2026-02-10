@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import json
+import argparse
 from datetime import date, timedelta, datetime
 from pathlib import Path
 from crawl_equibase import crawl_historical_races, COMMON_TRACKS
@@ -64,7 +65,7 @@ def log_crawl_to_database(supabase, crawl_date: str, stats: dict, status: str = 
             'crawl_date': crawl_date,
             'crawl_type': 'daily_auto',
             'status': status,
-            'tracks_processed': stats.get('tracks_processed', 0),
+            'tracks_processed': stats.get('tracks_checked', 0),
             'races_updated': stats.get('races_inserted', 0),
             'entries_updated': 0,  # We don't track this separately currently
             'error_message': stats.get('error', None) if status == 'failed' else None,
@@ -121,11 +122,28 @@ def main():
     # Check log rotation
     check_log_rotation()
 
-    # Calculate yesterday's date
-    yesterday = date.today() - timedelta(days=1)
-    crawl_date = yesterday.isoformat()
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Daily Horse Racing Crawler')
+    parser.add_validator = lambda x: datetime.strptime(x, '%Y-%m-%d').date()
+    parser.add_argument('--date', type=str, help='Target date to crawl (YYYY-MM-DD). Defaults to yesterday.')
+    args = parser.parse_args()
 
-    logger.info(f"Target date: {crawl_date}")
+    if args.date:
+        try:
+            # Validate date format
+            datetime.strptime(args.date, '%Y-%m-%d')
+            crawl_date = args.date
+            logger.info(f"Using manual target date: {crawl_date}")
+            # Convert to date object for crawler
+            target_date_obj = datetime.strptime(crawl_date, '%Y-%m-%d').date()
+        except ValueError:
+            logger.error(f"Invalid date format: {args.date}. Use YYYY-MM-DD.")
+            return EXIT_CONFIG_ERROR
+    else:
+        # Calculate yesterday's date
+        target_date_obj = date.today() - timedelta(days=1)
+        crawl_date = target_date_obj.isoformat()
+        logger.info(f"Target date: {crawl_date} (defaulting to yesterday)")
     logger.info(f"Tracks to crawl: {', '.join(COMMON_TRACKS)}")
 
     # Verify environment
@@ -133,12 +151,7 @@ def main():
         from dotenv import load_dotenv
         load_dotenv()
 
-        firecrawl_key = os.getenv('FIRECRAWL_API_KEY')
         supabase_url = os.getenv('SUPABASE_URL')
-
-        if not firecrawl_key:
-            logger.error("FIRECRAWL_API_KEY not set in environment")
-            return EXIT_CONFIG_ERROR
 
         if not supabase_url:
             logger.error("SUPABASE_URL not set in environment")
@@ -165,7 +178,7 @@ def main():
     logger.info("-" * 80)
 
     try:
-        stats = crawl_historical_races(crawl_date, COMMON_TRACKS)
+        stats = crawl_historical_races(target_date_obj, COMMON_TRACKS)
 
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
@@ -177,7 +190,7 @@ def main():
         logger.info("Summary:")
         logger.info(f"  Date: {crawl_date}")
         logger.info(f"  Duration: {duration:.1f} seconds")
-        logger.info(f"  Tracks processed: {stats.get('tracks_processed', 0)}")
+        logger.info(f"  Tracks processed: {stats.get('tracks_checked', 0)}")
         logger.info(f"  Races found: {stats.get('races_found', 0)}")
         logger.info(f"  Races inserted: {stats.get('races_inserted', 0)}")
 

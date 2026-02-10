@@ -9,7 +9,7 @@ services:
     container_name: horse-racing-backend
     restart: unless-stopped
     ports:
-      - "5002:5001"
+      - "5001:5001"
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
@@ -17,6 +17,7 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
+      - ./backend:/app/backend
     networks:
       - horse-racing-network
     healthcheck:
@@ -39,6 +40,7 @@ services:
       - TZ=America/New_York
     volumes:
       - ./logs:/var/log
+      - ./backend:/app/backend
     networks:
       - horse-racing-network
     depends_on:

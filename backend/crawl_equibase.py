@@ -11,6 +11,7 @@ import time
 import re
 import requests
 import subprocess
+import cloudscraper
 import pdfplumber
 from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Common US tracks (expand as needed)
 COMMON_TRACKS = [
     'AQU', 'BEL', 'CD', 'DMR', 'FG', 'GP', 'HOU', 'KEE', 'SA', 'SAR',
-    'TAM', 'WO', 'MD', 'PRX', 'PIM'
+    'TAM', 'WO', 'MD', 'PRX', 'PIM', 'MVR', 'TUP', 'WRD'
 ]
 
 
@@ -97,47 +98,21 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
     temp_file = f"temp_pdf_{int(time.time())}_{os.getpid()}.pdf"
     
     try:
-        logger.info(f"Downloading PDF from {pdf_url} via PowerShell")
+        logger.info(f"Downloading PDF from {pdf_url} via cloudscraper")
         
-        # Comprehensive headers to mimic Chrome on Windows exactly
-        # Note: PowerShell escaping with backticks ` or using a Headers hash
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(pdf_url, timeout=timeout)
         
-        ps_script = f"""
-        $headers = @{{
-            "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-            "Accept-Language" = "en-US,en;q=0.9"
-            "Referer" = "https://www.equibase.com/"
-            "Sec-Ch-Ua" = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"'
-            "Sec-Ch-Ua-Mobile" = "?0"
-            "Sec-Ch-Ua-Platform" = '"Windows"'
-            "Sec-Fetch-Dest" = "document"
-            "Sec-Fetch-Mode" = "navigate"
-            "Sec-Fetch-Site" = "same-origin"
-            "Sec-Fetch-User" = "?1"
-            "Upgrade-Insecure-Requests" = "1"
-        }}
-        
-        try {{
-            Invoke-WebRequest -Uri '{pdf_url}' -OutFile '{temp_file}' -Headers $headers -TimeoutSec {timeout} -ErrorAction Stop
-        }} catch {{
-            Write-Host "Error: $($_.Exception.Message)"
-            exit 1
-        }}
-        """
-        
-        # Execute PowerShell
-        # -NoProfile -NonInteractive -ExecutionPolicy Bypass
-        cmd = [
-            "powershell", 
-            "-NoProfile",
-            "-NonInteractive", 
-            "-ExecutionPolicy", "Bypass", 
-            "-Command", 
-            ps_script
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        if response.status_code == 200 and 'application/pdf' in response.headers.get('Content-Type', ''):
+            content = response.content
+            logger.info(f"Successfully downloaded PDF ({len(content)} bytes)")
+            return content
+        elif response.status_code == 404:
+            logger.warning(f"PDF not found (404) at {pdf_url}. Chart likely not generated yet.")
+            return None
+        else:
+            logger.warning(f"Download failed with status {response.status_code}. Type: {response.headers.get('Content-Type')}")
+            return None
         
         # Check if file exists and has size
         # Check if file exists and has size
@@ -287,8 +262,76 @@ def parse_race_chart_text(text: str) -> Dict:
     lines = text.split('\n')
 
     # Extract track name (usually on first line)
+    # SANITIZATION: Check if line 0 looks like a valid track name
+    # It shouldn't contain "Race", digits, or be extremely long
     if lines:
-        data['track_name'] = lines[0].strip()
+        raw_name = lines[0].strip()
+        
+        is_suspicious = False
+        if len(raw_name) > 50: is_suspicious = True
+        if re.search(r'Race\s*\d+', raw_name, re.IGNORECASE): is_suspicious = True
+        if re.search(r'\d{4}', raw_name): is_suspicious = True # Year
+        
+        # Check against common track map (expanded)
+        known_tracks = {
+            'AQUEDUCT': 'Aqueduct',
+            'BELMONT': 'Belmont Park',
+            'SARATOGA': 'Saratoga',
+            'DEL MAR': 'Del Mar',
+            'SANTA ANITA': 'Santa Anita Park',
+            'GULFSTREAM': 'Gulfstream Park',
+            'KEENELAND': 'Keeneland',
+            'CHURCHILL': 'Churchill Downs',
+            'TAMPA BAY': 'Tampa Bay Downs',
+            'OAKLAWN': 'Oaklawn Park',
+            'FAIR GROUNDS': 'Fair Grounds',
+            'WOODBINE': 'Woodbine',
+            'LAUREL': 'Laurel Park',
+            'PIMLICO': 'Pimlico',
+            'MONMOUTH': 'Monmouth Park',
+            'PARX': 'Parx Racing',
+            'PENN NATIONAL': 'Penn National',
+            'MAHONING': 'Mahoning Valley Race Course',
+            'TURF PARADISE': 'Turf Paradise',
+            'GOLDEN GATE': 'Golden Gate Fields',
+            'SAM HOUSTON': 'Sam Houston Race Park',
+            'DELTA DOWNS': 'Delta Downs',
+            'CHARLES TOWN': 'Charles Town',
+            'FINGER LAKES': 'Finger Lakes',
+            'HAWTHORNE': 'Hawthorne',
+            'HORSESHOE INDIANAPOLIS': 'Horseshoe Indianapolis',
+            'LOUISIANA DOWNS': 'Louisiana Downs',
+            'PRAIRIE MEADOWS': 'Prairie Meadows',
+            'PRESQUE ISLE': 'Presque Isle Downs',
+            'REMINGTON': 'Remington Park',
+            'RUIDOSO': 'Ruidoso Downs',
+            'SUNLAND': 'Sunland Park',
+            'TURFWAY': 'Turfway Park',
+            'WILL ROGERS': 'Will Rogers Downs',
+            'ZIA PARK': 'Zia Park'
+        }
+        
+        clean_name = None
+        upper_raw = raw_name.upper()
+        
+        # 1. Try to match known tracks
+        for key, val in known_tracks.items():
+            if key in upper_raw:
+                clean_name = val
+                break
+                
+        # 2. If no match but not suspicious, use raw
+        if not clean_name and not is_suspicious:
+            clean_name = raw_name
+            
+        # 3. If suspicious and no match, try next line? 
+        # Or just return None and let caller fallback to Track Code
+        if not clean_name and is_suspicious:
+            logger.warning(f"Suspicious track name found in PDF: '{raw_name}'. ignoring.")
+            data['track_name'] = None
+        else:
+             data['track_name'] = clean_name
+
 
     # Extract race number
     race_num_match = re.search(r'RACE\s+(\d+)', text, re.IGNORECASE)
@@ -1509,6 +1552,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
     logger.info(f"  Races failed: {stats['races_failed']}")
     logger.info("="*80 + "\n")
 
+    stats['success'] = stats['races_inserted'] > 0 or stats['races_found'] == 0
     return stats
 
 
