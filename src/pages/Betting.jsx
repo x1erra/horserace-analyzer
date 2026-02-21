@@ -6,6 +6,12 @@ import { getPostColor } from '../utils/saddleCloth';
 const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 const API_BASE_URL = `${API_ROOT}/api`;
 
+// Format dollar values with commas: 24368000 → "24,368,000.00"
+const fmtMoney = (val) => {
+    const num = parseFloat(val) || 0;
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 // Simple Tooltip Component
 const Tooltip = ({ text, children }) => {
     const [isVisible, setIsVisible] = useState(false);
@@ -339,7 +345,7 @@ export default function Betting() {
                     if (newEarnings > 0) {
                         // Refresh wallet from server as it should be credited there
                         fetchWallet();
-                        alert(`You won $${newEarnings.toFixed(2)}!`);
+                        alert(`You won $${fmtMoney(newEarnings)}!`);
                     }
 
                     // Update main state
@@ -414,7 +420,7 @@ export default function Betting() {
                 if (data.success) {
                     setBankroll(data.balance);
                     setIsBankModalOpen(false);
-                    alert(`Successfully added $${amountToAdd.toFixed(2)} to your wallet!`);
+                    alert(`Successfully added $${fmtMoney(amountToAdd)} to your wallet!`);
                 } else {
                     alert('Failed to add funds');
                 }
@@ -441,7 +447,7 @@ export default function Betting() {
                 if (data.success) {
                     setBankroll(data.balance);
                     setIsBankModalOpen(false);
-                    alert(`Successfully burned $${amountToBurn.toFixed(2)} from your wallet!`);
+                    alert(`Successfully burned $${fmtMoney(amountToBurn)} from your wallet!`);
                 } else {
                     alert(`Failed to burn funds: ${data.error}`);
                 }
@@ -473,7 +479,7 @@ export default function Betting() {
                         </div>
                         <div className="text-left">
                             <span className="block text-[10px] text-gray-400 uppercase tracking-widest font-bold">Wallet</span>
-                            <span className="block text-xl font-mono font-bold text-green-400">${bankroll.toFixed(2)}</span>
+                            <span className="block text-xl font-mono font-bold text-green-400">${fmtMoney(bankroll)}</span>
                         </div>
                         <Plus className="w-4 h-4 text-gray-500 group-hover:text-white ml-2" />
                     </button>
@@ -560,7 +566,7 @@ export default function Betting() {
                     <div>
                         <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">Net P&L</p>
                         <p className={`text-lg md:text-2xl font-bold ${stats.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {stats.pnl >= 0 ? '+' : ''}${stats.pnl.toFixed(2)}
+                            {stats.pnl >= 0 ? '+' : ''}${fmtMoney(stats.pnl)}
                         </p>
                     </div>
                 </div>
@@ -572,7 +578,7 @@ export default function Betting() {
                     </div>
                     <div>
                         <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">Wagered</p>
-                        <p className="text-lg md:text-2xl font-bold text-white">${stats.totalWagered.toFixed(2)}</p>
+                        <p className="text-lg md:text-2xl font-bold text-white">${fmtMoney(stats.totalWagered)}</p>
                     </div>
                 </div>
 
@@ -819,7 +825,7 @@ export default function Betting() {
                             </div>
                             <div className="text-right">
                                 <span className={`text-2xl font-bold ${totalCost > 0 ? 'text-white' : 'text-gray-600'}`}>
-                                    ${totalCost.toFixed(2)}
+                                    ${fmtMoney(totalCost)}
                                 </span>
                                 {isBoxBet && selectedHorseIds.length > 0 && (
                                     <p className="text-xs text-gray-400">
@@ -971,7 +977,7 @@ export default function Betting() {
                                             )}
                                         </td>
                                         <td className="p-4 text-sm text-gray-300">{ticket.bet_type}</td>
-                                        <td className="p-4 text-sm text-gray-300">${ticket.bet_cost || ticket.bet_amount}</td>
+                                        <td className="p-4 text-sm text-gray-300">${fmtMoney(ticket.bet_cost || ticket.bet_amount)}</td>
                                         <td className="p-4">
                                             <span className={`px-2 py-1 rounded text-xs font-bold ${ticket.status === 'Win' ? 'bg-green-900 text-green-200' :
                                                 ticket.status === 'Loss' ? 'bg-red-900 text-red-200' :
@@ -982,7 +988,7 @@ export default function Betting() {
                                             </span>
                                         </td>
                                         <td className="p-4 text-right text-green-400 font-bold">
-                                            {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
+                                            {ticket.payout > 0 ? `$${fmtMoney(ticket.payout)}` : '-'}
                                         </td>
                                         <td className="p-4 text-right">
                                             <button
@@ -1077,12 +1083,12 @@ export default function Betting() {
                                 <div className="flex justify-between items-center bg-black/40 p-2 rounded-md">
                                     <div>
                                         <span className="text-[10px] text-gray-500 uppercase block">Cost</span>
-                                        <span className="text-white font-medium">${ticket.bet_cost || ticket.bet_amount}</span>
+                                        <span className="text-white font-medium">${fmtMoney(ticket.bet_cost || ticket.bet_amount)}</span>
                                     </div>
                                     <div className="text-right">
                                         <span className="text-[10px] text-gray-500 uppercase block">Payout</span>
                                         <span className={`font-bold ${ticket.payout > 0 ? 'text-green-400' : 'text-gray-600'}`}>
-                                            {ticket.payout > 0 ? `$${ticket.payout.toFixed(2)}` : '-'}
+                                            {ticket.payout > 0 ? `$${fmtMoney(ticket.payout)}` : '-'}
                                         </span>
                                     </div>
                                 </div>
