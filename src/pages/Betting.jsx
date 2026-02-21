@@ -244,7 +244,7 @@ export default function Betting() {
         const totalWagered = resolved.reduce((acc, t) => acc + (parseFloat(t.bet_cost) || parseFloat(t.bet_amount) || 0), 0);
         const totalPayout = resolved.reduce((acc, t) => acc + (parseFloat(t.payout) || 0), 0);
         const pnl = totalPayout - totalWagered;
-        const roi = totalWagered > 0 ? ((pnl / totalWagered) * 100).toFixed(1) : 0;
+        const roi = totalWagered > 0 ? ((pnl / totalWagered) * 100) : 0;
 
         setStats({
             winRate: rate,
@@ -591,7 +591,7 @@ export default function Betting() {
                         <div>
                             <p className="text-[10px] md:text-xs text-gray-500 uppercase tracking-wider font-bold">ROI</p>
                             <p className={`text-lg md:text-2xl font-bold ${parseFloat(stats.roi) >= 0 ? 'text-indigo-400' : 'text-red-400'}`}>
-                                {stats.roi}%
+                                {parseFloat(stats.roi).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                             </p>
                         </div>
                     </div>
