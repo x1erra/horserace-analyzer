@@ -473,7 +473,7 @@ def get_filter_options():
                                 
                                 if summary_map[name]['next_race_iso'] is None:
                                     summary_map[name]['next_race_iso'] = localized.isoformat()
-                                summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
+                                    summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
                         except Exception:
                             if not summary_map.get(name, {}).get('next_race_time'):
                                 summary_map[name]['next_race_time'] = format_to_12h(post_time_str)
