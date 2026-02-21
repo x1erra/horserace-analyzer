@@ -81,7 +81,7 @@ export default function RaceCard({ race, linkTo, minimal = false }) {
                 </p>
                 <p className="text-sm text-white font-bold flex items-center gap-2">
                     <svg className="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    Post Time: {race.post_time_iso ? new Date(race.post_time_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : (race.post_time || 'TBD')}
+                    Post Time: {race.post_time_iso ? new Date(race.post_time_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }) : (race.post_time || 'TBD')}
                 </p>
             </div>
 
