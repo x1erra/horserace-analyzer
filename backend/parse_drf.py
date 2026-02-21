@@ -506,10 +506,42 @@ def get_or_create_track(supabase, track_code: str, track_name: str) -> Optional[
         if response.data and len(response.data) > 0:
             return response.data[0]['id']
 
+        # Determine Timezone
+        timezone_map = {
+            'TUP': 'America/Phoenix',        # Turf Paradise
+            'SA': 'America/Los_Angeles',     # Santa Anita
+            'FG': 'America/Chicago',         # Fair Grounds
+            'GG': 'America/Los_Angeles',     # Golden Gate
+            'OP': 'America/Chicago',         # Oaklawn
+            'HOU': 'America/Chicago',        # Sam Houston
+            'AQU': 'America/New_York',       # Aqueduct
+            'GP': 'America/New_York',        # Gulfstream Park
+            'TAM': 'America/New_York',       # Tampa Bay Downs
+            'PRX': 'America/New_York',       # Parx
+            'OAK': 'America/Chicago',        # Oaklawn 
+            'TP': 'America/New_York',        # Turfway (Eastern)
+            'PEN': 'America/New_York',       # Penn National
+            'CT': 'America/New_York',        # Charles Town
+            'MVR': 'America/New_York',       # Mahoning Valley
+            'LRL': 'America/New_York',       # Laurel Park
+            'DED': 'America/Chicago',        # Delta Downs
+            'FON': 'America/Chicago',        # Fonner Park
+            'HAW': 'America/Chicago',        # Hawthorne
+            'SUN': 'America/Denver',         # Sunland Park (Mountain Time)
+            'ZIA': 'America/Denver',         # Zia Park
+            'RP': 'America/Chicago',         # Remington Park
+            'WRD': 'America/Chicago',        # Will Rogers Downs
+            'LAD': 'America/Chicago',        # Louisiana Downs
+            'PRM': 'America/Chicago',        # Prairie Meadows
+        }
+        
+        tz = timezone_map.get(track_code, 'America/New_York')
+
         # Create new track
         new_track = supabase.table('hranalyzer_tracks').insert({
             'track_code': track_code,
-            'track_name': track_name or track_code
+            'track_name': track_name or track_code,
+            'timezone': tz
         }).execute()
 
         return new_track.data[0]['id'] if new_track.data else None
