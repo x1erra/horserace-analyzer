@@ -18,6 +18,7 @@ werkzeug==3.0.1
 pytz
 selenium
 beautifulsoup4
+cloudscraper
 
 # MCP Server for AI Agent Access
 mcp[cli]
