@@ -80,6 +80,38 @@ def format_to_12h(time_str):
     return time_str
 
 
+def parse_post_time_to_iso(race_date_str, post_time_str, tz_name='America/New_York'):
+    """Convert race date and post time string to an ISO 8601 string with timezone."""
+    if not post_time_str or post_time_str == 'N/A' or post_time_str == 'TBD':
+        return None
+    
+    clean_time_str = str(post_time_str).replace("Post Time", "").replace("Post time", "").strip()
+    clean_time_str = clean_time_str.replace("ET", "").replace("PT", "").replace("CT", "").replace("MT", "").strip()
+    
+    pt = None
+    for fmt in ["%I:%M %p", "%H:%M", "%H:%M:%S", "%I:%M%p"]:
+        try:
+            pt = datetime.strptime(clean_time_str, fmt).time()
+            break
+        except ValueError:
+            continue
+            
+    if pt and race_date_str:
+        try:
+            target_dt = datetime.strptime(race_date_str, "%Y-%m-%d").date()
+            dt = datetime.combine(target_dt, pt)
+            
+            if not tz_name: 
+                tz_name = 'America/New_York'
+            
+            local_tz = pytz.timezone(tz_name)
+            localized = local_tz.localize(dt)
+            return localized.isoformat()
+        except Exception:
+            return None
+    return None
+
+
 @app.route('/api/crawl-changes', methods=['POST'])
 def trigger_crawl_changes():
     """
@@ -247,7 +279,7 @@ def get_todays_races():
 
         # 1. Get ALL races for today first
         query = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name, location)')\
+            .select('*, hranalyzer_tracks(track_name, location, timezone)')\
             .eq('race_date', today)\
             .order('race_number')
             
@@ -331,6 +363,11 @@ def get_todays_races():
                 'race_number': race['race_number'],
                 'race_date': race['race_date'],
                 'post_time': format_to_12h(race['post_time']),
+                'post_time_iso': parse_post_time_to_iso(
+                    race['race_date'], 
+                    race['post_time'], 
+                    (race.get('hranalyzer_tracks') or {}).get('timezone', 'America/New_York')
+                ),
                 'race_type': race['race_type'],
                 'surface': race['surface'],
                 'distance': race['distance'],

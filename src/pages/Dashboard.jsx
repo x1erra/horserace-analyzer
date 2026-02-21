@@ -123,8 +123,8 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                     <span className="text-red-500 font-bold text-sm">CANCELLED</span>
                 ) : track.next_race_iso ? (
                     <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white">
-                            {track.next_race_time}
+                        <span className="text-sm font-bold text-white" title={track.next_race_time}>
+                            {track.next_race_iso ? new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : track.next_race_time}
                         </span>
                         <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                     </div>
