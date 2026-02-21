@@ -1,6 +1,6 @@
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -8,12 +8,13 @@ def resolve_all_pending_bets(supabase):
     """
     Check pending bets against completed races and resolve them.
     Supports Win, Place, Show, Exacta Box, Trifecta Box, Exotics.
+    Also handles stale bets (>2 days old) for cancelled or uncrawled races.
     Returns: Dict with resolution stats
     """
     try:
         # 1. Get all pending bets
         pending_bets = supabase.table('hranalyzer_bets')\
-            .select('*, hranalyzer_races(race_status, id)')\
+            .select('*, hranalyzer_races(race_status, id, race_date, is_cancelled)')\
             .eq('status', 'Pending')\
             .execute()
             
@@ -359,7 +360,96 @@ def resolve_all_pending_bets(supabase):
                     logger.error(f"Error resolving bet {bet['id']}: {e}")
                     import traceback
                     traceback.print_exc()
-            
+        
+        # =============================================
+        # STALE BET HANDLER
+        # Auto-resolve bets that are stuck pending for
+        # cancelled races or races never crawled (>2 days)
+        # =============================================
+        stale_cutoff = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        
+        # Re-fetch remaining pending bets (some may have been resolved above)
+        remaining_pending = supabase.table('hranalyzer_bets')\
+            .select('*, hranalyzer_races(race_status, id, race_date, is_cancelled)')\
+            .eq('status', 'Pending')\
+            .execute()
+        
+        for bet in (remaining_pending.data or []):
+            try:
+                race = bet.get('hranalyzer_races')
+                if not race:
+                    continue
+                
+                race_status = race.get('race_status', '')
+                race_date = race.get('race_date', '')
+                is_cancelled = race.get('is_cancelled', False)
+                
+                # Skip if race is recent (give crawler time to run)
+                if race_date and race_date > stale_cutoff:
+                    continue
+                
+                # CASE 1: Race is cancelled → Return bet with refund
+                if race_status == 'cancelled' or is_cancelled:
+                    refund_amount = float(bet.get('bet_cost') or bet.get('bet_amount') or 0)
+                    
+                    update_data = {
+                        'status': 'Returned',
+                        'payout': refund_amount,
+                        'updated_at': datetime.now().isoformat()
+                    }
+                    supabase.table('hranalyzer_bets').update(update_data).eq('id', bet['id']).execute()
+                    
+                    # Credit wallet
+                    if refund_amount > 0:
+                        try:
+                            user_ref = 'default_user'
+                            w_res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+                            if w_res.data:
+                                wallet = w_res.data
+                                new_bal = float(wallet['balance']) + refund_amount
+                                supabase.table('hranalyzer_wallets').update({'balance': new_bal}).eq('id', wallet['id']).execute()
+                                
+                                supabase.table('hranalyzer_transactions').insert({
+                                    'wallet_id': wallet['id'],
+                                    'amount': refund_amount,
+                                    'transaction_type': 'Refund',
+                                    'reference_id': bet['id'],
+                                    'description': f'Cancelled race refund for Bet {bet["id"]}'
+                                }).execute()
+                        except Exception as e:
+                            logger.error(f"Failed to refund wallet for cancelled race bet {bet['id']}: {e}")
+                    
+                    resolved_count += 1
+                    updated_bets.append({
+                        'id': bet['id'],
+                        'old_status': 'Pending',
+                        'new_status': 'Returned',
+                        'payout': refund_amount
+                    })
+                    logger.info(f"Stale handler: Returned bet {bet['id']} (Cancelled Race, Refund: {refund_amount})")
+                
+                # CASE 2: Race is >2 days old but never completed (data missed)
+                # Mark as Loss — the race happened but results were never crawled
+                elif race_status not in ['completed', 'cancelled']:
+                    update_data = {
+                        'status': 'Loss',
+                        'payout': 0,
+                        'updated_at': datetime.now().isoformat()
+                    }
+                    supabase.table('hranalyzer_bets').update(update_data).eq('id', bet['id']).execute()
+                    
+                    resolved_count += 1
+                    updated_bets.append({
+                        'id': bet['id'],
+                        'old_status': 'Pending',
+                        'new_status': 'Loss',
+                        'payout': 0
+                    })
+                    logger.info(f"Stale handler: Marked bet {bet['id']} as Loss (Race {race_date} never completed, status: {race_status})")
+                    
+            except Exception as e:
+                logger.error(f"Error in stale bet handler for bet {bet.get('id')}: {e}")
+
         return {
             'success': True,
             'resolved_count': resolved_count,

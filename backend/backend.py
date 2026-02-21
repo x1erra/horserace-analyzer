@@ -1596,23 +1596,56 @@ def get_bets():
 
 @app.route('/api/bets/<bet_id>', methods=['DELETE'])
 def delete_bet(bet_id):
-    """Delete a bet"""
+    """Delete a bet. If the bet is still Pending, refund the cost to the wallet."""
     try:
         supabase = get_supabase_client()
         
-        # Verify it exists
-        # In a real app we might check user ownership
+        # Fetch the bet first to check status and get cost for potential refund
+        bet_res = supabase.table('hranalyzer_bets').select('*').eq('id', bet_id).execute()
         
+        if not bet_res.data:
+            return jsonify({'error': 'Bet not found'}), 404
+        
+        bet = bet_res.data[0]
+        refunded = False
+        new_balance = None
+        
+        # Refund wallet if bet is still Pending
+        if bet['status'] == 'Pending':
+            refund_amount = float(bet.get('bet_cost') or bet.get('bet_amount') or 0)
+            if refund_amount > 0:
+                try:
+                    user_ref = 'default_user'
+                    w_res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+                    if w_res.data:
+                        wallet = w_res.data
+                        new_balance = float(wallet['balance']) + refund_amount
+                        supabase.table('hranalyzer_wallets').update({'balance': new_balance}).eq('id', wallet['id']).execute()
+                        
+                        # Log the refund transaction
+                        supabase.table('hranalyzer_transactions').insert({
+                            'wallet_id': wallet['id'],
+                            'amount': refund_amount,
+                            'transaction_type': 'Refund',
+                            'reference_id': bet['id'],
+                            'description': f'Bet deleted (refund)'
+                        }).execute()
+                        refunded = True
+                except Exception as e:
+                    print(f"Wallet refund failed for deleted bet {bet_id}: {e}")
+        
+        # Now delete the bet
         response = supabase.table('hranalyzer_bets').delete().eq('id', bet_id).execute()
         
-        if not response.data:
-            return jsonify({'error': 'Bet not found or already deleted'}), 404
-            
-        return jsonify({
+        result = {
             'success': True,
-            'message': 'Bet deleted',
-            'deleted_bet': response.data[0]
-        })
+            'message': 'Bet deleted' + (' and refunded' if refunded else ''),
+            'deleted_bet': response.data[0] if response.data else bet
+        }
+        if new_balance is not None:
+            result['new_balance'] = new_balance
+            
+        return jsonify(result)
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -1620,18 +1653,41 @@ def delete_bet(bet_id):
 
 @app.route('/api/bets', methods=['DELETE'])
 def delete_all_bets():
-    """Delete ALL bets (Reset Stats)"""
+    """Delete ALL bets (Reset Stats). Refunds all pending bets to wallet first."""
     try:
         supabase = get_supabase_client()
         
+        # Refund all pending bets before deleting
+        total_refund = 0
+        try:
+            pending = supabase.table('hranalyzer_bets').select('id, bet_cost, bet_amount').eq('status', 'Pending').execute()
+            if pending.data:
+                for bet in pending.data:
+                    total_refund += float(bet.get('bet_cost') or bet.get('bet_amount') or 0)
+            
+            if total_refund > 0:
+                user_ref = 'default_user'
+                w_res = supabase.table('hranalyzer_wallets').select('*').eq('user_ref', user_ref).single().execute()
+                if w_res.data:
+                    wallet = w_res.data
+                    new_bal = float(wallet['balance']) + total_refund
+                    supabase.table('hranalyzer_wallets').update({'balance': new_bal}).eq('id', wallet['id']).execute()
+                    
+                    supabase.table('hranalyzer_transactions').insert({
+                        'wallet_id': wallet['id'],
+                        'amount': total_refund,
+                        'transaction_type': 'Refund',
+                        'description': f'All bets reset (refund of {len(pending.data)} pending bets)'
+                    }).execute()
+        except Exception as e:
+            print(f"Batch refund failed: {e}")
+        
         # Delete all rows
-        # Supabase delete without filters deletes all rows? carefully check metadata
-        # Usually need a filter like .neq('id', 0) to be safe or allowed
         response = supabase.table('hranalyzer_bets').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
         
         return jsonify({
             'success': True,
-            'message': 'All bets deleted'
+            'message': f'All bets deleted. Refunded ${total_refund:.2f} from pending bets.'
         })
     except Exception as e:
         traceback.print_exc()

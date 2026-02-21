@@ -364,7 +364,9 @@ export default function Betting() {
             if (res.ok) {
                 setTickets([]);
                 calculateStats([]);
-                alert('All betting history has been deleted.');
+                // Refresh wallet to reflect any pending bet refunds
+                fetchWallet();
+                alert('All betting history has been deleted. Pending bets refunded.');
             } else {
                 alert('Failed to delete betting history.');
             }
@@ -379,6 +381,13 @@ export default function Betting() {
         try {
             const res = await fetch(`${API_BASE_URL}/bets/${ticketId}`, { method: 'DELETE' });
             if (res.ok) {
+                const data = await res.json();
+                // Sync wallet if refund occurred
+                if (data.new_balance !== undefined) {
+                    setBankroll(data.new_balance);
+                } else {
+                    fetchWallet();
+                }
                 // Remove from state
                 const remaining = tickets.filter(t => t.id !== ticketId);
                 setTickets(remaining);
