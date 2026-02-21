@@ -87,6 +87,45 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # MCP Server for AI Agent Access
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: horse-racing-mcp:latest
+    container_name: horse-racing-mcp
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TZ=America/New_York
+    networks:
+      - horse-racing-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          memory: 128M
+    command: [ "python3", "backend/mcp_server.py" ]
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://localhost:8001/mcp', timeout=5)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   horse-racing-network:
     driver: bridge

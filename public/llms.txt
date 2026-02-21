@@ -1,0 +1,70 @@
+# TrackData.live
+
+> Horse racing data platform providing real-time race information, results, entries, scratches, claims, and horse profiles for US thoroughbred tracks.
+
+## API Base URL
+
+All API endpoints are available at the backend server. Replace `{BASE}` with your backend URL (e.g., `https://your-backend-domain.com`).
+
+## Available Data (Read-Only GET Endpoints)
+
+### Today's Races
+- Endpoint: `GET {BASE}/api/todays-races`
+- Params: `track` (track code, e.g., "GP"), `status` ("Upcoming", "Completed", "All")
+- Returns: List of today's races with entries, post times, race types
+
+### Past Race Results
+- Endpoint: `GET {BASE}/api/past-races`
+- Params: `track` (track code), `start_date` (YYYY-MM-DD), `end_date` (YYYY-MM-DD), `limit` (default 50)
+- Returns: Historical race results with winners, payouts, finish positions
+
+### Race Details
+- Endpoint: `GET {BASE}/api/race-details/{race_key}`
+- race_key format: `{TRACK_CODE}-{YYYYMMDD}-{RACE_NUMBER}` (e.g., "GP-20260221-3")
+- Returns: Full race card with all entries, horses, jockeys, trainers, odds, finish positions, payouts
+
+### Horses
+- Endpoint: `GET {BASE}/api/horses`
+- Params: `search` (horse name), `limit` (default 50), `page` (default 1)
+- Returns: Horse list with win/place/show stats, win percentage, last race info
+
+### Horse Profile
+- Endpoint: `GET {BASE}/api/horse/{horse_id}`
+- Returns: Full horse profile with breeding info, career stats, complete race history
+
+### Scratches
+- Endpoint: `GET {BASE}/api/scratches`
+- Params: `view` ("upcoming" or "all"), `page`, `limit`
+- Returns: Scratched entries with horse, track, race, and trainer info
+
+### Changes (Scratches + Jockey Changes)
+- Endpoint: `GET {BASE}/api/changes`
+- Params: `view` ("upcoming" or "all"), `mode` ("upcoming" or "history"), `page`, `limit`
+- Returns: Combined feed of scratches, jockey changes, and other race modifications
+
+### Claims
+- Endpoint: `GET {BASE}/api/claims`
+- Params: `track` (track code), `start_date`, `end_date`, `limit` (default 100)
+- Returns: Claimed horses with new trainer, new owner, and claim price
+
+### Filter Options
+- Endpoint: `GET {BASE}/api/filter-options`
+- Returns: All available track codes, dates, and today's race summary per track
+
+### Health Check
+- Endpoint: `GET {BASE}/api/health`
+- Returns: Server status and database connectivity
+
+## MCP Server
+
+An MCP (Model Context Protocol) server is also available for direct AI agent integration. Connect to `{BASE_MCP}:8001/mcp` using any MCP-compatible client for structured tool access to all the data above.
+
+## Track Codes
+
+Common track codes: GP (Gulfstream Park), AQU (Aqueduct), SA (Santa Anita), FG (Fair Grounds), TAM (Tampa Bay Downs), CD (Churchill Downs), KEE (Keeneland), PRX (Parx Racing), HOU (Sam Houston), BEL (Belmont Park), SAR (Saratoga), WO (Woodbine), DMR (Del Mar), PIM (Pimlico), MD (Monmouth Park).
+
+## Data Freshness
+
+- Race results are crawled from Equibase automatically throughout the day.
+- Upcoming race entries come from uploaded Daily Racing Form (DRF) PDFs.
+- Scratches and changes are updated in real-time via RSS feeds.
