@@ -162,76 +162,119 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
 
 def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
     """
-    Parse Equibase race chart PDF using pdfplumber
+    Parse Equibase race chart PDF (Single Race or First Race of Full Card)
     Returns: Extracted race data or None if parsing fails
     """
+    results = parse_equibase_full_card(pdf_bytes)
+    return results[0] if results else None
+
+
+def parse_equibase_full_card(pdf_bytes: bytes) -> List[Dict]:
+    """
+    Parse a "Full Card" Equibase PDF containing multiple races
+    Returns: List of race data dicts
+    """
+    all_races = []
     try:
         if not pdf_bytes.startswith(b'%PDF'):
-            logger.warning("Downloaded content is not a valid PDF (likely HTML placeholder)")
-            return None
+            logger.warning("Content is not a valid PDF")
+            return []
 
         pdf_file = BytesIO(pdf_bytes)
 
         with pdfplumber.open(pdf_file) as pdf:
-            if len(pdf.pages) == 0:
-                logger.error("PDF has no pages")
-                return None
-
-            # Extract text from first page
-            page = pdf.pages[0]
-            text = page.extract_text()
-
-            if not text:
-                logger.error("Could not extract text from PDF")
-                return None
-
-            logger.debug(f"Extracted {len(text)} characters from PDF")
-
-            # Parse the race data
-            race_data = parse_race_chart_text(text)
-
-            # Try to extract table data for horses
-            tables = page.extract_tables()
-            horses = []
-            if tables:
-                logger.info(f"Found {len(tables)} tables in PDF")
-                horses = parse_horse_table(tables, text)
+            current_race_pages = []
             
-            # Fallback to text parsing if table method failed
-            if not horses:
-                logger.info("No horses found in tables, attempting text fallback parsing")
-                horses = parse_horses_from_text(text)
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text() or ""
                 
+                # Detect if this is a NEW race header
+                # A new race chart usually starts with something containing "Race N" at the top
+                # We saw patterns like "GULFSTREAMPARK-January9,2026-Race1 ?"
+                is_header = False
+                header_match = re.search(r'Race\s*(\d+)', text[:100], re.IGNORECASE)
+                if header_match:
+                    is_header = True
                 
-            if horses:
-                # Merge WPS Payouts if available
-                wps_payouts = race_data.get('wps_payouts', {})
-                
-                # Merge Trainers from footer if missing (common in text fallback)
-                trainers_map = parse_trainers_section(text)
-                
-                for horse in horses:
-                    pgm = horse.get('program_number')
-                    
-                    # Merge WPS
-                    if pgm and pgm in wps_payouts:
-                        payout = wps_payouts[pgm]
-                        horse['win_payout'] = payout.get('win')
-                        horse['place_payout'] = payout.get('place')
-                        horse['show_payout'] = payout.get('show')
-                    
-                    # Merge Trainer if missing
-                    if not horse.get('trainer') and pgm and pgm in trainers_map:
-                         horse['trainer'] = trainers_map[pgm]
-                         logger.debug(f"Merged trainer {horse['trainer']} for horse {pgm}")
-
-                race_data['horses'] = horses
-
-            return race_data
+                if is_header:
+                    # If we have collected pages for a race, parse them
+                    if current_race_pages:
+                        race_data = parse_pages_as_race(current_race_pages)
+                        if race_data:
+                            all_races.append(race_data)
+                    current_race_pages = [page]
+                else:
+                    # Continuation page for the current race
+                    if current_race_pages:
+                        current_race_pages.append(page)
+                    else:
+                        # First page of PDF might not have the header if it's messy, but usually does
+                        current_race_pages = [page]
+            
+            # Parse the final race
+            if current_race_pages:
+                race_data = parse_pages_as_race(current_race_pages)
+                if race_data:
+                    all_races.append(race_data)
 
     except Exception as e:
-        logger.error(f"Error parsing PDF: {e}")
+        logger.error(f"Error parsing full card PDF: {e}")
+        
+    return all_races
+
+
+def parse_pages_as_race(pages: List) -> Optional[Dict]:
+    """Helper to parse a group of pages representing one race"""
+    try:
+        # Combine text from all pages
+        full_text = ""
+        for page in pages:
+            full_text += (page.extract_text() or "") + "\n"
+        
+        if not full_text:
+            return None
+            
+        # Parse metadata from full text
+        race_data = parse_race_chart_text(full_text)
+        
+        # Combine tables from all pages
+        all_tables = []
+        for page in pages:
+            tables = page.extract_tables()
+            if tables:
+                all_tables.extend(tables)
+        
+        horses = []
+        if all_tables:
+            horses = parse_horse_table(all_tables, full_text)
+            
+        if not horses:
+            horses = parse_horses_from_text(full_text)
+            
+        if horses:
+            # Payouts and scratches are usually on the primary page (first page of race)
+            # but we use full_text now so it should find them
+            wps_payouts = parse_wps_payouts(full_text)
+            trainers_map = parse_trainers_section(full_text)
+            
+            for horse in horses:
+                pgm = horse.get('program_number')
+                if pgm and pgm in wps_payouts:
+                    payout = wps_payouts[pgm]
+                    horse['win_payout'] = payout.get('win')
+                    horse['place_payout'] = payout.get('place')
+                    horse['show_payout'] = payout.get('show')
+                
+                if not horse.get('trainer') and pgm and pgm in trainers_map:
+                     horse['trainer'] = trainers_map[pgm]
+            
+            race_data['horses'] = horses
+            
+        return race_data
+    except Exception as e:
+        logger.error(f"Error parsing pages as race: {e}")
         return None
+
 
 
 def parse_race_chart_text(text: str) -> Dict:
@@ -418,9 +461,26 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
     # Try to identify columns
     header_row = main_table[0] if main_table else []
     logger.debug(f"Table header: {header_row}")
+    
+    num_cols = len(header_row)
+    combined_rows = list(main_table[1:])
+    
+    # Merge continuation tables that might be on the next page
+    for t in tables:
+        if t == main_table or not t:
+            continue
+        # Check if table matches column count closely (+/- 1 column)
+        if abs(len(t[0]) - num_cols) <= 1:
+            for row in t:
+                row_str = " ".join([str(c) for c in row if c]).lower()
+                # Skip header rows in continuation tables
+                if "horse" in row_str and ("jockey" in row_str or "pgm" in row_str):
+                    continue
+                combined_rows.append(row)
 
     # Process each row
-    for row_idx, row in enumerate(main_table[1:], start=1):
+    row_idx = 1
+    for row in combined_rows:
         if not row or len(row) < 3:
             continue
 
@@ -471,7 +531,8 @@ def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
 
         except Exception as e:
             logger.debug(f"Error parsing row {row_idx}: {e}")
-            continue
+            
+        row_idx += 1
 
     logger.info(f"Parsed {len(horses)} horses from table")
     return horses
