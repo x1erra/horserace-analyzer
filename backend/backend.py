@@ -153,7 +153,6 @@ def admin_reset_race(race_key):
             .eq('id', race_id)\
             .execute()
 
-        logger.info(f"Admin reset race {race_key}: {entry_count} entries cleared")
         return jsonify({
             'success': True,
             'race_key': race_key,
