@@ -142,6 +142,9 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
     </div>
 );
 
+// Returns today's date as YYYY-MM-DD in EST, not UTC
+const getTodayEST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
 export default function Dashboard() {
     const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'results'
     const [todaySummary, setTodaySummary] = useState([]);
@@ -149,7 +152,7 @@ export default function Dashboard() {
     const [favoriteTracks, setFavoriteTracks] = useState([]);
 
     // Filters
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [selectedDate, setSelectedDate] = useState(getTodayEST());
     const [selectedTrack, setSelectedTrack] = useState('All');
     const [selectedStatus, setSelectedStatus] = useState('All'); // 'All' | 'Upcoming' | 'Completed'
     const [availableDates, setAvailableDates] = useState([]);
@@ -282,7 +285,7 @@ export default function Dashboard() {
                             className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
                         >
                             {availableDates.map(d => (
-                                <option key={d} value={d}>{d === new Date().toISOString().split('T')[0] ? `Today (${d})` : d}</option>
+                                <option key={d} value={d}>{d === getTodayEST() ? `Today (${d})` : d}</option>
                             ))}
                         </select>
                     </div>
