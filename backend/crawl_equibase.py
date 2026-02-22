@@ -1130,8 +1130,11 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
 
         # ---------------------------------------------------------
         # ZOMBIE CLEANUP: Scratch entries that weren't updated
+        # Only run when we have a full set of results (>= 3 finishers).
+        # A partial PDF parse (e.g. only 1 horse extracted) must NOT wipe
+        # out all the pre-existing upcoming entries for the race.
         # ---------------------------------------------------------
-        if updated_entry_ids:
+        if updated_entry_ids and len(updated_entry_ids) >= 3:
             try:
                 # 1. Fetch all active (non-scratched) entries for this race
                 all_entries = supabase.table('hranalyzer_race_entries')\
@@ -1294,12 +1297,23 @@ def insert_horse_entry(supabase, race_id: int, horse_data: Dict) -> Optional[str
         try:
             # Use upsert to handle case where entries were pre-populated by DRF PDF upload
             # on_conflict specified to match unique constraint (race_id, program_number)
+            # scratched=False: restore any entries incorrectly marked scratched by zombie cleanup
+            entry_data['scratched'] = False
             res = supabase.table('hranalyzer_race_entries').upsert(entry_data, on_conflict='race_id, program_number').execute()
             logger.debug(f"Upserted entry for horse {horse_name}")
-            
+
             if res.data:
                 return res.data[0]['id']
-            
+
+            # Supabase upsert may not return data in all versions — fall back to a direct lookup
+            lookup = supabase.table('hranalyzer_race_entries')\
+                .select('id')\
+                .eq('race_id', entry_data['race_id'])\
+                .eq('program_number', entry_data['program_number'])\
+                .execute()
+            if lookup.data:
+                return lookup.data[0]['id']
+
         except Exception as e:
             logger.error(f"Error upserting horse entry: {e}")
             
@@ -1476,27 +1490,31 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
                     status = race_record['race_status']
                     
                     if status == 'completed':
-                        # Verify it has a winner (entry with finish_position=1)
+                        # Verify it has a winner AND enough finishers to be a full result.
+                        # A race with only 1 finisher likely suffered a partial PDF parse —
+                        # allow re-crawling so the full results can be captured.
                         has_winner = False
+                        finisher_count = 0
                         try:
-                            # Check for at least one entry with finish_position=1
                             w_check = supabase.table('hranalyzer_race_entries')\
-                                .select('id')\
+                                .select('id, finish_position')\
                                 .eq('race_id', race_record['id'])\
-                                .eq('finish_position', 1)\
-                                .limit(1)\
+                                .gt('finish_position', 0)\
                                 .execute()
                             if w_check.data:
-                                has_winner = True
+                                has_winner = any(e['finish_position'] == 1 for e in w_check.data)
+                                finisher_count = len(w_check.data)
                         except Exception as e:
                             logger.debug(f"Error checking winner for {race_key}: {e}")
-                            
-                        if has_winner:
-                            logger.info(f"Skipping {race_key} (Already Completed & Verified)")
+
+                        if has_winner and finisher_count >= 3:
+                            logger.info(f"Skipping {race_key} (Already Completed & Verified with {finisher_count} finishers)")
                             race_num += 1
                             # We found a valid completed race, so track has races
                             track_had_races = True
                             continue
+                        elif has_winner:
+                            logger.warning(f"Race {race_key} has winner but only {finisher_count} finisher(s). Re-crawling for full results...")
                         else:
                             logger.warning(f"Race {race_key} marked completed but has no winner. Re-crawling...")
             except Exception as e:
