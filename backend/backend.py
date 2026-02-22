@@ -112,6 +112,60 @@ def parse_post_time_to_iso(race_date_str, post_time_str, tz_name='America/New_Yo
     return None
 
 
+@app.route('/api/admin/reset-race/<race_key>', methods=['POST'])
+def admin_reset_race(race_key):
+    """
+    Admin endpoint to reset a race's entries so it can be re-crawled cleanly.
+    - Un-scratches all entries and clears finish positions
+    - Resets race_status to 'upcoming' so the crawler treats it as fresh
+    Usage: curl -X POST http://localhost:5001/api/admin/reset-race/GP-20260221-12
+    """
+    try:
+        supabase = get_supabase_client()
+
+        race_resp = supabase.table('hranalyzer_races')\
+            .select('id, race_key, race_status')\
+            .eq('race_key', race_key)\
+            .single()\
+            .execute()
+
+        if not race_resp.data:
+            return jsonify({'error': f'Race {race_key} not found'}), 404
+
+        race_id = race_resp.data['id']
+
+        # Reset all entries: un-scratch and clear finish positions
+        entries_resp = supabase.table('hranalyzer_race_entries')\
+            .select('id')\
+            .eq('race_id', race_id)\
+            .execute()
+        entry_count = len(entries_resp.data) if entries_resp.data else 0
+
+        supabase.table('hranalyzer_race_entries')\
+            .update({'scratched': False, 'finish_position': None,
+                     'win_payout': None, 'place_payout': None, 'show_payout': None})\
+            .eq('race_id', race_id)\
+            .execute()
+
+        # Reset race so the crawler will treat it as unresolved
+        supabase.table('hranalyzer_races')\
+            .update({'race_status': 'upcoming', 'winner_program_number': None, 'final_time': None})\
+            .eq('id', race_id)\
+            .execute()
+
+        logger.info(f"Admin reset race {race_key}: {entry_count} entries cleared")
+        return jsonify({
+            'success': True,
+            'race_key': race_key,
+            'entries_reset': entry_count,
+            'message': 'Race reset. Re-run the equibase crawler to repopulate results.'
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/crawl-changes', methods=['POST'])
 def trigger_crawl_changes():
     """
