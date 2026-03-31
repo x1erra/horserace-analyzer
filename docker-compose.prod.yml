@@ -1,16 +1,7 @@
-version: '3.8'
-
-# Production Docker Compose Configuration
-# Optimized for Raspberry Pi 5 with resource limits and enhanced monitoring
-
 services:
-  # Flask Backend API
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: horse-racing-backend:latest
-    container_name: horse-racing-backend
+    image: ${IMAGE_REGISTRY:-ghcr.io/x1erra}/horserace-analyzer-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${BACKEND_PUBLISHED_PORT:-5001}:5001"
@@ -20,11 +11,10 @@ services:
       - TZ=America/New_York
       - FLASK_ENV=production
     volumes:
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
     networks:
       - horse-racing-network
-    # Resource limits for Pi 5
     deploy:
       resources:
         limits:
@@ -32,40 +22,33 @@ services:
           memory: 512M
         reservations:
           memory: 256M
-    # Enhanced health check
     healthcheck:
-      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://localhost:5001/api/health/live', timeout=5)" ]
+      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://127.0.0.1:5001/api/health/live', timeout=5)" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
-    # Logging limits
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-  # Live Crawler Scheduler
   scheduler:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile.scheduler
-    image: horse-racing-scheduler:latest
-    container_name: horse-racing-scheduler
+    image: ${IMAGE_REGISTRY:-ghcr.io/x1erra}/horserace-analyzer-scheduler:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - TZ=America/New_York
     volumes:
-      - ./logs:/var/log
+      - logs_data:/var/log
     networks:
       - horse-racing-network
     depends_on:
       backend:
         condition: service_healthy
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -73,27 +56,21 @@ services:
           memory: 800M
         reservations:
           memory: 128M
-    # Health check
     healthcheck:
       test: [ "CMD", "find", "/tmp/crawler_heartbeat", "-mmin", "-20" ]
       interval: 300s
       timeout: 10s
       retries: 3
       start_period: 30s
-    # Logging limits
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-  # MCP Server for AI Agent Access
   mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: horse-racing-mcp:latest
-    container_name: horse-racing-mcp
+    image: ${IMAGE_REGISTRY:-ghcr.io/x1erra}/horserace-analyzer-mcp:${IMAGE_TAG:-latest}
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${MCP_PUBLISHED_PORT:-8001}:8001"
@@ -115,7 +92,7 @@ services:
           memory: 128M
     command: [ "python3", "backend/mcp_server.py" ]
     healthcheck:
-      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://localhost:8001/mcp', timeout=5)" ]
+      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://127.0.0.1:8001/mcp', headers={'Accept': 'text/event-stream'}, timeout=5)" ]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -129,12 +106,9 @@ services:
 networks:
   horse-racing-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
 
 volumes:
-  uploads:
+  uploads_data:
     driver: local
-  logs:
+  logs_data:
     driver: local

@@ -3,6 +3,8 @@
 
 FROM python:3.13-slim-bookworm
 
+ARG TARGETARCH
+
 # Set working directory
 WORKDIR /app
 
@@ -18,13 +20,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libicu-dev \
     && rm -rf /var/lib/apt/lists/* \
+    && case "${TARGETARCH:-arm64}" in \
+        arm64) PS_ARCH=arm64 ;; \
+        amd64) PS_ARCH=x64 ;; \
+        *) echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
+      esac \
     && mkdir -p /opt/microsoft/powershell/7 \
-    && wget -q https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/powershell-7.4.1-linux-arm64.tar.gz \
-    && tar -zxf powershell-7.4.1-linux-arm64.tar.gz -C /opt/microsoft/powershell/7 \
+    && wget -q "https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/powershell-7.4.1-linux-${PS_ARCH}.tar.gz" \
+    && tar -zxf "powershell-7.4.1-linux-${PS_ARCH}.tar.gz" -C /opt/microsoft/powershell/7 \
     && chmod +x /opt/microsoft/powershell/7/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/powershell \
-    && rm powershell-7.4.1-linux-arm64.tar.gz
+    && rm "powershell-7.4.1-linux-${PS_ARCH}.tar.gz"
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -41,7 +48,7 @@ EXPOSE 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 -c "import requests; requests.get('http://localhost:5001/api/health/live', timeout=5)" || exit 1
+    CMD python3 -c "import requests; requests.get('http://127.0.0.1:5001/api/health/live', timeout=5)" || exit 1
 
 # Run Flask backend
 CMD ["python3", "backend/backend.py"]

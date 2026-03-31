@@ -240,20 +240,10 @@ See [INTEGRATION_TEST_RESULTS.md](backend/INTEGRATION_TEST_RESULTS.md) for detai
 ### Raspberry Pi 5 with Portainer
 
 ```bash
-# Transfer code
-rsync -avz horse-racing-tool/ pi@raspberrypi.local:~/horse-racing-tool/
-
-# SSH to Pi
-ssh pi@raspberrypi.local
-cd horse-racing-tool
-
-# Configure and deploy
-cp .env.example .env
-nano .env
-docker-compose up -d
-
-# Monitor
-docker-compose logs -f
+# In Portainer, deploy from Git:
+# Repo: https://github.com/x1erra/horserace-analyzer.git
+# Compose path: docker-compose.prod.yml
+# Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, IMAGE_REGISTRY=ghcr.io/x1erra, IMAGE_TAG=latest
 ```
 
 Full guide: [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)

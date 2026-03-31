@@ -96,8 +96,8 @@ deploy:
 # Deploy full stack (production)
 deploy-prod:
 	@echo "Deploying full stack (production)..."
-	docker compose -f docker-compose.prod.yml build --no-cache
-	docker compose -f docker-compose.prod.yml up -d
+	docker compose -f docker-compose.prod.yml pull
+	docker compose -f docker-compose.prod.yml up -d --remove-orphans
 	@echo "Production deployment complete!"
 	@sleep 5
 	@make health

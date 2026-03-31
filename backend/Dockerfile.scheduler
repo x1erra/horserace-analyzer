@@ -4,6 +4,8 @@
 
 FROM python:3.11-slim
 
+ARG TARGETARCH
+
 # Set working directory
 WORKDIR /app
 
@@ -19,13 +21,18 @@ RUN apt-get update && apt-get install -y \
   ca-certificates \
   libicu-dev \
   && rm -rf /var/lib/apt/lists/* \
+  && case "${TARGETARCH:-arm64}" in \
+    arm64) PS_ARCH=arm64 ;; \
+    amd64) PS_ARCH=x64 ;; \
+    *) echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
+  esac \
   && mkdir -p /opt/microsoft/powershell/7 \
-  && wget -q https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/powershell-7.4.1-linux-arm64.tar.gz \
-  && tar -zxf powershell-7.4.1-linux-arm64.tar.gz -C /opt/microsoft/powershell/7 \
+  && wget -q "https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/powershell-7.4.1-linux-${PS_ARCH}.tar.gz" \
+  && tar -zxf "powershell-7.4.1-linux-${PS_ARCH}.tar.gz" -C /opt/microsoft/powershell/7 \
   && chmod +x /opt/microsoft/powershell/7/pwsh \
   && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh \
   && ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/powershell \
-  && rm powershell-7.4.1-linux-arm64.tar.gz
+  && rm "powershell-7.4.1-linux-${PS_ARCH}.tar.gz"
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .

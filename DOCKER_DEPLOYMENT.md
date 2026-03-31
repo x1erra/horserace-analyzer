@@ -132,29 +132,21 @@ docker-compose logs scheduler | grep "Starting crawl"
    - Click **Deploy the stack**
 
 4. **Git repository method:**
-   - Repository URL: `https://github.com/yourusername/horse-racing-tool`
-   - Compose path: `docker-compose.yml`
-   - Add environment variables
+   - Repository URL: `https://github.com/x1erra/horserace-analyzer.git`
+   - Compose path: `docker-compose.prod.yml`
+   - Add environment variables:
+     - `SUPABASE_URL`
+     - `SUPABASE_SERVICE_KEY`
+     - `IMAGE_REGISTRY=ghcr.io/x1erra`
+     - `IMAGE_TAG=latest`
+     - `BACKEND_PUBLISHED_PORT=5001`
+     - `MCP_PUBLISHED_PORT=8001`
    - Click **Deploy the stack**
 
-### Build Custom Images in Portainer
+### Portainer Update Workflow
 
-1. **Build Backend Image**
-   ```bash
-   cd /home/pi/horse-racing-tool
-   docker build -t horse-racing-backend:latest .
-   ```
-
-2. **Build Scheduler Image**
-   ```bash
-   docker build -f Dockerfile.scheduler -t horse-racing-scheduler:latest .
-   ```
-
-3. **Deploy in Portainer**
-   - Go to **Containers** → **Add container**
-   - Select image: `horse-racing-backend:latest`
-   - Configure port mappings, volumes, env vars
-   - Click **Deploy**
+Use **Pull and redeploy** on the stack after new images are published to GHCR from GitHub Actions.
+The production compose file pulls registry images and does not depend on local image builds on the Pi.
 
 ## Container Configuration Details
 
@@ -162,7 +154,7 @@ docker-compose logs scheduler | grep "Starting crawl"
 
 | Setting | Value |
 |---------|-------|
-| Image | horse-racing-backend:latest |
+| Image | ghcr.io/x1erra/horserace-analyzer-backend:latest |
 | Port | 5001:5001 |
 | Restart | unless-stopped |
 | Memory Limit | 512MB (recommended) |
@@ -173,7 +165,7 @@ docker-compose logs scheduler | grep "Starting crawl"
 
 | Setting | Value |
 |---------|-------|
-| Image | horse-racing-scheduler:latest |
+| Image | ghcr.io/x1erra/horserace-analyzer-scheduler:latest |
 | Restart | unless-stopped |
 | Memory Limit | 256MB (recommended) |
 | Environment | SUPABASE_URL, SUPABASE_SERVICE_KEY, FIRECRAWL_API_KEY, TZ |
