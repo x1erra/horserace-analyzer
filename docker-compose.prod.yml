@@ -11,8 +11,8 @@ services:
       - TZ=America/New_York
       - FLASK_ENV=production
     volumes:
-      - uploads_data:/app/uploads
-      - logs_data:/app/logs
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
     networks:
       - horse-racing-network
     deploy:
@@ -43,7 +43,7 @@ services:
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - TZ=America/New_York
     volumes:
-      - logs_data:/var/log
+      - ./logs:/var/log
     networks:
       - horse-racing-network
     depends_on:
@@ -106,9 +106,3 @@ services:
 networks:
   horse-racing-network:
     driver: bridge
-
-volumes:
-  uploads_data:
-    driver: local
-  logs_data:
-    driver: local
