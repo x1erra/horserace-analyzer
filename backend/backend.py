@@ -62,6 +62,16 @@ def health_check():
         }), 500
 
 
+@app.route('/api/health/live', methods=['GET'])
+def live_health_check():
+    """Fast liveness probe that does not depend on external services."""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'backend',
+        'version': '1.0.3'
+    })
+
+
 def format_to_12h(time_str):
     """Convert 24h time string (HH:MM:SS) to 12h format (I:MM PM)"""
     if not time_str or time_str == 'N/A' or time_str == 'TBD':
@@ -2122,4 +2132,11 @@ def get_race_data():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5001)
+    debug_enabled = str(os.getenv('FLASK_DEBUG', '')).lower() in {'1', 'true', 'yes'}
+    app.run(
+        host='0.0.0.0',
+        port=5001,
+        debug=debug_enabled,
+        use_reloader=debug_enabled,
+        threaded=True,
+    )
