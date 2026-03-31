@@ -22,16 +22,20 @@ Port mapping mismatch. The Cloudflare Tunnel points to `http://10.0.0.147:5001`,
 ssh umbrel@umbrel
 cd ~/horserace-analyzer
 
-# Force remove the orphaned/misconfigured containers
-sudo docker rm -f horse-racing-backend horse-racing-scheduler
+# See what is actually holding host port 5001
+make port-check
 
-# Redeploy from the correct docker-compose.yml (has 5001:5001)
-sudo docker compose up -d
+# Force remove the orphaned/misconfigured app containers, then rebuild
+make redeploy-clean
 
 # Verify
 curl http://localhost:5001/api/health
 curl https://api.trackdata.live/api/health
 ```
+
+If you are stuck in Portainer and the stack will not redeploy, remove the old `horse-racing-backend`
+container from **Containers** first, then redeploy the stack. The failure is not the image pull; it is
+the stale container still owning host port `5001`.
 
 **Why this happens:**
 - If something (Portainer UI, an AI agent, or a manual `docker run`) restarts the container outside of `docker compose`, it may assign a different host port.
@@ -59,7 +63,7 @@ sudo docker compose up -d
 | Component | Value |
 |-----------|-------|
 | Pi IP | `10.0.0.147` |
-| Backend host port | `5001` |
+| Backend host port | `5001` (default via `BACKEND_PUBLISHED_PORT`) |
 | Backend container port | `5001` |
 | Cloudflare Tunnel route | `api.trackdata.live` → `http://10.0.0.147:5001` |
 | Portainer | `https://10.0.0.147:9443` |

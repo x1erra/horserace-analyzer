@@ -1,4 +1,6 @@
-.PHONY: help build up down restart logs ps test clean deploy deploy-prod deploy-scheduler
+.PHONY: help build up down restart logs ps test clean deploy deploy-prod deploy-scheduler health crawl shell-backend shell-scheduler crawler-logs port-check redeploy-clean
+
+BACKEND_PUBLISHED_PORT ?= 5001
 
 # Default target
 help:
@@ -20,6 +22,8 @@ help:
 	@echo "  deploy             - Deploy full stack (dev)"
 	@echo "  deploy-prod        - Deploy full stack (production)"
 	@echo "  deploy-scheduler   - Deploy scheduler only"
+	@echo "  port-check         - Show what is listening on the backend host port"
+	@echo "  redeploy-clean     - Force-remove app containers, then rebuild/restart"
 	@echo "  health             - Check backend health"
 	@echo "  crawl              - Manually trigger crawler"
 	@echo "  shell-backend      - Shell into backend container"
@@ -69,10 +73,10 @@ ps:
 # Test endpoints
 test:
 	@echo "Testing backend health..."
-	@curl -s http://localhost:5001/api/health | python3 -m json.tool
+	@curl -s http://localhost:$(BACKEND_PUBLISHED_PORT)/api/health | python3 -m json.tool
 	@echo ""
 	@echo "Testing today's races endpoint..."
-	@curl -s http://localhost:5001/api/todays-races | python3 -m json.tool | head -20
+	@curl -s http://localhost:$(BACKEND_PUBLISHED_PORT)/api/todays-races | python3 -m json.tool | head -20
 
 # Clean up
 clean:
@@ -107,10 +111,26 @@ deploy-scheduler:
 # Check health
 health:
 	@echo "Checking backend health..."
-	@curl -s http://localhost:5001/api/health || echo "Backend not responding"
+	@curl -s http://localhost:$(BACKEND_PUBLISHED_PORT)/api/health || echo "Backend not responding"
 	@echo ""
 	@echo "Checking container status..."
 	@docker ps --filter "name=horse-racing" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+port-check:
+	@echo "Checking listeners on port $(BACKEND_PUBLISHED_PORT)..."
+	@lsof -nP -iTCP:$(BACKEND_PUBLISHED_PORT) -sTCP:LISTEN || true
+	@echo ""
+	@echo "Checking Docker publishers on port $(BACKEND_PUBLISHED_PORT)..."
+	@docker ps --filter "publish=$(BACKEND_PUBLISHED_PORT)" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+redeploy-clean:
+	@echo "Removing app containers that commonly hold port $(BACKEND_PUBLISHED_PORT)..."
+	@docker rm -f horse-racing-backend horse-racing-scheduler horse-racing-mcp 2>/dev/null || true
+	@echo "Rebuilding and starting the stack..."
+	docker compose up -d --build --remove-orphans
+	@echo "Waiting for services to settle..."
+	@sleep 5
+	@$(MAKE) health BACKEND_PUBLISHED_PORT=$(BACKEND_PUBLISHED_PORT)
 
 # Manual crawler run
 crawl:

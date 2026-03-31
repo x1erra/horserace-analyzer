@@ -252,7 +252,8 @@ docker-compose logs backend
 
 **Common issues:**
 - Missing environment variables → Check `.env` file
-- Port 5001 already in use → Change port in docker-compose.yml
+- Port 5001 already in use → Run `make port-check`, then `make redeploy-clean`
+- Need a different published host port → Set `BACKEND_PUBLISHED_PORT` in `.env`, and update any tunnel/proxy that points at `5001`
 - Database connection failed → Verify Supabase credentials
 
 ### Scheduler not running crawls
