@@ -120,6 +120,177 @@ def get_type_class(item):
     return "other"
 
 
+def _chunked(values, size=200):
+    """Yield fixed-size chunks from an iterable of values."""
+    values = list(values)
+    for index in range(0, len(values), size):
+        yield values[index:index + size]
+
+
+def _extract_nested_name(payload, *keys):
+    """Return the first non-empty nested name value from a relation payload."""
+    payload = payload or {}
+    for key in keys:
+        value = payload.get(key)
+        if value:
+            return value
+    return None
+
+
+def _get_entry_snapshot(item, entry_snapshots):
+    """Resolve an entry snapshot from inline data first, then the bulk lookup map."""
+    entry = item.get("entry") or {}
+    horse = entry.get("horse") or entry.get("hranalyzer_horses") or {}
+    jockey = entry.get("jockey") or entry.get("hranalyzer_jockeys") or {}
+    trainer = entry.get("trainer") or entry.get("hranalyzer_trainers") or {}
+
+    inline_snapshot = {
+        "id": item.get("entry_id") or entry.get("id"),
+        "program_number": entry.get("program_number"),
+        "horse_name": _extract_nested_name(horse, "horse_name"),
+        "jockey_name": _extract_nested_name(jockey, "jockey_name"),
+        "trainer_name": _extract_nested_name(trainer, "trainer_name"),
+        "weight": entry.get("weight"),
+    }
+
+    entry_id = item.get("entry_id") or entry.get("id")
+    snapshot = dict(entry_snapshots.get(entry_id, {}))
+    for key, value in inline_snapshot.items():
+        if value not in (None, "", []):
+            snapshot[key] = value
+    return snapshot
+
+
+def _get_race_snapshot(item, race_snapshots):
+    """Resolve a race snapshot from inline data first, then the bulk lookup map."""
+    race = item.get("race") or {}
+    track = race.get("track") or race.get("hranalyzer_tracks") or {}
+
+    inline_snapshot = {
+        "id": item.get("race_id") or race.get("id"),
+        "race_key": race.get("race_key"),
+        "track_code": race.get("track_code"),
+        "track_name": _extract_nested_name(track, "track_name"),
+        "race_date": race.get("race_date"),
+        "race_number": race.get("race_number"),
+        "post_time": race.get("post_time"),
+    }
+
+    race_id = item.get("race_id") or race.get("id")
+    snapshot = dict(race_snapshots.get(race_id, {}))
+    for key, value in inline_snapshot.items():
+        if value not in (None, "", []):
+            snapshot[key] = value
+    return snapshot
+
+
+def _fetch_entry_snapshots(supabase, entry_ids):
+    """Bulk-load race entry details needed to enrich change rows."""
+    snapshots = {}
+    if not entry_ids:
+        return snapshots
+
+    for chunk in _chunked(sorted({entry_id for entry_id in entry_ids if entry_id}), size=200):
+        response = (
+            supabase.table("hranalyzer_race_entries")
+            .select(
+                """
+                    id,
+                    race_id,
+                    program_number,
+                    weight,
+                    horse:hranalyzer_horses(horse_name),
+                    jockey:hranalyzer_jockeys(jockey_name),
+                    trainer:hranalyzer_trainers(trainer_name)
+                """
+            )
+            .in_("id", chunk)
+            .execute()
+        )
+
+        for row in response.data or []:
+            horse = row.get("horse") or row.get("hranalyzer_horses") or {}
+            jockey = row.get("jockey") or row.get("hranalyzer_jockeys") or {}
+            trainer = row.get("trainer") or row.get("hranalyzer_trainers") or {}
+            snapshots[row["id"]] = {
+                "id": row["id"],
+                "race_id": row.get("race_id"),
+                "program_number": row.get("program_number"),
+                "horse_name": _extract_nested_name(horse, "horse_name"),
+                "jockey_name": _extract_nested_name(jockey, "jockey_name"),
+                "trainer_name": _extract_nested_name(trainer, "trainer_name"),
+                "weight": row.get("weight"),
+            }
+
+    return snapshots
+
+
+def _fetch_race_snapshots(supabase, race_ids):
+    """Bulk-load race details needed to enrich change rows."""
+    snapshots = {}
+    if not race_ids:
+        return snapshots
+
+    for chunk in _chunked(sorted({race_id for race_id in race_ids if race_id}), size=200):
+        response = (
+            supabase.table("hranalyzer_races")
+            .select(
+                """
+                    id,
+                    race_key,
+                    track_code,
+                    race_date,
+                    race_number,
+                    post_time,
+                    track:hranalyzer_tracks(track_name)
+                """
+            )
+            .in_("id", chunk)
+            .execute()
+        )
+
+        for row in response.data or []:
+            track = row.get("track") or row.get("hranalyzer_tracks") or {}
+            snapshots[row["id"]] = {
+                "id": row["id"],
+                "race_key": row.get("race_key"),
+                "track_code": row.get("track_code"),
+                "track_name": _extract_nested_name(track, "track_name"),
+                "race_date": row.get("race_date"),
+                "race_number": row.get("race_number"),
+                "post_time": row.get("post_time"),
+            }
+
+    return snapshots
+
+
+def _build_change_record(item, entry_snapshots, race_snapshots, source, default_change_type=None):
+    """Normalize a raw change row into the shared MCP/API change shape."""
+    entry = _get_entry_snapshot(item, entry_snapshots)
+    race = _get_race_snapshot(item, race_snapshots)
+
+    return {
+        "id": item["id"],
+        "race_id": race.get("id") or item.get("race_id"),
+        "race_key": race.get("race_key"),
+        "race_date": str(race.get("race_date")) if race.get("race_date") is not None else None,
+        "track_code": race.get("track_code"),
+        "track_name": race.get("track_name") or race.get("track_code"),
+        "race_number": race.get("race_number"),
+        "post_time": race.get("post_time", "N/A"),
+        "entry_id": entry.get("id") or item.get("entry_id"),
+        "program_number": entry.get("program_number", item.get("program_number", "-")),
+        "horse_name": entry.get("horse_name") or item.get("horse_name", "Race-wide"),
+        "jockey_name": entry.get("jockey_name"),
+        "trainer_name": entry.get("trainer_name"),
+        "weight": entry.get("weight"),
+        "change_type": default_change_type or item.get("change_type"),
+        "description": item.get("description"),
+        "change_time": item.get("created_at") or item.get("change_time") or item.get("updated_at"),
+        "_source": source,
+    }
+
+
 def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
     """Mirror backend change merge and dedupe logic for MCP consumers."""
     supabase = get_supabase_client()
@@ -140,18 +311,7 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
                     change_type,
                     description,
                     created_at,
-                    entry:hranalyzer_race_entries(
-                        id,
-                        program_number,
-                        horse:hranalyzer_horses(horse_name)
-                    ),
-                    race:hranalyzer_races!inner(
-                        id,
-                        track_code,
-                        race_date,
-                        race_number,
-                        post_time
-                    )
+                    race:hranalyzer_races!inner(id)
                 """
             )
         )
@@ -165,30 +325,26 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
             changes_query = changes_query.eq("race.track_code", track)
 
         changes_response = changes_query.execute()
-        for item in changes_response.data or []:
-            race = item.get("race") or {}
-            entry = item.get("entry") or {}
-            horse = entry.get("horse") or {}
+        change_rows = changes_response.data or []
+        entry_snapshots = _fetch_entry_snapshots(
+            supabase,
+            [item.get("entry_id") for item in change_rows if item.get("entry_id")],
+        )
+        race_snapshots = _fetch_race_snapshots(
+            supabase,
+            [
+                item.get("race_id") or (item.get("race") or {}).get("id")
+                for item in change_rows
+                if item.get("race_id") or (item.get("race") or {}).get("id")
+            ],
+        )
+
+        for item in change_rows:
 
             if item.get("change_type") == "Scratch" and item.get("entry_id"):
                 entries_with_detailed_scratches.add(item["entry_id"])
 
-            all_changes.append(
-                {
-                    "id": item["id"],
-                    "race_id": race.get("id") or item.get("race_id"),
-                    "race_date": str(race.get("race_date")),
-                    "track_code": race.get("track_code"),
-                    "race_number": race.get("race_number"),
-                    "post_time": race.get("post_time", "N/A"),
-                    "program_number": entry.get("program_number", "-"),
-                    "horse_name": horse.get("horse_name", "Race-wide"),
-                    "change_type": item.get("change_type"),
-                    "description": item.get("description"),
-                    "change_time": item.get("created_at"),
-                    "_source": "changes",
-                }
-            )
+            all_changes.append(_build_change_record(item, entry_snapshots, race_snapshots, "changes"))
     except Exception:
         pass
 
@@ -197,17 +353,11 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
         .select(
             """
                 id,
+                race_id,
                 program_number,
                 scratched,
                 updated_at,
-                horse:hranalyzer_horses(horse_name),
-                race:hranalyzer_races!inner(
-                    id,
-                    track_code,
-                    race_date,
-                    race_number,
-                    post_time
-                )
+                race:hranalyzer_races!inner(id)
             """
         )
         .eq("scratched", True)
@@ -222,27 +372,29 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
         scratch_query = scratch_query.eq("race.track_code", track)
 
     scratch_response = scratch_query.execute()
-    for item in scratch_response.data or []:
+    scratch_rows = scratch_response.data or []
+    scratch_entry_snapshots = _fetch_entry_snapshots(supabase, [item["id"] for item in scratch_rows if item.get("id")])
+    scratch_race_snapshots = _fetch_race_snapshots(
+        supabase,
+        [
+            item.get("race_id") or (item.get("race") or {}).get("id")
+            for item in scratch_rows
+            if item.get("race_id") or (item.get("race") or {}).get("id")
+        ],
+    )
+
+    for item in scratch_rows:
         if item["id"] in entries_with_detailed_scratches:
             continue
 
-        race = item.get("race") or {}
-        horse = item.get("horse") or {}
         all_changes.append(
-            {
-                "id": item["id"],
-                "race_id": race.get("id"),
-                "track_code": race.get("track_code"),
-                "race_date": str(race.get("race_date")),
-                "race_number": race.get("race_number"),
-                "program_number": item.get("program_number"),
-                "horse_name": horse.get("horse_name"),
-                "change_type": "Scratch",
-                "description": "Scratched",
-                "change_time": item.get("updated_at"),
-                "post_time": race.get("post_time"),
-                "_source": "entries",
-            }
+            _build_change_record(
+                item,
+                scratch_entry_snapshots,
+                scratch_race_snapshots,
+                "entries",
+                default_change_type="Scratch",
+            )
         )
 
     normalized_map = {}
@@ -1106,30 +1258,30 @@ def get_race_changes(race_id: str) -> dict:
     """Get all changes for a specific race ID."""
     supabase = get_supabase_client()
     all_changes = []
+    race_snapshots = _fetch_race_snapshots(supabase, [race_id])
 
     scratch_response = (
         supabase.table("hranalyzer_race_entries")
         .select(
             """
-                id, program_number, scratched, updated_at,
-                horse:hranalyzer_horses(horse_name)
+                id, race_id, program_number, scratched, updated_at
             """
         )
         .eq("race_id", race_id)
         .eq("scratched", True)
         .execute()
     )
-    for item in scratch_response.data or []:
-        horse = item.get("horse") or {}
+    scratch_rows = scratch_response.data or []
+    scratch_entry_snapshots = _fetch_entry_snapshots(supabase, [item["id"] for item in scratch_rows if item.get("id")])
+    for item in scratch_rows:
         all_changes.append(
-            {
-                "id": item["id"],
-                "program_number": item.get("program_number", "-"),
-                "horse_name": horse.get("horse_name", "Unknown"),
-                "change_type": "Scratch",
-                "description": "Scratched",
-                "change_time": item.get("updated_at"),
-            }
+            _build_change_record(
+                item,
+                scratch_entry_snapshots,
+                race_snapshots,
+                "entries",
+                default_change_type="Scratch",
+            )
         )
 
     try:
@@ -1137,29 +1289,24 @@ def get_race_changes(race_id: str) -> dict:
             supabase.table("hranalyzer_changes")
             .select(
                 """
-                    id, change_type, description, change_time,
-                    entry:hranalyzer_race_entries(
-                        program_number,
-                        horse:hranalyzer_horses(horse_name)
-                    )
+                    id,
+                    entry_id,
+                    race_id,
+                    change_type,
+                    description,
+                    created_at
                 """
             )
             .eq("race_id", race_id)
             .execute()
         )
-        for item in changes_response.data or []:
-            entry = item.get("entry") or {}
-            horse = entry.get("horse") or {}
-            all_changes.append(
-                {
-                    "id": item["id"],
-                    "program_number": entry.get("program_number", "-"),
-                    "horse_name": horse.get("horse_name", "Race-wide"),
-                    "change_type": item.get("change_type"),
-                    "description": item.get("description"),
-                    "change_time": item.get("change_time"),
-                }
-            )
+        change_rows = changes_response.data or []
+        change_entry_snapshots = _fetch_entry_snapshots(
+            supabase,
+            [item.get("entry_id") for item in change_rows if item.get("entry_id")],
+        )
+        for item in change_rows:
+            all_changes.append(_build_change_record(item, change_entry_snapshots, race_snapshots, "changes"))
     except Exception:
         pass
 
