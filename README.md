@@ -119,8 +119,34 @@ horse-racing-tool/
 | `/api/todays-races` | GET | Upcoming races for today |
 | `/api/past-races` | GET | Historical completed races |
 | `/api/race-details/:key` | GET | Full race details with entries |
+| `/api/filter-options` | GET | Available tracks, dates, and track summary |
+| `/api/claims` | GET | Claims feed with race context |
+| `/api/changes` | GET | Normalized scratches and other changes |
+| `/api/scratches` | GET | Scratch feed with pagination |
+| `/api/horses` | GET | Horse search with aggregate stats |
+| `/api/horse/:id` | GET | Stable horse profile by horse ID |
+| `/api/uploads` | GET | Recent DRF upload logs |
 | `/api/upload-drf` | POST | Upload and parse DRF PDF |
-| `/api/tracks` | GET | List all tracks |
+
+## MCP Tools
+
+The project also exposes a read-only MCP server for AI agents at `http://<host>:8001/mcp`.
+
+Available MCP tools:
+
+- `get_health`
+- `get_tracks`
+- `get_recent_uploads`
+- `get_filter_options`
+- `get_todays_races`
+- `get_past_races`
+- `get_race_details`
+- `get_horses`
+- `get_horse_profile`
+- `get_scratches`
+- `get_changes`
+- `get_race_changes`
+- `get_claims`
 
 ## Database Schema
 

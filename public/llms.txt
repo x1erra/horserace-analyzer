@@ -57,7 +57,24 @@ All API endpoints are available at the backend server. Replace `{BASE}` with you
 
 ## MCP Server
 
-An MCP (Model Context Protocol) server is also available for direct AI agent integration. Connect to `{BASE_MCP}:8001/mcp` using any MCP-compatible client for structured tool access to all the data above.
+An MCP (Model Context Protocol) server is also available for direct AI agent integration. Connect to `{BASE_MCP}:8001/mcp` using any MCP-compatible client for structured tool access to the database-backed read-only tools below.
+
+### MCP Tools
+
+- `get_health`
+- `get_tracks`
+- `get_recent_uploads`
+- `get_filter_options`
+- `get_todays_races`
+- `get_past_races`
+- `get_race_details`
+- `get_horses`
+- `get_horse_profile`
+  - Prefer `horse_id` when available. `horse_name` is supported, but ambiguous matches return candidate rows instead of silently picking one.
+- `get_scratches`
+- `get_changes`
+- `get_race_changes`
+- `get_claims`
 
 ## Track Codes
 
