@@ -19,6 +19,11 @@ from io import BytesIO
 from supabase_client import get_supabase_client
 from dotenv import load_dotenv
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # pragma: no cover - dependency is installed in production images
+    curl_requests = None
+
 # Load environment variables
 load_dotenv()
 
@@ -88,6 +93,62 @@ def build_equibase_url(track_code: str, race_date: date, race_number: int) -> st
 
     url = f"https://www.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA{race_number}.pdf"
     return url
+
+
+def build_equibase_full_card_url(track_code: str, race_date: date) -> str:
+    """Build the full-card Equibase PDF URL for a track/date."""
+    date_str = race_date.strftime('%m/%d/%Y')
+    return (
+        "https://www.equibase.com/premium/eqbPDFChartPlus.cfm"
+        f"?RACE=A&BorP=P&TID={track_code}&CTRY=USA&DT={date_str}&DAY=D&STYLE=EQB"
+    )
+
+
+def parse_equibase_static_pdf_url(pdf_url: str) -> Optional[Tuple[str, date, int]]:
+    """Extract track/date/race_number from a static chart PDF URL."""
+    match = re.search(r'/([A-Z]{2,4})(\d{2})(\d{2})(\d{2})USA(\d+)\.pdf(?:\?.*)?$', pdf_url)
+    if not match:
+        return None
+
+    track_code, mm, dd, yy, race_number = match.groups()
+    race_date = datetime.strptime(f'{mm}{dd}{yy}', '%m%d%y').date()
+    return track_code, race_date, int(race_number)
+
+
+def download_full_card_pdf(track_code: str, race_date: date, timeout: int = 60) -> Optional[bytes]:
+    """
+    Download the premium full-card Equibase PDF using a browser-impersonated client.
+    This is more reliable than the static chart endpoint when Equibase's WAF is aggressive.
+    """
+    if curl_requests is None:
+        logger.warning("curl_cffi is not installed; cannot use full-card fallback downloader")
+        return None
+
+    url = build_equibase_full_card_url(track_code, race_date)
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Referer': 'https://www.equibase.com/',
+    }
+
+    try:
+        logger.info(f"Attempting full-card PDF fallback for {track_code} {race_date} via curl_cffi")
+        response = curl_requests.get(url, headers=headers, impersonate='chrome', timeout=timeout)
+        if response.status_code == 200 and response.content.startswith(b'%PDF'):
+            logger.info(f"Successfully downloaded full-card PDF ({len(response.content)} bytes)")
+            return response.content
+        logger.warning(
+            "Full-card fallback failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.error(f"Error downloading full-card PDF fallback: {e}")
+
+    return None
 
 
 def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
@@ -1053,26 +1114,58 @@ def extract_race_from_pdf(pdf_url: str, max_retries: int = 3) -> Optional[Dict]:
     Extract race data from Equibase PDF using local parsing
     Returns: Extracted race data or None if extraction fails
     """
+    fallback_meta = parse_equibase_static_pdf_url(pdf_url)
+
     for attempt in range(1, max_retries + 1):
         logger.info(f"Extracting data from {pdf_url} (attempt {attempt}/{max_retries})")
 
         # Download PDF
         pdf_bytes = download_pdf(pdf_url)
+        race_data = None
+
         if not pdf_bytes:
             logger.warning(f"Extraction attempt {attempt} failed: Could not download PDF")
-            if attempt < max_retries:
-                time.sleep(2 * attempt)  # Exponential backoff
-            continue
-
-        # Parse PDF
-        race_data = parse_equibase_pdf(pdf_bytes)
-        if race_data and race_data.get('horses'):
-            logger.info(f"Successfully extracted race with {len(race_data['horses'])} horses")
-            return race_data
         else:
+            # Parse PDF
+            race_data = parse_equibase_pdf(pdf_bytes)
+            if race_data and race_data.get('horses'):
+                logger.info(f"Successfully extracted race with {len(race_data['horses'])} horses")
+                return race_data
             logger.warning(f"Extraction attempt {attempt} failed: Could not parse race data")
-            if attempt < max_retries:
-                time.sleep(2 * attempt)
+
+        if fallback_meta:
+            track_code, race_date, race_number = fallback_meta
+            logger.info(
+                "Attempting full-card fallback for %s Race %s on %s",
+                track_code,
+                race_number,
+                race_date,
+            )
+            full_card_pdf = download_full_card_pdf(track_code, race_date)
+            if full_card_pdf:
+                try:
+                    races = parse_equibase_full_card(full_card_pdf)
+                    matched_race = next(
+                        (
+                            race for race in races
+                            if int(race.get('race_number') or 0) == race_number and race.get('horses')
+                        ),
+                        None,
+                    )
+                    if matched_race:
+                        logger.info(
+                            f"Recovered {track_code} Race {race_number} from full-card fallback "
+                            f"with {len(matched_race.get('horses', []))} horses"
+                        )
+                        return matched_race
+                    logger.warning(
+                        f"Full-card fallback did not contain a parsable race {race_number} for {track_code}"
+                    )
+                except Exception as e:
+                    logger.error(f"Full-card fallback parse failed: {e}")
+
+        if attempt < max_retries:
+            time.sleep(2 * attempt)
 
     logger.error(f"All extraction attempts failed for {pdf_url}")
     return None
