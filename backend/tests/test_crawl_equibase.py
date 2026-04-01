@@ -32,6 +32,30 @@ import crawl_equibase
 
 
 class TestCrawlEquibase(unittest.TestCase):
+    def test_build_race_map_indexes_valid_races_only(self):
+        race_map = crawl_equibase.build_race_map([
+            {"race_number": 1, "horses": [{"horse_name": "Alpha"}]},
+            {"race_number": "2", "horses": [{"horse_name": "Bravo"}]},
+            {"race_number": None, "horses": [{"horse_name": "Skip"}]},
+            {"race_number": 3, "horses": []},
+        ])
+
+        self.assertEqual(sorted(race_map.keys()), [1, 2])
+        self.assertEqual(race_map[2]["horses"][0]["horse_name"], "Bravo")
+
+    def test_download_pdf_tries_layered_downloaders_until_one_succeeds(self):
+        with patch.object(crawl_equibase, "download_pdf_via_curl_cffi", return_value=None) as curl_dl, \
+             patch.object(crawl_equibase, "download_pdf_via_cloudscraper", return_value=None) as cloud_dl, \
+             patch.object(crawl_equibase, "download_pdf_via_requests", return_value=b"%PDF via requests") as req_dl, \
+             patch.object(crawl_equibase, "download_pdf_via_powershell") as pwsh_dl:
+            content = crawl_equibase.download_pdf("https://example.test/race.pdf", timeout=12)
+
+        self.assertEqual(content, b"%PDF via requests")
+        curl_dl.assert_called_once()
+        cloud_dl.assert_called_once()
+        req_dl.assert_called_once()
+        pwsh_dl.assert_not_called()
+
     def test_parse_equibase_static_pdf_url_extracts_metadata(self):
         parsed = crawl_equibase.parse_equibase_static_pdf_url(
             "https://www.equibase.com/static/chart/pdf/PRX033126USA7.pdf"
@@ -59,6 +83,35 @@ class TestCrawlEquibase(unittest.TestCase):
 
         self.assertEqual(race["race_number"], 2)
         self.assertEqual(race["horses"][0]["horse_name"], "Bravo")
+
+    def test_extract_race_from_pdf_keeps_existing_success_path(self):
+        parsed_race = {"race_number": 2, "horses": [{"horse_name": "Bravo"}]}
+
+        with patch.object(crawl_equibase, "download_pdf", return_value=b"%PDF single race"), \
+             patch.object(crawl_equibase, "parse_equibase_pdf", return_value=parsed_race), \
+             patch.object(crawl_equibase, "download_full_card_pdf") as full_card_download:
+            race = crawl_equibase.extract_race_from_pdf(
+                "https://www.equibase.com/static/chart/pdf/PRX033126USA2.pdf",
+                max_retries=1,
+            )
+
+        self.assertEqual(race, parsed_race)
+        full_card_download.assert_not_called()
+
+    def test_extract_race_from_pdf_uses_cached_full_card_before_network(self):
+        cached_races = {
+            2: {"race_number": 2, "horses": [{"horse_name": "Bravo"}]},
+        }
+
+        with patch.object(crawl_equibase, "download_pdf") as download_pdf_mock:
+            race = crawl_equibase.extract_race_from_pdf(
+                "https://www.equibase.com/static/chart/pdf/PRX033126USA2.pdf",
+                max_retries=1,
+                cached_full_card_races=cached_races,
+            )
+
+        self.assertEqual(race["race_number"], 2)
+        download_pdf_mock.assert_not_called()
 
     def test_extract_race_from_pdf_returns_none_when_full_card_has_no_target_race(self):
         with patch.object(crawl_equibase, "download_pdf", return_value=None), \

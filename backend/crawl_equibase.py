@@ -9,6 +9,7 @@ import sys
 import logging
 import time
 import re
+import shutil
 import requests
 import subprocess
 import cloudscraper
@@ -36,6 +37,15 @@ COMMON_TRACKS = [
     'AQU', 'BEL', 'CD', 'DMR', 'FG', 'GP', 'HOU', 'KEE', 'SA', 'SAR',
     'TAM', 'WO', 'MD', 'PRX', 'PIM', 'MVR', 'TUP', 'WRD'
 ]
+
+DEFAULT_BROWSER_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    ),
+    'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Referer': 'https://www.equibase.com/',
+}
 
 
 def normalize_name(name: str) -> str:
@@ -115,38 +125,185 @@ def parse_equibase_static_pdf_url(pdf_url: str) -> Optional[Tuple[str, date, int
     return track_code, race_date, int(race_number)
 
 
+def is_pdf_bytes(content: Optional[bytes]) -> bool:
+    """Cheap validation that a response is actually a PDF."""
+    return bool(content and content.startswith(b'%PDF'))
+
+
+def build_race_map(races: List[Dict]) -> Dict[int, Dict]:
+    """Index parsed races by race number for quick reuse."""
+    race_map = {}
+    for race in races or []:
+        try:
+            race_number = int(race.get('race_number') or 0)
+        except (TypeError, ValueError):
+            continue
+        if race_number and race.get('horses'):
+            race_map[race_number] = race
+    return race_map
+
+
+def download_pdf_via_curl_cffi(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
+    if curl_requests is None:
+        return None
+
+    try:
+        response = curl_requests.get(
+            pdf_url,
+            headers=DEFAULT_BROWSER_HEADERS,
+            impersonate='chrome',
+            timeout=timeout,
+        )
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"curl_cffi downloaded PDF ({len(response.content)} bytes)")
+            return response.content
+        if response.status_code == 404:
+            logger.warning(f"curl_cffi got 404 for {pdf_url}")
+            return None
+        logger.warning(
+            "curl_cffi static download failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.warning(f"curl_cffi static download error for {pdf_url}: {e}")
+
+    return None
+
+
+def download_pdf_via_cloudscraper(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
+    try:
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(pdf_url, headers=DEFAULT_BROWSER_HEADERS, timeout=timeout)
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"cloudscraper downloaded PDF ({len(response.content)} bytes)")
+            return response.content
+        if response.status_code == 404:
+            logger.warning(f"cloudscraper got 404 for {pdf_url}")
+            return None
+        logger.warning(
+            "cloudscraper static download failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.warning(f"cloudscraper static download error for {pdf_url}: {e}")
+
+    return None
+
+
+def download_pdf_via_requests(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
+    try:
+        response = requests.get(pdf_url, headers=DEFAULT_BROWSER_HEADERS, timeout=timeout)
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"requests downloaded PDF ({len(response.content)} bytes)")
+            return response.content
+        if response.status_code == 404:
+            logger.warning(f"requests got 404 for {pdf_url}")
+            return None
+        logger.warning(
+            "requests static download failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.warning(f"requests static download error for {pdf_url}: {e}")
+
+    return None
+
+
+def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[bytes]:
+    """Last-resort downloader using pwsh inside the production container image."""
+    if shutil.which("pwsh") is None:
+        return None
+
+    temp_file = f"/tmp/equibase_{int(time.time())}_{os.getpid()}.pdf"
+    script = (
+        "$ProgressPreference='SilentlyContinue'; "
+        "$headers=@{"
+        f"'User-Agent'='{DEFAULT_BROWSER_HEADERS['User-Agent']}';"
+        f"'Accept'='{DEFAULT_BROWSER_HEADERS['Accept']}';"
+        f"'Referer'='{DEFAULT_BROWSER_HEADERS['Referer']}'"
+        "}; "
+        f"Invoke-WebRequest -Uri '{pdf_url}' -Headers $headers -OutFile '{temp_file}' -TimeoutSec {timeout}"
+    )
+
+    try:
+        result = subprocess.run(
+            ["pwsh", "-NoLogo", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 10,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(f"pwsh download failed for {pdf_url}: {result.stderr.strip()}")
+            return None
+        if not os.path.exists(temp_file):
+            logger.warning(f"pwsh did not produce a file for {pdf_url}")
+            return None
+        with open(temp_file, 'rb') as fh:
+            content = fh.read()
+        if is_pdf_bytes(content):
+            logger.info(f"pwsh downloaded PDF ({len(content)} bytes)")
+            return content
+        logger.warning(f"pwsh download for {pdf_url} was not a PDF")
+    except Exception as e:
+        logger.warning(f"pwsh static download error for {pdf_url}: {e}")
+    finally:
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+
+    return None
+
+
 def download_full_card_pdf(track_code: str, race_date: date, timeout: int = 60) -> Optional[bytes]:
     """
     Download the premium full-card Equibase PDF using a browser-impersonated client.
     This is more reliable than the static chart endpoint when Equibase's WAF is aggressive.
     """
-    if curl_requests is None:
-        logger.warning("curl_cffi is not installed; cannot use full-card fallback downloader")
-        return None
-
     url = build_equibase_full_card_url(track_code, race_date)
-    headers = {
-        'User-Agent': (
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        ),
-        'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': 'https://www.equibase.com/',
-    }
+    if curl_requests is not None:
+        try:
+            logger.info(f"Attempting full-card PDF for {track_code} {race_date} via curl_cffi")
+            response = curl_requests.get(
+                url,
+                headers=DEFAULT_BROWSER_HEADERS,
+                impersonate='chrome',
+                timeout=timeout,
+            )
+            if response.status_code == 200 and is_pdf_bytes(response.content):
+                logger.info(f"Successfully downloaded full-card PDF ({len(response.content)} bytes)")
+                return response.content
+            logger.warning(
+                "curl_cffi full-card download failed with status %s and content type %s",
+                response.status_code,
+                response.headers.get('Content-Type'),
+            )
+        except Exception as e:
+            logger.warning(f"curl_cffi full-card download error: {e}")
+
+    content = download_pdf_via_powershell(url, timeout=timeout)
+    if content:
+        logger.info(f"Recovered full-card PDF for {track_code} {race_date} via pwsh")
+        return content
 
     try:
-        logger.info(f"Attempting full-card PDF fallback for {track_code} {race_date} via curl_cffi")
-        response = curl_requests.get(url, headers=headers, impersonate='chrome', timeout=timeout)
-        if response.status_code == 200 and response.content.startswith(b'%PDF'):
-            logger.info(f"Successfully downloaded full-card PDF ({len(response.content)} bytes)")
+        logger.info(f"Attempting full-card PDF for {track_code} {race_date} via requests")
+        response = requests.get(url, headers=DEFAULT_BROWSER_HEADERS, timeout=timeout)
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"requests recovered full-card PDF ({len(response.content)} bytes)")
             return response.content
         logger.warning(
-            "Full-card fallback failed with status %s and content type %s",
+            "requests full-card download failed with status %s and content type %s",
             response.status_code,
             response.headers.get('Content-Type'),
         )
     except Exception as e:
-        logger.error(f"Error downloading full-card PDF fallback: {e}")
+        logger.warning(f"requests full-card download error: {e}")
 
     return None
 
@@ -156,69 +313,20 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
     Download PDF from Equibase using PowerShell with robust browser masquerading to bypass WAF
     Returns: PDF bytes or None if download fails
     """
-    temp_file = f"temp_pdf_{int(time.time())}_{os.getpid()}.pdf"
-    
-    try:
-        logger.info(f"Downloading PDF from {pdf_url} via cloudscraper")
-        
-        scraper = cloudscraper.create_scraper()
-        response = scraper.get(pdf_url, timeout=timeout)
-        
-        if response.status_code == 200 and 'application/pdf' in response.headers.get('Content-Type', ''):
-            content = response.content
-            logger.info(f"Successfully downloaded PDF ({len(content)} bytes)")
-            return content
-        elif response.status_code == 404:
-            logger.warning(f"PDF not found (404) at {pdf_url}. Chart likely not generated yet.")
-            return None
-        else:
-            logger.warning(f"Download failed with status {response.status_code}. Type: {response.headers.get('Content-Type')}")
-            return None
-        
-        # Check if file exists and has size
-        # Check if file exists and has size
-        if os.path.exists(temp_file):
-            size = os.path.getsize(temp_file)
-            if size < 2000: # 2KB is too small for a PDF chart
-                # Read content to see if it's a 404 or Block
-                with open(temp_file, 'rb') as f:
-                    content_head = f.read(1000)
-                
-                check_str = content_head.decode('utf-8', errors='ignore').lower()
-                
-                if "404" in check_str or "not found" in check_str or "unavailable" in check_str:
-                     logger.warning(f"PDF not found (404) at {pdf_url}. Chart likely not generated yet.")
-                else:
-                     logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked by WAF.")
+    logger.info(f"Downloading PDF from {pdf_url} using layered fallbacks")
 
-                return None
-            
-            # Validation: check first bytes
-            with open(temp_file, 'rb') as f:
-                head = f.read(4)
-            if head != b'%PDF':
-                logger.warning("File header is not %PDF. Discarding.")
-                return None
-            
-            with open(temp_file, 'rb') as f:
-                content = f.read()
-                
-            logger.info(f"Successfully downloaded PDF ({len(content)} bytes)")
+    for downloader in (
+        download_pdf_via_curl_cffi,
+        download_pdf_via_cloudscraper,
+        download_pdf_via_requests,
+        download_pdf_via_powershell,
+    ):
+        content = downloader(pdf_url, timeout=timeout)
+        if content:
             return content
-        else:
-            logger.warning(f"PowerShell download failed or file not created.")
-            return None
 
-    except Exception as e:
-        logger.error(f"Error downloading PDF: {e}")
-        return None
-        
-    finally:
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except:
-                pass
+    logger.warning(f"All static PDF download methods failed for {pdf_url}")
+    return None
 
 
 def parse_equibase_pdf(pdf_bytes: bytes) -> Optional[Dict]:
@@ -1109,12 +1217,25 @@ def parse_claims_text(text: str) -> List[Dict]:
     return claims
 
 
-def extract_race_from_pdf(pdf_url: str, max_retries: int = 3) -> Optional[Dict]:
+def extract_race_from_pdf(
+    pdf_url: str,
+    max_retries: int = 3,
+    cached_full_card_races: Optional[Dict[int, Dict]] = None,
+) -> Optional[Dict]:
     """
     Extract race data from Equibase PDF using local parsing
     Returns: Extracted race data or None if extraction fails
     """
     fallback_meta = parse_equibase_static_pdf_url(pdf_url)
+    if fallback_meta and cached_full_card_races:
+        cached_race = cached_full_card_races.get(fallback_meta[2])
+        if cached_race and cached_race.get('horses'):
+            logger.info(
+                "Using cached full-card race %s for %s",
+                fallback_meta[2],
+                fallback_meta[0],
+            )
+            return cached_race
 
     for attempt in range(1, max_retries + 1):
         logger.info(f"Extracting data from {pdf_url} (attempt {attempt}/{max_retries})")
@@ -1141,17 +1262,18 @@ def extract_race_from_pdf(pdf_url: str, max_retries: int = 3) -> Optional[Dict]:
                 race_number,
                 race_date,
             )
-            full_card_pdf = download_full_card_pdf(track_code, race_date)
-            if full_card_pdf:
+            full_card_map = cached_full_card_races
+            if not full_card_map:
+                full_card_pdf = download_full_card_pdf(track_code, race_date)
+                if full_card_pdf:
+                    try:
+                        full_card_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                    except Exception as e:
+                        logger.error(f"Full-card fallback parse failed: {e}")
+                        full_card_map = None
+            if full_card_map:
                 try:
-                    races = parse_equibase_full_card(full_card_pdf)
-                    matched_race = next(
-                        (
-                            race for race in races
-                            if int(race.get('race_number') or 0) == race_number and race.get('horses')
-                        ),
-                        None,
-                    )
+                    matched_race = full_card_map.get(race_number)
                     if matched_race:
                         logger.info(
                             f"Recovered {track_code} Race {race_number} from full-card fallback "
@@ -1631,6 +1753,22 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
         track_had_races = False
         race_num = 1
         missing_consecutive = 0
+        full_card_race_map = {}
+
+        full_card_pdf = download_full_card_pdf(track_code, target_date)
+        if full_card_pdf:
+            try:
+                full_card_race_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                if full_card_race_map:
+                    logger.info(
+                        "Loaded %s races from full-card cache for %s on %s",
+                        len(full_card_race_map),
+                        track_code,
+                        target_date,
+                    )
+            except Exception as e:
+                logger.warning(f"Could not build full-card cache for {track_code} {target_date}: {e}")
+                full_card_race_map = {}
 
         # Try up to 12 races per track
         while race_num <= 12:
@@ -1677,7 +1815,11 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
             pdf_url = build_equibase_url(track_code, target_date, race_num)
 
             # Extract race data
-            race_data = extract_race_from_pdf(pdf_url, max_retries=2)
+            race_data = extract_race_from_pdf(
+                pdf_url,
+                max_retries=2,
+                cached_full_card_races=full_card_race_map,
+            )
 
             if not race_data or not race_data.get('horses'):
                 missing_consecutive += 1
