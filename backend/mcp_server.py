@@ -7,7 +7,7 @@ Runs alongside the Flask backend on port 8001.
 import os
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytz
 from dotenv import load_dotenv
@@ -73,6 +73,37 @@ def parse_post_time_to_iso(race_date_str, post_time_str, tz_name="America/New_Yo
         except Exception:
             return None
     return None
+
+
+def derive_live_race_status(
+    race_date_str,
+    post_time_str,
+    stored_status,
+    tz_name="America/New_York",
+    has_results=False,
+    grace_minutes=20,
+):
+    """Derive a live race status from stored state plus post time."""
+    if has_results or stored_status == "completed":
+        return "completed"
+    if stored_status in {"cancelled", "delayed"}:
+        return stored_status
+    if stored_status == "past_drf_only":
+        return "past"
+
+    post_time_iso = parse_post_time_to_iso(race_date_str, post_time_str, tz_name)
+    if not post_time_iso:
+        return stored_status or "upcoming"
+
+    try:
+        post_dt = datetime.fromisoformat(post_time_iso)
+        now_dt = datetime.now(post_dt.tzinfo)
+        if now_dt >= post_dt + timedelta(minutes=grace_minutes):
+            return "past"
+    except Exception:
+        return stored_status or "upcoming"
+
+    return "upcoming"
 
 
 def is_valid_horse_name(name):
@@ -550,7 +581,14 @@ def get_filter_options(summary_date: str = "") -> dict:
         track_name = (race.get("hranalyzer_tracks") or {}).get("track_name", race["track_code"])
         entries = race.get("hranalyzer_race_entries") or []
         has_results = any(entry.get("finish_position") in [1, 2, 3] for entry in entries)
-        race_status = "completed" if has_results else race["race_status"]
+        timezone_name = (race.get("hranalyzer_tracks") or {}).get("timezone", "America/New_York")
+        race_status = derive_live_race_status(
+            race["race_date"],
+            race.get("post_time"),
+            race["race_status"],
+            timezone_name,
+            has_results=has_results,
+        )
 
         if track_name not in summary_map:
             summary_map[track_name] = {
@@ -558,6 +596,7 @@ def get_filter_options(summary_date: str = "") -> dict:
                 "track_code": race["track_code"],
                 "total": 0,
                 "upcoming": 0,
+                "past_post": 0,
                 "completed": 0,
                 "cancelled": 0,
                 "is_fully_cancelled": False,
@@ -583,16 +622,16 @@ def get_filter_options(summary_date: str = "") -> dict:
                     summary_map[track_name]["last_race_winner"] = "Unknown"
         elif race_status == "cancelled":
             summary_map[track_name]["cancelled"] += 1
-        else:
+        elif race_status == "upcoming":
             summary_map[track_name]["upcoming"] += 1
-            if summary_map[track_name]["next_race_iso"] is None:
-                tz_name = (race.get("hranalyzer_tracks") or {}).get("timezone", "America/New_York")
-                summary_map[track_name]["next_race_iso"] = parse_post_time_to_iso(
-                    target_summary_date,
-                    race.get("post_time"),
-                    tz_name,
-                )
-                summary_map[track_name]["next_race_time"] = format_to_12h(race.get("post_time"))
+            post_time_iso = parse_post_time_to_iso(target_summary_date, race.get("post_time"), timezone_name)
+            if post_time_iso:
+                current_next_iso = summary_map[track_name]["next_race_iso"]
+                if current_next_iso is None or post_time_iso < current_next_iso:
+                    summary_map[track_name]["next_race_iso"] = post_time_iso
+                    summary_map[track_name]["next_race_time"] = format_to_12h(race.get("post_time"))
+        else:
+            summary_map[track_name]["past_post"] += 1
 
     for summary in summary_map.values():
         if summary["total"] > 0 and summary["cancelled"] == summary["total"]:
@@ -665,13 +704,17 @@ def get_todays_races(track: str = "", status: str = "All") -> dict:
         if track and track != "All" and track_name != track and race["track_code"] != track:
             continue
 
-        current_status = race["race_status"]
         stats = race_stats.get(race["id"], {"count": 0, "results": []})
-        if stats["results"]:
-            current_status = "completed"
+        current_status = derive_live_race_status(
+            race["race_date"],
+            race.get("post_time"),
+            race["race_status"],
+            (race.get("hranalyzer_tracks") or {}).get("timezone", "America/New_York"),
+            has_results=bool(stats["results"]),
+        )
 
         if status and status != "All":
-            if status == "Upcoming" and current_status == "completed":
+            if status == "Upcoming" and current_status != "upcoming":
                 continue
             if status == "Completed" and current_status != "completed":
                 continue
@@ -893,9 +936,13 @@ def get_race_details(race_key: str) -> dict:
     if 0 <= current_index < len(siblings) - 1:
         navigation["next_race_key"] = siblings[current_index + 1]["race_key"]
 
-    current_status = race["race_status"]
-    if any(entry.get("finish_position") in [1, 2, 3] for entry in entries):
-        current_status = "completed"
+    current_status = derive_live_race_status(
+        race["race_date"],
+        race.get("post_time"),
+        race["race_status"],
+        (race.get("hranalyzer_tracks") or {}).get("timezone", "America/New_York"),
+        has_results=any(entry.get("finish_position") in [1, 2, 3] for entry in entries),
+    )
 
     return {
         "race": {

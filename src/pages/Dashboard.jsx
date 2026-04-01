@@ -91,13 +91,14 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                 <div className="w-full bg-purple-900/20 h-1.5 rounded-full overflow-hidden border border-purple-900/30">
                     <div
                         className="bg-green-500 h-full"
-                        style={{ width: `${((track.completed + track.cancelled) / track.total) * 100}%` }}
+                        style={{ width: `${(((track.completed || 0) + (track.cancelled || 0) + (track.past_post || 0)) / track.total) * 100}%` }}
                     ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 pt-1">
                     <div className="flex flex-col">
                         <span>{track.completed} Completed</span>
                         {track.cancelled > 0 && <span className="text-gray-600 text-[10px]">({track.cancelled} Cancelled)</span>}
+                        {track.past_post > 0 && <span className="text-orange-400 text-[10px]">{track.past_post} Awaiting Results</span>}
                     </div>
                     <span>{track.upcoming} Upcoming</span>
                 </div>
@@ -128,6 +129,8 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                         </span>
                         <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
                     </div>
+                ) : track.past_post > 0 ? (
+                    <span className="text-orange-400 font-bold text-sm">AWAITING RESULTS</span>
                 ) : track.completed + track.cancelled === track.total ? (
                     track.cancelled > 0 ? (
                         <span className="text-red-500 font-bold text-sm">CANCELLED</span>
