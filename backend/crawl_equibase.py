@@ -10,6 +10,8 @@ import logging
 import time
 import re
 import shutil
+import base64
+import tempfile
 import requests
 import subprocess
 import cloudscraper
@@ -105,26 +107,25 @@ def normalize_pgm(pgm: str) -> str:
 
 def build_equibase_url(track_code: str, race_date: date, race_number: int) -> str:
     """
-    Build Equibase PDF URL for a specific race
-    Format: https://www.equibase.com/static/chart/pdf/TTMMDDYYUSAN.pdf
+    Build the accessible TVG-hosted Equibase PDF URL for a specific race.
+    Format: https://tvg.equibase.com/static/chart/pdf/TTMMDDYYUSAN.pdf
 
-    Example: GP on 01/04/2024, Race 1 -> https://www.equibase.com/static/chart/pdf/GP010424USA1.pdf
+    Example: GP on 01/04/2024, Race 1 -> https://tvg.equibase.com/static/chart/pdf/GP010424USA1.pdf
     """
     mm = race_date.strftime('%m')
     dd = race_date.strftime('%d')
     yy = race_date.strftime('%y')
 
-    url = f"https://www.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA{race_number}.pdf"
+    url = f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA{race_number}.pdf"
     return url
 
 
 def build_equibase_full_card_url(track_code: str, race_date: date) -> str:
-    """Build the full-card Equibase PDF URL for a track/date."""
-    date_str = race_date.strftime('%m/%d/%Y')
-    return (
-        "https://www.equibase.com/premium/eqbPDFChartPlus.cfm"
-        f"?RACE=A&BorP=P&TID={track_code}&CTRY=USA&DT={date_str}&DAY=D&STYLE=EQB"
-    )
+    """Build the accessible TVG-hosted full-card Equibase PDF URL for a track/date."""
+    mm = race_date.strftime('%m')
+    dd = race_date.strftime('%d')
+    yy = race_date.strftime('%y')
+    return f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA.pdf"
 
 
 def parse_equibase_static_pdf_url(pdf_url: str) -> Optional[Tuple[str, date, int]]:
@@ -164,6 +165,189 @@ def page_looks_like_imperva(html: Optional[str]) -> bool:
         or 'onprotectioninitialized' in normalized
         or 'imperva' in normalized
     )
+
+
+def create_equibase_webdriver(download_dir: Optional[str] = None, timeout: int = 45):
+    """Create a Chromium webdriver configured for Equibase and optional file downloads."""
+    if webdriver is None or Options is None:
+        logger.warning("selenium is not installed; cannot launch Chromium for Equibase")
+        return None
+
+    options = Options()
+    for arg in (
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--window-size=1400,1200',
+    ):
+        options.add_argument(arg)
+
+    prefs = {
+        'download.prompt_for_download': False,
+        'download.directory_upgrade': True,
+        'plugins.always_open_pdf_externally': True,
+        'safebrowsing.enabled': True,
+    }
+    if download_dir:
+        prefs['download.default_directory'] = download_dir
+    options.add_experimental_option('prefs', prefs)
+
+    for binary in ('/usr/bin/chromium', '/usr/bin/chromium-browser'):
+        if os.path.exists(binary):
+            options.binary_location = binary
+            break
+
+    service_path = shutil.which('chromedriver')
+    service = Service(executable_path=service_path) if service_path else Service()
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.set_page_load_timeout(timeout)
+
+    if download_dir:
+        for command in ('Page.setDownloadBehavior', 'Browser.setDownloadBehavior'):
+            try:
+                driver.execute_cdp_cmd(
+                    command,
+                    {
+                        'behavior': 'allow',
+                        'downloadPath': download_dir,
+                        'eventsEnabled': True,
+                    },
+                )
+                break
+            except Exception:
+                continue
+
+    return driver
+
+
+def warm_equibase_browser_session(driver, target_url: str, timeout: int) -> bool:
+    """Load an Equibase page and wait for the Imperva interstitial to clear."""
+    try:
+        driver.get(target_url)
+    except Exception as e:
+        logger.warning(f"Chromium warm-up navigation failed for {target_url}: {e}")
+        return False
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            html = driver.page_source
+        except Exception:
+            html = ''
+        if not page_looks_like_imperva(html):
+            return True
+        time.sleep(1)
+
+    logger.warning("Chromium session remained on the Imperva interstitial for %s", target_url)
+    return False
+
+
+def fetch_pdf_via_browser_context(driver, pdf_url: str, timeout: int = 30) -> Optional[bytes]:
+    """Fetch the PDF inside the live browser session after Equibase challenge clearance."""
+    script = """
+const url = arguments[0];
+const done = arguments[arguments.length - 1];
+fetch(url, {
+  credentials: 'include',
+  headers: { 'Accept': 'application/pdf,application/octet-stream,*/*' }
+}).then(async (response) => {
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  done({
+    status: response.status,
+    contentType: response.headers.get('content-type') || '',
+    body: btoa(binary),
+  });
+}).catch((error) => done({ error: String(error) }));
+"""
+
+    try:
+        driver.set_script_timeout(timeout)
+        result = driver.execute_async_script(script, pdf_url)
+        if not isinstance(result, dict):
+            logger.warning("selenium browser fetch returned an unexpected payload for %s", pdf_url)
+            return None
+        if result.get('error'):
+            logger.warning("selenium browser fetch error for %s: %s", pdf_url, result['error'])
+            return None
+
+        content = base64.b64decode(result.get('body') or '')
+        if result.get('status') == 200 and is_pdf_bytes(content):
+            logger.info(f"selenium browser fetch downloaded PDF ({len(content)} bytes)")
+            return content
+        logger.warning(
+            "selenium browser fetch failed with status %s and content type %s",
+            result.get('status'),
+            result.get('contentType'),
+        )
+    except Exception as e:
+        logger.warning(f"selenium browser fetch error for {pdf_url}: {e}")
+
+    return None
+
+
+def wait_for_downloaded_pdf(download_dir: str, timeout: int = 30) -> Optional[bytes]:
+    """Wait for Chromium to place a PDF into the download directory."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            entries = os.listdir(download_dir)
+        except FileNotFoundError:
+            return None
+
+        for name in entries:
+            if name.endswith(('.crdownload', '.tmp', '.part')):
+                continue
+            path = os.path.join(download_dir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, 'rb') as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            if is_pdf_bytes(content):
+                return content
+
+        time.sleep(1)
+
+    return None
+
+
+def download_pdf_via_cookie_replay(
+    pdf_url: str,
+    cookies: Optional[Dict[str, str]],
+    timeout: int = 60,
+) -> Optional[bytes]:
+    """Replay a PDF request via requests using browser-acquired cookies."""
+    if not cookies:
+        return None
+
+    try:
+        response = requests.get(
+            pdf_url,
+            headers=DEFAULT_BROWSER_HEADERS,
+            cookies=cookies,
+            timeout=timeout,
+        )
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"selenium cookie replay downloaded PDF ({len(response.content)} bytes)")
+            return response.content
+        logger.warning(
+            "selenium cookie replay failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.warning(f"selenium cookie replay error for {pdf_url}: {e}")
+
+    return None
 
 
 def download_pdf_via_curl_cffi(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
@@ -242,41 +426,14 @@ def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional
     if cached and (time.time() - fetched_at) < COOKIE_CACHE_TTL_SECONDS:
         return cached
 
-    if webdriver is None or Options is None:
-        logger.warning("selenium is not installed; cannot harvest browser cookies for Equibase")
-        return None
-
-    options = Options()
-    for arg in (
-        '--headless=new',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--window-size=1400,1200',
-    ):
-        options.add_argument(arg)
-
-    for binary in ('/usr/bin/chromium', '/usr/bin/chromium-browser'):
-        if os.path.exists(binary):
-            options.binary_location = binary
-            break
-
-    service_path = shutil.which('chromedriver')
-    service = Service(executable_path=service_path) if service_path else Service()
     driver = None
 
     try:
         logger.info("Launching headless Chromium to satisfy Equibase protection")
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(timeout)
-        driver.get(target_url)
-
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            html = driver.page_source
-            if not page_looks_like_imperva(html):
-                break
-            time.sleep(1)
+        driver = create_equibase_webdriver(timeout=timeout)
+        if driver is None:
+            return None
+        warm_equibase_browser_session(driver, target_url, timeout)
 
         cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
         if cookies:
@@ -300,30 +457,52 @@ def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional
 
 
 def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes]:
-    """Last-resort downloader that harvests browser cookies, then re-requests the PDF."""
-    cookies = get_equibase_browser_cookies(pdf_url, timeout=min(timeout, 45))
-    if not cookies:
-        return None
+    """Last-resort downloader that uses a real browser session before falling back to cookie replay."""
+    driver = None
+    cookies = None
 
     try:
-        response = requests.get(
-            pdf_url,
-            headers=DEFAULT_BROWSER_HEADERS,
-            cookies=cookies,
-            timeout=timeout,
-        )
-        if response.status_code == 200 and is_pdf_bytes(response.content):
-            logger.info(f"selenium cookie replay downloaded PDF ({len(response.content)} bytes)")
-            return response.content
-        logger.warning(
-            "selenium cookie replay failed with status %s and content type %s",
-            response.status_code,
-            response.headers.get('Content-Type'),
-        )
-    except Exception as e:
-        logger.warning(f"selenium cookie replay error for {pdf_url}: {e}")
+        with tempfile.TemporaryDirectory(prefix='equibase_dl_') as download_dir:
+            logger.info("Launching headless Chromium for native Equibase PDF retrieval")
+            driver = create_equibase_webdriver(
+                download_dir=download_dir,
+                timeout=min(timeout, 45),
+            )
+            if driver is None:
+                return None
 
-    return None
+            warm_equibase_browser_session(driver, 'https://www.equibase.com/', min(timeout, 25))
+
+            content = fetch_pdf_via_browser_context(driver, pdf_url, timeout=min(timeout, 25))
+            if content:
+                return content
+
+            try:
+                driver.get(pdf_url)
+            except Exception as e:
+                logger.warning(f"selenium browser navigation error for {pdf_url}: {e}")
+
+            content = wait_for_downloaded_pdf(download_dir, timeout=min(timeout, 25))
+            if content:
+                logger.info(f"selenium browser download captured PDF ({len(content)} bytes)")
+                return content
+
+            cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
+            if cookies:
+                _equibase_cookie_cache['cookies'] = cookies
+                _equibase_cookie_cache['fetched_at'] = time.time()
+    except WebDriverException as e:
+        logger.warning(f"Chromium PDF retrieval failed for {pdf_url}: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected Chromium PDF retrieval error for {pdf_url}: {e}")
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    return download_pdf_via_cookie_replay(pdf_url, cookies, timeout=timeout)
 
 
 def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[bytes]:
@@ -1498,7 +1677,7 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
             'race_status': 'completed',
             'data_source': 'equibase',
             'equibase_pdf_url': build_equibase_url(track_code, race_date, race_number),
-            'equibase_chart_url': f"https://www.equibase.com/static/chart/pdf/{track_code}{race_date.strftime('%m%d%y')}USA{race_number}.pdf"
+            'equibase_chart_url': build_equibase_url(track_code, race_date, race_number),
         }
 
         # Only update post_time if we actually found one
