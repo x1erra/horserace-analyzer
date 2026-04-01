@@ -25,6 +25,17 @@ try:
 except ImportError:  # pragma: no cover - dependency is installed in production images
     curl_requests = None
 
+try:
+    from selenium import webdriver
+    from selenium.common.exceptions import WebDriverException
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+except ImportError:  # pragma: no cover - dependency is installed in scheduler image
+    webdriver = None
+    WebDriverException = Exception
+    Options = None
+    Service = None
+
 # Load environment variables
 load_dotenv()
 
@@ -46,6 +57,8 @@ DEFAULT_BROWSER_HEADERS = {
     'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Referer': 'https://www.equibase.com/',
 }
+COOKIE_CACHE_TTL_SECONDS = 20 * 60
+_equibase_cookie_cache = {'cookies': None, 'fetched_at': 0.0}
 
 
 def normalize_name(name: str) -> str:
@@ -143,6 +156,16 @@ def build_race_map(races: List[Dict]) -> Dict[int, Dict]:
     return race_map
 
 
+def page_looks_like_imperva(html: Optional[str]) -> bool:
+    """Detect the Imperva interstitial Equibase is serving to the crawler."""
+    normalized = (html or '').lower()
+    return (
+        'pardon our interruption' in normalized
+        or 'onprotectioninitialized' in normalized
+        or 'imperva' in normalized
+    )
+
+
 def download_pdf_via_curl_cffi(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
     if curl_requests is None:
         return None
@@ -208,6 +231,97 @@ def download_pdf_via_requests(pdf_url: str, timeout: int = 40) -> Optional[bytes
         )
     except Exception as e:
         logger.warning(f"requests static download error for {pdf_url}: {e}")
+
+    return None
+
+
+def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional[Dict[str, str]]:
+    """Use headless Chromium to satisfy Imperva and capture a valid Equibase cookie jar."""
+    cached = _equibase_cookie_cache.get('cookies')
+    fetched_at = _equibase_cookie_cache.get('fetched_at', 0.0)
+    if cached and (time.time() - fetched_at) < COOKIE_CACHE_TTL_SECONDS:
+        return cached
+
+    if webdriver is None or Options is None:
+        logger.warning("selenium is not installed; cannot harvest browser cookies for Equibase")
+        return None
+
+    options = Options()
+    for arg in (
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--window-size=1400,1200',
+    ):
+        options.add_argument(arg)
+
+    for binary in ('/usr/bin/chromium', '/usr/bin/chromium-browser'):
+        if os.path.exists(binary):
+            options.binary_location = binary
+            break
+
+    service_path = shutil.which('chromedriver')
+    service = Service(executable_path=service_path) if service_path else Service()
+    driver = None
+
+    try:
+        logger.info("Launching headless Chromium to satisfy Equibase protection")
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(timeout)
+        driver.get(target_url)
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            html = driver.page_source
+            if not page_looks_like_imperva(html):
+                break
+            time.sleep(1)
+
+        cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
+        if cookies:
+            _equibase_cookie_cache['cookies'] = cookies
+            _equibase_cookie_cache['fetched_at'] = time.time()
+            logger.info(f"Captured {len(cookies)} Equibase browser cookies")
+            return cookies
+        logger.warning("Browser session completed without any Equibase cookies")
+    except WebDriverException as e:
+        logger.warning(f"Chromium fallback failed while solving Equibase challenge: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected Chromium fallback error: {e}")
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    return None
+
+
+def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes]:
+    """Last-resort downloader that harvests browser cookies, then re-requests the PDF."""
+    cookies = get_equibase_browser_cookies(pdf_url, timeout=min(timeout, 45))
+    if not cookies:
+        return None
+
+    try:
+        response = requests.get(
+            pdf_url,
+            headers=DEFAULT_BROWSER_HEADERS,
+            cookies=cookies,
+            timeout=timeout,
+        )
+        if response.status_code == 200 and is_pdf_bytes(response.content):
+            logger.info(f"selenium cookie replay downloaded PDF ({len(response.content)} bytes)")
+            return response.content
+        logger.warning(
+            "selenium cookie replay failed with status %s and content type %s",
+            response.status_code,
+            response.headers.get('Content-Type'),
+        )
+    except Exception as e:
+        logger.warning(f"selenium cookie replay error for {pdf_url}: {e}")
 
     return None
 
@@ -305,6 +419,11 @@ def download_full_card_pdf(track_code: str, race_date: date, timeout: int = 60) 
     except Exception as e:
         logger.warning(f"requests full-card download error: {e}")
 
+    content = download_pdf_via_selenium(url, timeout=timeout)
+    if content:
+        logger.info(f"Recovered full-card PDF for {track_code} {race_date} via selenium cookies")
+        return content
+
     return None
 
 
@@ -320,6 +439,7 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
         download_pdf_via_cloudscraper,
         download_pdf_via_requests,
         download_pdf_via_powershell,
+        download_pdf_via_selenium,
     ):
         content = downloader(pdf_url, timeout=timeout)
         if content:

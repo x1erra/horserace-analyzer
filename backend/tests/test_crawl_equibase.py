@@ -32,6 +32,10 @@ import crawl_equibase
 
 
 class TestCrawlEquibase(unittest.TestCase):
+    def setUp(self):
+        crawl_equibase._equibase_cookie_cache['cookies'] = None
+        crawl_equibase._equibase_cookie_cache['fetched_at'] = 0.0
+
     def test_build_race_map_indexes_valid_races_only(self):
         race_map = crawl_equibase.build_race_map([
             {"race_number": 1, "horses": [{"horse_name": "Alpha"}]},
@@ -55,6 +59,35 @@ class TestCrawlEquibase(unittest.TestCase):
         cloud_dl.assert_called_once()
         req_dl.assert_called_once()
         pwsh_dl.assert_not_called()
+
+    def test_page_looks_like_imperva_detects_interstitial(self):
+        self.assertTrue(crawl_equibase.page_looks_like_imperva("<title>Pardon Our Interruption</title>"))
+        self.assertFalse(crawl_equibase.page_looks_like_imperva("<html><body>%PDF</body></html>"))
+
+    def test_download_pdf_uses_selenium_as_last_resort(self):
+        with patch.object(crawl_equibase, "download_pdf_via_curl_cffi", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_cloudscraper", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_requests", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_powershell", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_selenium", return_value=b"%PDF via selenium") as selenium_dl:
+            content = crawl_equibase.download_pdf("https://example.test/race.pdf", timeout=12)
+
+        self.assertEqual(content, b"%PDF via selenium")
+        selenium_dl.assert_called_once()
+
+    def test_download_pdf_via_selenium_replays_browser_cookies(self):
+        response = types.SimpleNamespace(
+            status_code=200,
+            content=b"%PDF from cookie replay",
+            headers={"Content-Type": "application/pdf"},
+        )
+
+        with patch.object(crawl_equibase, "get_equibase_browser_cookies", return_value={"visid": "abc"}), \
+             patch.object(crawl_equibase.requests, "get", return_value=response) as requests_get:
+            content = crawl_equibase.download_pdf_via_selenium("https://example.test/race.pdf", timeout=9)
+
+        self.assertEqual(content, b"%PDF from cookie replay")
+        self.assertEqual(requests_get.call_args.kwargs["cookies"], {"visid": "abc"})
 
     def test_parse_equibase_static_pdf_url_extracts_metadata(self):
         parsed = crawl_equibase.parse_equibase_static_pdf_url(
