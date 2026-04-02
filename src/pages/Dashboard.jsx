@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import RecentUploads from '../components/RecentUploads';
 import RaceCard from '../components/RaceCard';
@@ -7,7 +7,7 @@ import { HiStar, HiOutlineStar } from 'react-icons/hi';
 import ErrorMessage from '../components/common/ErrorMessage';
 
 // Helper component for Countdown
-const Countdown = ({ targetIso, originalTime }) => {
+const Countdown = ({ targetIso }) => {
     const [timeLeft, setTimeLeft] = useState('');
     const [isUrgent, setIsUrgent] = useState(false);
 
@@ -127,7 +127,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                         <span className="text-sm font-bold text-white" title={track.next_race_time}>
                             {track.next_race_iso ? new Date(track.next_race_iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }) : track.next_race_time}
                         </span>
-                        <Countdown targetIso={track.next_race_iso} originalTime={track.next_race_time} />
+                        <Countdown targetIso={track.next_race_iso} />
                     </div>
                 ) : track.past_post > 0 ? (
                     <span className="text-orange-400 font-bold text-sm">AWAITING RESULTS</span>
@@ -163,31 +163,43 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(false);
     const [metaLoading, setMetaLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [metaError, setMetaError] = useState(null);
 
-    // Fetch summary on mount or date change
+    // Load favorites on mount
     useEffect(() => {
-        // Load favorites from localStorage
         const savedFavorites = JSON.parse(localStorage.getItem('favorite_tracks')) || [];
         setFavoriteTracks(savedFavorites);
+    }, []);
 
-        const fetchSummary = async () => {
-            try {
-                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-                const response = await axios.get(`${baseUrl}/api/filter-options`, {
-                    params: { date: selectedDate }
-                });
-                if (response.data) {
-                    setTodaySummary(response.data.today_summary || []);
-                    setAvailableDates(response.data.dates || []);
-                }
-            } catch (err) {
-                console.error("Error fetching summary:", err);
-            } finally {
-                setMetaLoading(false);
+    const fetchSummary = useCallback(async () => {
+        setMetaLoading(true);
+        setMetaError(null);
+        try {
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+            const response = await axios.get(`${baseUrl}/api/filter-options`, {
+                params: { date: selectedDate, _t: Date.now() }
+            });
+            if (response.data) {
+                setTodaySummary(response.data.today_summary || []);
+                setAvailableDates(response.data.dates || []);
             }
-        };
-        fetchSummary();
+        } catch (err) {
+            console.error("Error fetching summary:", err);
+            const errorMessage = err.response?.data?.error || err.message || "Failed to load dashboard summary.";
+            setMetaError({
+                message: errorMessage,
+                details: `Endpoint: ${err.config?.url} | Status: ${err.response?.status || 'Network Error'}`
+            });
+            setTodaySummary([]);
+        } finally {
+            setMetaLoading(false);
+        }
     }, [selectedDate]);
+
+    // Fetch summary on date change
+    useEffect(() => {
+        fetchSummary();
+    }, [fetchSummary]);
 
     const handleLoadRaces = async (trackOverride = null, statusOverride = null) => {
         try {
@@ -254,8 +266,6 @@ export default function Dashboard() {
     }, [todaySummary, favoriteTracks]);
 
     // Calculate totals for overview
-    const totalRacesToday = todaySummary.reduce((sum, item) => sum + item.total, 0);
-
     return (
         <div className="space-y-8">
             {/* Header Area */}
@@ -349,6 +359,12 @@ export default function Dashboard() {
                 <div className="py-20 text-center">
                     <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-500"></div>
                 </div>
+            ) : metaError ? (
+                <ErrorMessage
+                    message={metaError.message}
+                    details={metaError.details}
+                    onRetry={fetchSummary}
+                />
             ) : viewMode === 'overview' ? (
                 /* Overview Mode */
                 <div className="space-y-10 animate-fadeIn">

@@ -8,6 +8,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
 venv/
 env/
 ENV/
@@ -22,6 +23,8 @@ ENV/
 # Node modules (if any)
 node_modules/
 npm-debug.log*
+dist/
+coverage/
 
 # Logs
 logs/
@@ -36,6 +39,23 @@ uploads/*
 !uploads/.gitkeep
 DRF/
 *.pdf
+chromedriver/
+
+# Frontend sources are not needed for backend/scheduler images
+src/
+public/
+package.json
+package-lock.json
+vite.config.js
+eslint.config.js
+
+# Backend tests/debug utilities are not needed in runtime images
+backend/tests/
+backend/debug_env/
+backend/INTEGRATION_TEST_RESULTS.md
+backend/DAILY_CRAWLER_SETUP.md
+backend/PI_DEPLOYMENT.md
+backend/SCHEDULER_QUICKSTART.md
 
 # Documentation
 *.md

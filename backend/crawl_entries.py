@@ -513,16 +513,20 @@ def fetch_hrn_entries(track_code, race_date):
                     # Horse Name 
                     horse_part = cols[idx_horse] if len(cols) > idx_horse else None
                     horse_name = horse_part.get_text(strip=True) if horse_part else "Unknown"
-                    # HRN puts sire info in same cell usually? 2 | Horse Name | (Sire) ...
-                    # Let's clean it up.
-                    # Usually "Horse Name\n(Score)\nSire"
-                    # Just take first line or bold part?
-                    if horse_part and horse_part.find('strong'): # bold name
-                         horse_name = horse_part.find('strong').get_text(strip=True)
-                    elif horse_part and horse_part.find('a'):
-                         horse_name = horse_part.find('a').get_text(strip=True)
-                    else:
-                         horse_name = horse_name.split('|')[0].strip()
+                    # HRN can render quarter-horse cards as:
+                    #   <td><h4>Horse Name</h4><p>Sire Name</p></td>
+                    # Using get_text(strip=True) would incorrectly concatenate horse+sire.
+                    if horse_part:
+                        preferred_name_tag = (
+                            horse_part.find('h4')
+                            or horse_part.find('strong')
+                            or horse_part.find('a')
+                        )
+                        if preferred_name_tag:
+                            horse_name = preferred_name_tag.get_text(" ", strip=True)
+                        else:
+                            stripped_text = list(horse_part.stripped_strings)
+                            horse_name = stripped_text[0] if stripped_text else "Unknown"
 
                     # Trainer / Jockey
                     tj_part = cols[idx_tj] if len(cols) > idx_tj else None

@@ -131,7 +131,19 @@ docker-compose logs scheduler | grep "Starting crawl"
      - `FIRECRAWL_API_KEY`
    - Click **Deploy the stack**
 
-4. **Git repository method:**
+4. **Git repository method (fast local rebuilds, recommended):**
+   - Repository URL: `https://github.com/x1erra/horserace-analyzer.git`
+   - Compose path: `docker-compose.portainer.yml`
+   - Add environment variables:
+     - `SUPABASE_URL`
+     - `SUPABASE_SERVICE_KEY`
+     - `ALERT_WEBHOOK_URL` (optional but recommended)
+     - `BACKEND_PUBLISHED_PORT=5001`
+     - `MCP_PUBLISHED_PORT=8001`
+   - Click **Deploy the stack**
+   - Use **Update the stack** for code changes. Portainer will rebuild locally on the Pi and reuse Docker cache.
+
+5. **Git repository method (registry images / slower):**
    - Repository URL: `https://github.com/x1erra/horserace-analyzer.git`
    - Compose path: `docker-compose.prod.yml`
    - Add environment variables:
@@ -145,8 +157,8 @@ docker-compose logs scheduler | grep "Starting crawl"
 
 ### Portainer Update Workflow
 
-Use **Pull and redeploy** on the stack after new images are published to GHCR from GitHub Actions.
-The production compose file pulls registry images and does not depend on local image builds on the Pi.
+- `docker-compose.portainer.yml`: use **Update the stack**. Portainer will fetch the repo and rebuild the backend/scheduler/MCP locally on the Pi. This is the fastest day-to-day workflow.
+- `docker-compose.prod.yml`: use **Pull and redeploy** after new images are published to GHCR from GitHub Actions. This is slower, but useful for release-style deploys.
 
 ## Container Configuration Details
 

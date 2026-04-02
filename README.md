@@ -240,8 +240,12 @@ See [INTEGRATION_TEST_RESULTS.md](backend/INTEGRATION_TEST_RESULTS.md) for detai
 ### Raspberry Pi 5 with Portainer
 
 ```bash
-# In Portainer, deploy from Git:
+# Fast Portainer path (recommended for day-to-day changes):
 # Repo: https://github.com/x1erra/horserace-analyzer.git
+# Compose path: docker-compose.portainer.yml
+# Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, ALERT_WEBHOOK_URL, BACKEND_PUBLISHED_PORT=5001, MCP_PUBLISHED_PORT=8001
+
+# Registry/GHCR path (slower, release-style):
 # Compose path: docker-compose.prod.yml
 # Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, IMAGE_REGISTRY=ghcr.io/x1erra, IMAGE_TAG=latest
 ```

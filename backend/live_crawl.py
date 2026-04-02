@@ -11,6 +11,7 @@ from crawl_entries import crawl_entries
 from crawl_scratches import crawl_late_changes
 from bet_resolution import resolve_all_pending_bets
 from supabase_client import get_supabase_client
+from runtime_state import evaluate_runtime_alerts, update_crawl_status
 
 # Configure logging
 log_dir = os.getenv('LOG_DIR', '.')
@@ -32,6 +33,78 @@ START_HOUR = 0
 END_HOUR = 23 # Run 24/7 to ensure morning races are captured
 HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "crawler_heartbeat")
 
+
+def record_crawl_result(crawl_type, success, **details):
+    update_crawl_status(crawl_type, success=success, details=details)
+
+
+def run_entries_refresh(today_date):
+    s1 = crawl_entries(today_date, COMMON_TRACKS)
+    s2 = crawl_entries(today_date + timedelta(days=1), COMMON_TRACKS)
+    s3 = crawl_entries(today_date + timedelta(days=2), COMMON_TRACKS)
+    total_found = s1.get('races_found', 0) + s2.get('races_found', 0) + s3.get('races_found', 0)
+    record_crawl_result(
+        'entries',
+        success=True,
+        today_races_found=s1.get('races_found', 0),
+        tomorrow_races_found=s2.get('races_found', 0),
+        day_after_races_found=s3.get('races_found', 0),
+        total_races_found=total_found,
+    )
+    return {'races_found': total_found}
+
+
+def run_results_refresh(today_date, current_hour):
+    stats_today = {}
+    stats_yesterday = {}
+    if current_hour >= 11 or current_hour < 2:
+        logger.info("Racing hours (or late night check) active. Crawling results...")
+        stats_today = crawl_historical_races(today_date, COMMON_TRACKS)
+        stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
+    else:
+        logger.info("Slow hours. Performing maintenance check on yesterday's results...")
+        stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
+
+    record_crawl_result(
+        'results',
+        success=True,
+        today_races_found=stats_today.get('races_found', 0),
+        yesterday_races_found=stats_yesterday.get('races_found', 0),
+    )
+    return stats_today, stats_yesterday
+
+
+def run_scratches_refresh():
+    logger.info("Checking for Late Scratches...")
+    scratches_found = crawl_late_changes()
+    logger.info(f"Scratch check complete. Marked: {scratches_found}")
+    record_crawl_result('scratches', success=True, changes_processed=scratches_found)
+    return scratches_found
+
+
+def run_startup_backfill(now):
+    today_date = now.date()
+    logger.info("Running startup self-heal backfill...")
+    try:
+        run_entries_refresh(today_date)
+    except Exception as e:
+        logger.error(f"Startup entries refresh failed: {e}")
+        record_crawl_result('entries', success=False, error=str(e))
+
+    try:
+        run_results_refresh(today_date, now.hour)
+    except Exception as e:
+        logger.error(f"Startup results refresh failed: {e}")
+        record_crawl_result('results', success=False, error=str(e))
+
+    try:
+        run_scratches_refresh()
+    except Exception as e:
+        logger.error(f"Startup scratches refresh failed: {e}")
+        record_crawl_result('scratches', success=False, error=str(e))
+
+    evaluate_runtime_alerts(during_racing_hours=8 <= now.hour <= 23)
+
 def touch_heartbeat():
     """Update heartbeat file to signal health to Docker"""
     try:
@@ -48,7 +121,8 @@ def run_crawler():
     # Touch heartbeat immediately on startup
     touch_heartbeat()
     
-    last_entries_crawl_date = None
+    last_entries_crawl_at = None
+    run_startup_backfill(datetime.now(EST))
     
     while True:
         try:
@@ -73,31 +147,33 @@ def run_crawler():
                     stats_yesterday = {}
                     
                     # Result crawling is most relevant after 11 AM EST
-                    if current_hour >= 11 or current_hour < 2: # 11 AM to 2 AM next day
-                         logger.info("Racing hours (or late night check) active. Crawling results...")
-                         stats_today = crawl_historical_races(today_date, COMMON_TRACKS)
-                         stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
-                    else:
-                         logger.info("Slow hours. Performing maintenance check on yesterday's results...")
-                         stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), COMMON_TRACKS)
+                    try:
+                        stats_today, stats_yesterday = run_results_refresh(today_date, current_hour)
+                    except Exception as e:
+                        logger.error(f"Results crawl failed: {e}")
+                        record_crawl_result('results', success=False, error=str(e))
 
                     # 2. Crawl Upcoming Entries (Once per day)
                     entry_stats = {'races_found': 0}
+                    entry_total_for_alert = None
                     
-                    if last_entries_crawl_date != today_date:
-                        logger.info("First run of the day for Entries. Fetching upcoming races for Today, Tomorrow, and Day After...")
-                        
-                        # Crawl today (in case of changes)
-                        s1 = crawl_entries(today_date, COMMON_TRACKS)
-                        # Crawl tomorrow (primary advance data)
-                        s2 = crawl_entries(today_date + timedelta(days=1), COMMON_TRACKS)
-                        # Crawl day after (bonus advance data)
-                        s3 = crawl_entries(today_date + timedelta(days=2), COMMON_TRACKS)
-                        
-                        entry_stats['races_found'] = s1.get('races_found', 0) + s2.get('races_found', 0) + s3.get('races_found', 0)
-                        last_entries_crawl_date = today_date
+                    entries_refresh_interval = timedelta(hours=4)
+                    should_refresh_entries = (
+                        last_entries_crawl_at is None
+                        or (now - last_entries_crawl_at) >= entries_refresh_interval
+                    )
+
+                    if should_refresh_entries:
+                        logger.info("Refreshing entries for Today, Tomorrow, and Day After...")
+                        try:
+                            entry_stats = run_entries_refresh(today_date)
+                            last_entries_crawl_at = now
+                            entry_total_for_alert = entry_stats.get('races_found')
+                        except Exception as e:
+                            logger.error(f"Entries crawl failed: {e}")
+                            record_crawl_result('entries', success=False, error=str(e))
                     else:
-                        logger.info("Entries already crawled today. Skipping.")
+                        logger.info("Entries refreshed recently. Skipping for now.")
 
                     duration = time.time() - start_time
                     logger.info(f"Crawl finished in {duration:.1f}s. "
@@ -105,13 +181,16 @@ def run_crawler():
                                 f"Entries: {entry_stats.get('races_found', 0)}")
                                 
                     # 2.5 Crawl Scratches (Every loop)
-                    logger.info("Checking for Late Scratches...")
                     try:
-                        scratches_found = crawl_late_changes()
-                        logger.info(f"Scratch check complete. Marked: {scratches_found}")
+                        scratches_found = run_scratches_refresh()
                     except Exception as e:
                         logger.error(f"Scratch crawl failed: {e}")
+                        record_crawl_result('scratches', success=False, error=str(e))
 
+                    evaluate_runtime_alerts(
+                        today_summary_total=entry_total_for_alert,
+                        during_racing_hours=8 <= current_hour <= 23,
+                    )
                                 
                     # 3. Resolve Pending Bets
                     logger.info("Resolving pending bets...")

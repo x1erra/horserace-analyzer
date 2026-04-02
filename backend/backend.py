@@ -7,12 +7,21 @@ import os
 import sys
 print("Backend script starting...", file=sys.stdout, flush=True)
 import subprocess
+import logging
 from datetime import date, datetime, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from supabase_client import get_supabase_client
 from bet_resolution import resolve_all_pending_bets
+from runtime_state import (
+    clear_dashboard_summary_failures,
+    evaluate_runtime_alerts,
+    get_dashboard_summary_snapshot,
+    record_dashboard_summary_failure,
+    snapshot_dashboard_summary,
+    summarize_freshness,
+)
 import traceback
 import pytz
 
@@ -35,6 +44,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 
 def allowed_file(filename):
@@ -49,10 +59,13 @@ def health_check():
         supabase = get_supabase_client()
         # Test connection
         supabase.table('hranalyzer_tracks').select('id').limit(1).execute()
+        freshness, alerts = summarize_freshness(datetime.utcnow())
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'version': '1.0.3'
+            'version': '1.0.3',
+            'crawler': freshness,
+            'alerts': [alert for alert in alerts if alert.get('status') == 'open'],
         })
     except Exception as e:
         traceback.print_exc()
@@ -602,14 +615,38 @@ def get_filter_options():
                 summary_map[name]['is_fully_cancelled'] = True
 
         today_summary = sorted(list(summary_map.values()), key=lambda x: x['track_name'])
-
-        return jsonify({
+        payload = {
             'dates': unique_dates,
             'tracks': sorted_tracks,
             'today_summary': today_summary
-        })
+        }
+
+        snapshot_dashboard_summary(target_summary_date, payload)
+        clear_dashboard_summary_failures(target_summary_date)
+        total_races = sum(item.get('total', 0) for item in today_summary)
+        eastern_now = datetime.now(pytz.timezone("America/New_York"))
+        during_racing_hours = 8 <= eastern_now.hour <= 23
+        evaluate_runtime_alerts(
+            today_summary_total=total_races if target_summary_date == today else None,
+            during_racing_hours=during_racing_hours and target_summary_date == today,
+        )
+
+        return jsonify(payload)
 
     except Exception as e:
+        logger.exception("Dashboard summary failed for date=%s", request.args.get('date', date.today().isoformat()))
+        target_summary_date = request.args.get('date', date.today().isoformat())
+        record_dashboard_summary_failure(target_summary_date, str(e))
+
+        snapshot = get_dashboard_summary_snapshot(target_summary_date)
+        if snapshot and snapshot.get('payload'):
+            payload = dict(snapshot['payload'])
+            payload['stale'] = True
+            payload['summary_source'] = 'snapshot'
+            payload['stale_reason'] = str(e)
+            payload['snapshot_captured_at'] = snapshot.get('captured_at')
+            return jsonify(payload)
+
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
