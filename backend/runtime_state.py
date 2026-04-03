@@ -257,6 +257,24 @@ def _format_alert_detail_value(value):
     return str(value)
 
 
+def _humanize_alert_detail_key(key):
+    labels = {
+        "age_minutes": "Age (minutes)",
+        "changes_processed": "Changes Processed",
+        "last_attempt_at": "Last Attempt",
+        "last_error": "Error",
+        "last_success_at": "Last Success",
+        "phase": "Phase",
+        "races_found": "Races Found",
+        "startup_grace_reason": "Startup Grace",
+        "target_date": "Target Date",
+        "threshold_minutes": "Alert Threshold (minutes)",
+        "today_races_found": "Today's Races Found",
+        "tracks_checked": "Tracks Checked",
+    }
+    return labels.get(key, key.replace("_", " ").title())
+
+
 def _normalize_alert_details(details):
     normalized = dict(details or {})
     nested = normalized.pop("last_details", None)
@@ -281,20 +299,15 @@ def _build_alert_payload(alert):
         content = f"TrackData alert {status.lower()}: {headline}"
 
     preferred_detail_order = [
-        "last_success_at",
-        "age_minutes",
-        "last_attempt_at",
         "target_date",
         "phase",
+        "last_success_at",
+        "last_attempt_at",
+        "age_minutes",
         "tracks_checked",
         "races_found",
         "today_races_found",
         "changes_processed",
-        "in_progress",
-        "within_startup_grace",
-        "startup_grace_reason",
-        "threshold_minutes",
-        "stale",
         "last_error",
     ]
 
@@ -307,21 +320,19 @@ def _build_alert_payload(alert):
         value = details.get(key)
         if key in {"in_progress", "within_startup_grace"} and not value:
             continue
-        if key == "stale" and (not value or is_resolved):
+        if key in {"stale", "count", "threshold_minutes", "startup_grace_reason"}:
             continue
         formatted = _format_alert_detail_value(details.get(key))
         if formatted is not None:
-            detail_lines.append(f"**{key}**: {formatted}")
+            detail_lines.append(f"**{_humanize_alert_detail_key(key)}:** {formatted}")
 
     description = "\n".join(detail_lines) if detail_lines else "No additional details."
-    if alert.get("count"):
-        description += f"\n**count**: {alert['count']}"
 
     return {
         "content": content,
         "embeds": [
             {
-                "title": alert.get("key", "trackdata-alert"),
+                "title": headline,
                 "description": description[:4000],
                 "color": _alert_color(alert.get("severity")),
                 "fields": [

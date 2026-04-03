@@ -96,12 +96,14 @@ class TestRuntimeState(unittest.TestCase):
         )
 
         self.assertIn("TrackData alert resolved", payload["content"])
+        self.assertEqual(payload["embeds"][0]["title"], "Entries crawl is stale")
         description = payload["embeds"][0]["description"]
-        self.assertIn("**last_success_at**: 2026-04-02T22:46:41Z", description)
-        self.assertIn("**age_minutes**: 0", description)
+        self.assertIn("**Last Success:** 2026-04-02T22:46:41Z", description)
+        self.assertIn("**Age (minutes):** 0", description)
         self.assertNotIn("last_attempt_at", description)
         self.assertNotIn("last_error", description)
         self.assertNotIn("stale", description)
+        self.assertNotIn("count", description)
 
     def test_payload_flattens_last_details_and_omits_false_flags(self):
         payload = self.runtime_state._build_alert_payload(  # pylint: disable=protected-access
@@ -126,13 +128,14 @@ class TestRuntimeState(unittest.TestCase):
         )
 
         description = payload["embeds"][0]["description"]
-        self.assertIn("**phase**: startup", description)
-        self.assertIn("**target_date**: 2026-04-02", description)
-        self.assertIn("**changes_processed**: 3", description)
-        self.assertIn("**stale**: yes", description)
+        self.assertIn("**Phase:** startup", description)
+        self.assertIn("**Target Date:** 2026-04-02", description)
+        self.assertIn("**Changes Processed:** 3", description)
         self.assertNotIn("last_details", description)
         self.assertNotIn("in_progress", description)
         self.assertNotIn("within_startup_grace", description)
+        self.assertNotIn("stale", description)
+        self.assertNotIn("count", description)
 
     def test_startup_grace_resolution_does_not_dispatch_noise(self):
         os.environ["ALERT_WEBHOOK_URL"] = "https://discord.example/webhook"
