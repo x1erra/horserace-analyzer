@@ -267,6 +267,16 @@ class TestMcpServer(unittest.TestCase):
                     {"key": "crawl-stale:entries", "status": "resolved"},
                 ],
             ),
+        ), patch.object(
+            mcp_server,
+            "_detect_pipeline_activity",
+            return_value={
+                "entries_data_present": False,
+                "results_data_present": False,
+                "scratches_data_present": False,
+                "any_recent_data": False,
+                "active_signals": [],
+            },
         ):
             result = mcp_server.get_feed_freshness()
 
@@ -274,8 +284,10 @@ class TestMcpServer(unittest.TestCase):
         self.assertIn("results", result["stale_crawlers"])
         self.assertEqual(result["crawler"]["entries"]["status"], "fresh")
         self.assertEqual(result["crawler"]["results"]["status"], "stale")
+        self.assertIn("No recent successful results crawl", result["crawler"]["results"]["reason"])
         self.assertEqual(result["alert_count"], 1)
         self.assertEqual(result["alerts"][0]["key"], "crawl-stale:results")
+        self.assertEqual(result["risk_level"], "high")
         self.assertIn("Use status and stale_crawlers first", result["how_to_read"])
 
     def test_get_feed_freshness_reports_startup_grace_clearly(self):
@@ -290,12 +302,56 @@ class TestMcpServer(unittest.TestCase):
                 },
                 [],
             ),
+        ), patch.object(
+            mcp_server,
+            "_detect_pipeline_activity",
+            return_value={
+                "entries_data_present": True,
+                "results_data_present": True,
+                "scratches_data_present": True,
+                "any_recent_data": True,
+                "active_signals": ["entries", "results", "scratches"],
+            },
         ):
             result = mcp_server.get_feed_freshness()
 
         self.assertEqual(result["status"], "warming_up")
         self.assertEqual(set(result["warming_up_crawlers"]), {"entries", "results", "scratches"})
         self.assertFalse(result["all_crawlers_fresh"])
+        self.assertEqual(result["risk_level"], "low")
+        self.assertIn("Wait for the first full crawler pass", result["recommended_action"])
+
+    def test_get_feed_freshness_reports_monitoring_desync_when_data_exists(self):
+        with patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
+                    "results": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
+                    "scratches": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
+                },
+                [],
+            ),
+        ), patch.object(
+            mcp_server,
+            "_detect_pipeline_activity",
+            return_value={
+                "entries_data_present": True,
+                "results_data_present": True,
+                "scratches_data_present": True,
+                "any_recent_data": True,
+                "active_signals": ["entries", "results", "scratches"],
+            },
+        ):
+            result = mcp_server.get_feed_freshness()
+
+        self.assertEqual(result["monitoring_status"], "stale")
+        self.assertEqual(result["status"], "monitoring_desynced")
+        self.assertIn("recent database activity exists", result["summary"])
+        self.assertTrue(result["pipeline_activity"]["any_recent_data"])
+        self.assertEqual(result["risk_level"], "low")
+        self.assertIn("Data is flowing", result["recommended_action"])
 
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:

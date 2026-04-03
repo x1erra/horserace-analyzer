@@ -356,6 +356,117 @@ def _track_matches(track_filter, race_track_code, race_track_name):
     return track_filter in {race_track_code, race_track_name}
 
 
+def _detect_pipeline_activity():
+    """Probe for recent DB activity so freshness consumers can distinguish monitor lag from data outage."""
+    supabase = get_supabase_client()
+    today = date.today()
+    today_str = today.isoformat()
+    yesterday_str = (today - timedelta(days=1)).isoformat()
+    tomorrow_str = (today + timedelta(days=1)).isoformat()
+    day_after_str = (today + timedelta(days=2)).isoformat()
+
+    signals = {
+        "entries_data_present": False,
+        "results_data_present": False,
+        "scratches_data_present": False,
+    }
+
+    try:
+        entries_probe = (
+            supabase.table("hranalyzer_races")
+            .select("id")
+            .in_("race_date", [today_str, tomorrow_str, day_after_str])
+            .limit(1)
+            .execute()
+        )
+        signals["entries_data_present"] = bool(entries_probe.data)
+    except Exception:
+        pass
+
+    try:
+        results_probe = (
+            supabase.table("hranalyzer_race_entries")
+            .select("id, race:hranalyzer_races!inner(race_date)")
+            .in_("finish_position", [1, 2, 3])
+            .gte("race.race_date", yesterday_str)
+            .lte("race.race_date", today_str)
+            .limit(1)
+            .execute()
+        )
+        signals["results_data_present"] = bool(results_probe.data)
+    except Exception:
+        pass
+
+    try:
+        scratches_probe = (
+            supabase.table("hranalyzer_race_entries")
+            .select("id, race:hranalyzer_races!inner(race_date)")
+            .eq("scratched", True)
+            .gte("race.race_date", yesterday_str)
+            .lte("race.race_date", today_str)
+            .limit(1)
+            .execute()
+        )
+        signals["scratches_data_present"] = bool(scratches_probe.data)
+    except Exception:
+        pass
+
+    active_signals = [name.replace("_data_present", "") for name, active in signals.items() if active]
+    return {
+        **signals,
+        "any_recent_data": any(signals.values()),
+        "active_signals": active_signals,
+    }
+
+
+def _describe_crawler_status(crawl_name, item):
+    if item.get("within_startup_grace") and not item.get("last_success_at"):
+        return "Startup grace is active after deploy/restart, so timestamps may still be empty."
+    if item.get("stale"):
+        threshold = item.get("threshold_minutes")
+        if threshold:
+            return f"No successful {crawl_name} crawl has been recorded within the {threshold}-minute threshold."
+        return f"No recent successful {crawl_name} crawl has been recorded."
+    if item.get("in_progress"):
+        return "A crawl attempt is currently active or was started recently."
+    return "A recent successful crawl is recorded."
+
+
+def _freshness_guidance(status, summary):
+    if status == "healthy":
+        return {
+            "risk_level": "none",
+            "recommended_action": "No action needed.",
+            "operator_summary": summary,
+        }
+    if status == "warming_up":
+        return {
+            "risk_level": "low",
+            "recommended_action": "Wait for the first full crawler pass after redeploy/startup before treating this as a problem.",
+            "operator_summary": summary,
+        }
+    if status == "monitoring_desynced":
+        return {
+            "risk_level": "low",
+            "recommended_action": (
+                "Data is flowing, but crawler freshness timestamps are behind. Monitor scheduler logs and only escalate "
+                "if this persists beyond one normal crawler loop."
+            ),
+            "operator_summary": summary,
+        }
+    if status == "degraded":
+        return {
+            "risk_level": "medium",
+            "recommended_action": "Inspect open runtime alerts. Crawler freshness is current, so the issue is likely elsewhere.",
+            "operator_summary": summary,
+        }
+    return {
+        "risk_level": "high",
+        "recommended_action": "Investigate scheduler logs and /api/health immediately. One or more crawlers are genuinely stale.",
+        "operator_summary": summary,
+    }
+
+
 def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
     """Mirror backend change merge and dedupe logic for MCP consumers."""
     supabase = get_supabase_client()
@@ -715,7 +826,13 @@ def get_feed_freshness() -> dict:
         else:
             fresh_crawlers.append(crawl_name)
 
-        crawler[crawl_name] = {**item, "status": crawl_status}
+        crawler[crawl_name] = {
+            **item,
+            "status": crawl_status,
+            "reason": _describe_crawler_status(crawl_name, item),
+        }
+
+    pipeline_activity = _detect_pipeline_activity()
 
     if stale_crawlers:
         overall_status = "stale"
@@ -735,20 +852,43 @@ def get_feed_freshness() -> dict:
         overall_status = "healthy"
         summary = "All crawler freshness checks are healthy."
 
+    monitoring_status = overall_status
+    if overall_status == "stale" and pipeline_activity.get("any_recent_data"):
+        overall_status = "monitoring_desynced"
+        active_signals = pipeline_activity.get("active_signals", [])
+        signal_text = ", ".join(active_signals) if active_signals else "recent race data"
+        summary = (
+            f"Freshness timestamps are stale, but recent database activity exists for {signal_text}. "
+            "The runtime freshness monitor may be behind the live pipeline."
+        )
+    elif overall_status == "warming_up" and pipeline_activity.get("any_recent_data"):
+        summary = (
+            "Startup grace is active and recent database activity is already visible. "
+            "Crawler timestamps may still be settling after redeploy."
+        )
+
+    guidance = _freshness_guidance(overall_status, summary)
+
     return {
         "crawler": crawler,
         "alerts": open_alerts,
         "status": overall_status,
+        "monitoring_status": monitoring_status,
         "summary": summary,
+        "risk_level": guidance["risk_level"],
+        "recommended_action": guidance["recommended_action"],
+        "operator_summary": guidance["operator_summary"],
         "all_crawlers_fresh": not stale_crawlers and not warming_up_crawlers,
         "stale_crawlers": stale_crawlers,
         "fresh_crawlers": fresh_crawlers,
         "warming_up_crawlers": warming_up_crawlers,
         "in_progress_crawlers": in_progress_crawlers,
         "alert_count": len(open_alerts),
+        "pipeline_activity": pipeline_activity,
         "how_to_read": (
             "Use status and stale_crawlers first. Per-crawler status will be one of fresh, in_progress, "
-            "warming_up, or stale."
+            "warming_up, or stale. If status is monitoring_desynced, recent database activity exists even though "
+            "freshness timestamps are behind."
         ),
     }
 

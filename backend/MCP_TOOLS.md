@@ -11,9 +11,12 @@ How to read it:
 - `status="healthy"` means crawler freshness is good.
 - `status="warming_up"` means the stack recently restarted and startup grace is active.
 - `status="stale"` means one or more crawlers are genuinely stale.
+- `status="monitoring_desynced"` means recent race data exists in the database, but runtime freshness timestamps are behind.
 - `status="degraded"` means crawler freshness is current, but there are other open runtime alerts.
 - `stale_crawlers`, `warming_up_crawlers`, and `in_progress_crawlers` are the next fields to inspect.
 - `crawler.<name>.status` is one of `fresh`, `in_progress`, `warming_up`, or `stale`.
+- `crawler.<name>.reason` explains that crawler’s state in plain English.
+- `risk_level` and `recommended_action` are intended for bots/operators to summarize the situation without guessing.
 - Do not infer freshness from `last_success_at` alone without checking `status`.
 
 ## Targeted race/card tools
