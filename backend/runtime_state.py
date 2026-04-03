@@ -284,6 +284,46 @@ def _normalize_alert_details(details):
     return normalized
 
 
+def _describe_alert_reason(alert, details, is_resolved):
+    key = alert.get("key", "")
+    threshold = details.get("threshold_minutes")
+    last_error = details.get("last_error")
+
+    if key.startswith("crawl-stale:"):
+        crawl_name = key.split(":", 1)[1].replace("-", " ").title()
+        if is_resolved:
+            return f"A successful {crawl_name.lower()} crawl was recorded."
+        if threshold:
+            reason = f"No successful {crawl_name.lower()} crawl has been recorded in the last {threshold} minutes."
+        else:
+            reason = f"No recent successful {crawl_name.lower()} crawl has been recorded."
+        if last_error:
+            reason += f" Latest error: {last_error}"
+        return reason
+
+    if key.startswith("dashboard-summary-failures:"):
+        failure_count = details.get("failure_count")
+        target_date = details.get("target_date")
+        latest_error = details.get("latest_error")
+        reason = "The dashboard summary endpoint has failed repeatedly"
+        if target_date:
+            reason += f" for {target_date}"
+        if failure_count:
+            reason += f" ({failure_count} times)"
+        reason += "."
+        if latest_error:
+            reason += f" Latest error: {latest_error}"
+        return reason
+
+    if key == "dashboard-zero-races-during-racing-hours":
+        return "The dashboard summary returned zero races during active racing hours."
+
+    if is_resolved:
+        return "The underlying issue is no longer active."
+
+    return None
+
+
 def _build_alert_payload(alert):
     severity = (alert.get("severity") or "warning").upper()
     status = (alert.get("status") or "open").upper()
@@ -326,7 +366,13 @@ def _build_alert_payload(alert):
         if formatted is not None:
             detail_lines.append(f"**{_humanize_alert_detail_key(key)}:** {formatted}")
 
-    description = "\n".join(detail_lines) if detail_lines else "No additional details."
+    reason = _describe_alert_reason(alert, details, is_resolved)
+    description_parts = []
+    if reason:
+        description_parts.append(f"**Why:** {reason}")
+    if detail_lines:
+        description_parts.append("\n".join(detail_lines))
+    description = "\n\n".join(description_parts) if description_parts else "No additional details."
 
     return {
         "content": content,
