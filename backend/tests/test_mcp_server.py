@@ -951,6 +951,8 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["claims"][0]["horse_name"], "Horse A")
         self.assertTrue(result["claims"][0]["claimant_details_complete"])
         self.assertEqual(result["meta"]["missing_claimant_details"], 0)
+        self.assertEqual(result["meta"]["claims_with_complete_details"], 1)
+        self.assertEqual(result["meta"]["claimant_detail_coverage_pct"], 100.0)
 
     def test_get_claims_reports_missing_claimant_details(self):
         supabase = SupabaseStub(
@@ -982,6 +984,8 @@ class TestMcpServer(unittest.TestCase):
         self.assertFalse(result["claims"][0]["claimant_details_complete"])
         self.assertEqual(result["meta"]["missing_claimant_details"], 1)
         self.assertFalse(result["meta"]["all_claimant_details_complete"])
+        self.assertEqual(result["meta"]["claims_with_complete_details"], 0)
+        self.assertEqual(result["meta"]["claimant_detail_coverage_pct"], 0.0)
 
 
 if __name__ == "__main__":

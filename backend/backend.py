@@ -945,67 +945,18 @@ def get_race_details(race_key):
 
 @app.route('/api/claims', methods=['GET'])
 def get_claims():
-    """
-    Get claimed horses with optional filters
-    Query params:
-    - track: Filter by track code
-    - start_date: Filter by date range
-    - end_date: Filter by date range
-    - limit: Limit results (default 100)
-    """
+    """Public API wrapper around the shared claims feed logic used by MCP."""
     try:
-        supabase = get_supabase_client()
-        
-        # Get query parameters
-        track = request.args.get('track')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        limit = int(request.args.get('limit', 100))
-        
-        # Select claims with race info
-        query = supabase.table('hranalyzer_claims')\
-            .select('*, hranalyzer_races(race_key, track_code, race_date, race_number, hranalyzer_tracks(track_name))')\
-            .order('created_at', desc=True)\
-            .limit(limit)
-            
-        response = query.execute()
-        
-        claims = []
-        for item in response.data:
-            race = item.get('hranalyzer_races')
-            if not race:
-                continue
-            
-            # Helper to access nested track name safely
-            track_info = race.get('hranalyzer_tracks')
-            track_name = track_info.get('track_name') if track_info else race['track_code']
+        from mcp_server import get_claims as mcp_get_claims
 
-            # Python-side filtering
-            if track and race['track_code'] != track and track_name != track:
-                continue
-            if start_date and race['race_date'] < start_date:
-                continue
-            if end_date and race['race_date'] > end_date:
-                continue
-            
-            claims.append({
-                'id': item['id'],
-                'race_key': race['race_key'],
-                'race_date': race['race_date'],
-                'track_code': race['track_code'],
-                'track_name': track_name,
-                'race_number': race['race_number'],
-                'horse_name': item['horse_name'],
-                'program_number': item.get('program_number'),
-                'new_trainer': item['new_trainer_name'],
-                'new_owner': item['new_owner_name'],
-                'claim_price': item['claim_price']
-            })
-            
-        return jsonify({
-            'claims': claims,
-            'count': len(claims)
-        })
+        result = mcp_get_claims(
+            track=request.args.get('track', ''),
+            start_date=request.args.get('start_date', ''),
+            end_date=request.args.get('end_date', ''),
+            race_number=int(request.args.get('race_number', 0)),
+            limit=int(request.args.get('limit', 100)),
+        )
+        return jsonify(result)
 
     except Exception as e:
         traceback.print_exc()

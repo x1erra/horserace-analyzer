@@ -56,6 +56,25 @@ class TestBackendFeedRoutes(unittest.TestCase):
             race_number=7,
         )
 
+    def test_claims_route_delegates_to_shared_mcp_logic(self):
+        fake_module = types.SimpleNamespace(
+            get_claims=MagicMock(return_value={"claims": [], "count": 0, "meta": {}})
+        )
+
+        with patch.dict(sys.modules, {"mcp_server": fake_module}):
+            response = self.client.get(
+                "/api/claims?track=GP&start_date=2026-04-03&end_date=2026-04-03&race_number=7&limit=25"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        fake_module.get_claims.assert_called_once_with(
+            track="GP",
+            start_date="2026-04-03",
+            end_date="2026-04-03",
+            race_number=7,
+            limit=25,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

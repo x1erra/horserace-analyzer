@@ -43,6 +43,7 @@ Scratch/change semantics:
 
 Claims semantics:
 - `get_claims` returns `meta.missing_claimant_details` and per-claim `claimant_details_complete`.
+- `get_claims` also returns `meta.claims_with_complete_details` and `meta.claimant_detail_coverage_pct`.
 - Empty `new_trainer` / `new_owner` fields should be treated as incomplete source extraction for that claim, not as a failed endpoint.
 
 ## Feed views

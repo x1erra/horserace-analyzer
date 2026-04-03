@@ -1980,7 +1980,9 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_n
         "claims": claims,
         "count": len(claims),
         "meta": {
+            "claims_with_complete_details": len(claims) - missing_claimant_details,
             "missing_claimant_details": missing_claimant_details,
+            "claimant_detail_coverage_pct": round(((len(claims) - missing_claimant_details) / len(claims)) * 100, 1) if claims else 100.0,
             "all_claimant_details_complete": missing_claimant_details == 0,
         },
     }

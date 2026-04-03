@@ -12,7 +12,7 @@ load_dotenv()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://vytyhtddhplcrvvgidyy.supabase.co')
-SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY')
+SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE')
 
 # Singleton client instance
 _supabase_client: Client = None
@@ -33,7 +33,7 @@ def get_supabase_client() -> Client:
     if _supabase_client is None:
         if not SUPABASE_SERVICE_KEY:
             raise ValueError(
-                "SUPABASE_SERVICE_KEY environment variable is not set. "
+                "SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE) environment variable is not set. "
                 "Please check your .env file."
             )
 
