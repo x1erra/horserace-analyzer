@@ -55,7 +55,7 @@ const getChangeColor = (type) => {
 const getDisplayHorseName = (item) => {
     const horseName = (item.horse_name || '').trim();
     if (!horseName || horseName.toLowerCase() === 'race-wide') {
-        return 'Race-wide change';
+        return 'Race-wide Change';
     }
     return horseName;
 };
@@ -286,11 +286,6 @@ export default function Changes() {
                                                         <div className="text-white font-medium group-hover:text-purple-400 transition-colors">
                                                             {getDisplayHorseName(item)}
                                                         </div>
-                                                        {getDisplayHorseName(item) === 'Race-wide change' && (
-                                                            <div className="text-xs text-gray-500">
-                                                                Applies to the entire race
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
                                             </td>
@@ -355,9 +350,6 @@ export default function Changes() {
                                             <div className="text-white font-lg font-bold">
                                                 {getDisplayHorseName(item)}
                                             </div>
-                                            {getDisplayHorseName(item) === 'Race-wide change' && (
-                                                <div className="text-xs text-gray-500">Applies to the entire race</div>
-                                            )}
                                         </div>
                                     </div>
 
