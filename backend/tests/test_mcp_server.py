@@ -346,12 +346,12 @@ class TestMcpServer(unittest.TestCase):
         ):
             result = mcp_server.get_feed_freshness()
 
-        self.assertEqual(result["monitoring_status"], "stale")
-        self.assertEqual(result["status"], "monitoring_desynced")
-        self.assertIn("recent database activity exists", result["summary"])
+        self.assertEqual(result["monitoring_status"], "desynced")
+        self.assertEqual(result["status"], "healthy")
+        self.assertIn("live pipeline appears healthy", result["summary"])
         self.assertTrue(result["pipeline_activity"]["any_recent_data"])
-        self.assertEqual(result["risk_level"], "low")
-        self.assertIn("Data is flowing", result["recommended_action"])
+        self.assertEqual(result["risk_level"], "none")
+        self.assertIn("No action needed", result["recommended_action"])
 
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
@@ -864,6 +864,47 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["changes"][0]["horse_name"], "A Lister")
         self.assertEqual(result["changes"][0]["race_key"], "SA-20260331-3")
 
+    def test_get_race_changes_filters_blank_race_wide_noise(self):
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_changes": [
+                    {
+                        "id": "chg-noise",
+                        "entry_id": None,
+                        "race_id": "race-1",
+                        "change_type": "Other",
+                        "description": "",
+                        "created_at": "2026-03-31T12:00:00Z",
+                    },
+                    {
+                        "id": "chg-real",
+                        "entry_id": None,
+                        "race_id": "race-1",
+                        "change_type": "Post Time Change",
+                        "description": "Post time delayed to 2:15 PM",
+                        "created_at": "2026-03-31T12:05:00Z",
+                    },
+                ],
+                "hranalyzer_races": [
+                    {
+                        "id": "race-1",
+                        "race_key": "SA-20260331-3",
+                        "track_code": "SA",
+                        "race_date": "2026-03-31",
+                        "race_number": 3,
+                        "post_time": "14:00:00",
+                        "track": {"track_name": "Santa Anita"},
+                    }
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_race_changes("race-1")
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["changes"][0]["change_type"], "Post Time Change")
+
     def test_get_claims_filters_by_race_number(self):
         supabase = SupabaseStub(
             Response(
@@ -908,6 +949,39 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["claims"][0]["race_number"], 4)
         self.assertEqual(result["claims"][0]["horse_name"], "Horse A")
+        self.assertTrue(result["claims"][0]["claimant_details_complete"])
+        self.assertEqual(result["meta"]["missing_claimant_details"], 0)
+
+    def test_get_claims_reports_missing_claimant_details(self):
+        supabase = SupabaseStub(
+            Response(
+                data=[
+                    {
+                        "id": "claim-1",
+                        "horse_name": "Horse A",
+                        "program_number": "5",
+                        "new_trainer_name": "",
+                        "new_owner_name": None,
+                        "claim_price": 25000,
+                        "hranalyzer_races": {
+                            "race_key": "GP-20260406-4",
+                            "track_code": "GP",
+                            "race_date": "2026-04-06",
+                            "race_number": 4,
+                            "hranalyzer_tracks": {"track_name": "Gulfstream Park"},
+                        },
+                    }
+                ]
+            )
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_claims(track="GP", start_date="2026-04-06", end_date="2026-04-06", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertFalse(result["claims"][0]["claimant_details_complete"])
+        self.assertEqual(result["meta"]["missing_claimant_details"], 1)
+        self.assertFalse(result["meta"]["all_claimant_details_complete"])
 
 
 if __name__ == "__main__":

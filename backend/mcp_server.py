@@ -379,6 +379,88 @@ def _format_scratch_feed_item(item):
     }
 
 
+def _should_keep_change_item(item):
+    """Filter out meaningless race-wide placeholders while preserving genuine race-wide events."""
+    horse_name = item.get("horse_name")
+    change_type = item.get("change_type") or ""
+    description = item.get("description") or ""
+    race_wide = horse_name in (None, "", "Race-wide", "Race-Wide")
+    change_type_lower = change_type.lower()
+    if not race_wide:
+        return True
+    if any(term in change_type_lower for term in ("scratch", "jockey", "weight", "equipment")):
+        return False
+    if "cancelled" in change_type_lower:
+        return True
+    if "post time" in change_type_lower:
+        return True
+    if description.strip():
+        return True
+    return False
+
+
+def _normalize_change_list(all_changes, sort_desc=False):
+    """Deduplicate and filter normalized change rows consistently across MCP surfaces."""
+    normalized_map = {}
+    for item in all_changes:
+        if not _should_keep_change_item(item):
+            continue
+
+        key_base = (
+            str(item.get("track_code") or "").strip().upper(),
+            str(item.get("race_date") or "").strip()[:10],
+            str(item.get("race_number") or "").strip(),
+            normalize_identity(item),
+            get_type_class(item),
+        )
+
+        if key_base[3] == "RACE_WIDE":
+            event_key = key_base + ((item.get("description") or "").strip()[:30].lower(),)
+        else:
+            event_key = key_base
+
+        normalized_map.setdefault(event_key, []).append(item)
+
+    final_list = []
+    for candidates in normalized_map.values():
+        if not candidates:
+            continue
+        if len(candidates) == 1:
+            winner = candidates[0]
+        else:
+            candidates.sort(key=lambda candidate: str(candidate.get("change_time") or ""), reverse=True)
+            winner = candidates[0]
+
+        if get_type_class(winner) == "scratch" and winner.get("change_type") == "Other":
+            winner["change_type"] = "Scratch"
+
+        winner = dict(winner)
+        winner.pop("_source", None)
+        final_list.append(winner)
+
+    if sort_desc:
+        final_list.sort(
+            key=lambda item: (
+                str(item.get("race_date") or ""),
+                str(item.get("track_code") or ""),
+                int(str(item.get("race_number") or 0)),
+                normalize_identity(item),
+            ),
+            reverse=True,
+        )
+    else:
+        final_list.sort(
+            key=lambda item: (
+                str(item.get("race_date") or ""),
+                str(item.get("track_code") or ""),
+                int(str(item.get("race_number") or 0)),
+                normalize_identity(item),
+            )
+        )
+
+    return final_list
+
+
 def _track_matches(track_filter, race_track_code, race_track_name):
     if not track_filter:
         return True
@@ -627,72 +709,13 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
             )
         )
 
-    normalized_map = {}
-    for item in all_changes:
-        key_base = (
-            str(item.get("track_code") or "").strip().upper(),
-            str(item.get("race_date") or "").strip()[:10],
-            str(item.get("race_number") or "").strip(),
-            normalize_identity(item),
-            get_type_class(item),
-        )
-
-        if key_base[3] == "RACE_WIDE":
-            event_key = key_base + ((item.get("description") or "").strip()[:30].lower(),)
-        else:
-            event_key = key_base
-
-        normalized_map.setdefault(event_key, []).append(item)
-
-    final_list = []
-    for candidates in normalized_map.values():
-        if not candidates:
-            continue
-
-        if len(candidates) == 1:
-            winner = candidates[0]
-        else:
-            candidates.sort(key=lambda candidate: str(candidate.get("change_time") or ""), reverse=True)
-            winner = candidates[0]
-
-        if get_type_class(winner) == "scratch" and winner.get("change_type") == "Other":
-            winner["change_type"] = "Scratch"
-
-        final_list.append(winner)
-
-    final_list = [
-        item
-        for item in final_list
-        if item.get("horse_name") not in (None, "", "Race-wide", "Race-Wide")
-        or item.get("change_type") == "Race Cancelled"
-    ]
+    final_list = _normalize_change_list(all_changes, sort_desc=mode in {"history", "all"} or bool(start_date or end_date))
     final_list = [
         item
         for item in final_list
         if item.get("change_type") != "Wagering"
         and "wagering" not in (item.get("description") or "").lower()
     ]
-
-    sort_desc = mode in {"history", "all"} or bool(start_date or end_date)
-    if sort_desc:
-        final_list.sort(
-            key=lambda item: (
-                str(item.get("race_date") or ""),
-                str(item.get("track_code") or ""),
-                int(str(item.get("race_number") or 0)),
-                normalize_identity(item),
-            ),
-            reverse=True,
-        )
-    else:
-        final_list.sort(
-            key=lambda item: (
-                str(item.get("race_date") or ""),
-                str(item.get("track_code") or ""),
-                int(str(item.get("race_number") or 0)),
-                normalize_identity(item),
-            )
-        )
 
     paginated = final_list[start:end]
     for item in paginated:
@@ -922,12 +945,13 @@ def get_feed_freshness() -> dict:
 
     monitoring_status = overall_status
     if overall_status == "stale" and pipeline_activity.get("any_recent_data"):
-        overall_status = "monitoring_desynced"
+        overall_status = "healthy"
+        monitoring_status = "desynced"
         active_signals = pipeline_activity.get("active_signals", [])
         signal_text = ", ".join(active_signals) if active_signals else "recent race data"
         summary = (
-            f"Freshness timestamps are stale, but recent database activity exists for {signal_text}. "
-            "The runtime freshness monitor may be behind the live pipeline."
+            f"Recent database activity exists for {signal_text}. The live pipeline appears healthy, "
+            "but freshness timestamps are lagging behind the current crawler state."
         )
     elif overall_status == "warming_up" and pipeline_activity.get("any_recent_data"):
         summary = (
@@ -955,8 +979,8 @@ def get_feed_freshness() -> dict:
         "pipeline_activity": pipeline_activity,
         "how_to_read": (
             "Use status and stale_crawlers first. Per-crawler status will be one of fresh, in_progress, "
-            "warming_up, or stale. If status is monitoring_desynced, recent database activity exists even though "
-            "freshness timestamps are behind."
+            "warming_up, or stale. monitoring_status indicates whether the freshness monitor itself is lagging "
+            "behind live pipeline activity."
         ),
     }
 
@@ -1894,7 +1918,8 @@ def get_race_changes(race_id: str) -> dict:
     except Exception:
         pass
 
-    return {"changes": all_changes, "count": len(all_changes), "race_id": race_id}
+    normalized = _normalize_change_list(all_changes, sort_desc=True)
+    return {"changes": normalized, "count": len(normalized), "race_id": race_id}
 
 
 @mcp.tool()
@@ -1911,6 +1936,7 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_n
     )
 
     claims = []
+    missing_claimant_details = 0
     for item in response.data:
         race = item.get("hranalyzer_races")
         if not race:
@@ -1927,6 +1953,12 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_n
         if race_number and race["race_number"] != race_number:
             continue
 
+        new_trainer = item.get("new_trainer_name")
+        new_owner = item.get("new_owner_name")
+        claimant_details_complete = bool((new_trainer or "").strip() and (new_owner or "").strip())
+        if not claimant_details_complete:
+            missing_claimant_details += 1
+
         claims.append(
             {
                 "id": item["id"],
@@ -1937,13 +1969,21 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_n
                 "race_number": race["race_number"],
                 "horse_name": item["horse_name"],
                 "program_number": item.get("program_number"),
-                "new_trainer": item["new_trainer_name"],
-                "new_owner": item["new_owner_name"],
+                "new_trainer": new_trainer,
+                "new_owner": new_owner,
+                "claimant_details_complete": claimant_details_complete,
                 "claim_price": item["claim_price"],
             }
         )
 
-    return {"claims": claims, "count": len(claims)}
+    return {
+        "claims": claims,
+        "count": len(claims),
+        "meta": {
+            "missing_claimant_details": missing_claimant_details,
+            "all_claimant_details_complete": missing_claimant_details == 0,
+        },
+    }
 
 
 if __name__ == "__main__":
