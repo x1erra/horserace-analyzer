@@ -10,8 +10,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from crawl_scratches import (
     LEGACY_LATE_CHANGES_TRACK_URL,
+    MOBILE_LATE_CHANGES_TRACK_URL,
     TVG_LATE_CHANGES_TRACK_URL,
     fetch_direct_track_changes_page,
+    parse_mobile_track_changes,
     parse_rss_changes,
     parse_track_changes,
 )
@@ -104,6 +106,28 @@ class TestDateValidation(unittest.TestCase):
         self.assertEqual(html, "<html>ok</html>")
         self.assertEqual(source_url, LEGACY_LATE_CHANGES_TRACK_URL.format(track_code="GP"))
         self.assertEqual(fetch_mock.call_count, 2)
+
+    def test_parse_mobile_track_changes(self):
+        html = f"""
+        <html><body>
+        <div>TODAY'S SCRATCHES AND CHANGES</div>
+        <table width="100%" bgcolor="#008000"><tr><td><font color="#ffffff"><b>Race 7</b></font></td></tr></table>
+        <p><b># 4 Royal Salute:</b></p>
+        <p><ChangeDescWeb><i>Scratched</i> - Veterinarian</ChangeDescWeb></p>
+        <p>10:01 AM ET</p>
+        <p><ChangeDescWeb>Temp Rail Distance set at 45 ft.</ChangeDescWeb></p>
+        <p>Reported at Entry Time</p>
+        </body></html>
+        """
+        changes = parse_mobile_track_changes(html, "GP")
+
+        self.assertEqual(len(changes), 2)
+        self.assertEqual(changes[0]["race_number"], 7)
+        self.assertEqual(changes[0]["program_number"], "4")
+        self.assertEqual(changes[0]["horse_name"], "royalsalute")
+        self.assertEqual(changes[0]["change_type"], "Scratch")
+        self.assertEqual(changes[0]["description"], "Scratched - Veterinarian")
+        self.assertEqual(changes[1]["description"], "Temp Rail Distance set at 45 ft.")
 
 if __name__ == '__main__':
     unittest.main()

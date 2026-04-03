@@ -27,6 +27,7 @@ EQUIBASE_BASE_URL = "https://www.equibase.com/static/latechanges/html/"
 LATE_CHANGES_INDEX_URL = "https://www.equibase.com/static/latechanges/html/latechanges.html"
 TVG_LATE_CHANGES_TRACK_URL = "https://tvg.equibase.com/static/latechanges/html/latechanges{track_code}-USA.html"
 LEGACY_LATE_CHANGES_TRACK_URL = "https://www.equibase.com/static/latechanges/html/latechanges{track_code}-USA.html"
+MOBILE_LATE_CHANGES_TRACK_URL = "https://mobile.equibase.com/html/scratches{track_code}.html"
 
 def fetch_static_page(url, retries=3):
     """
@@ -134,6 +135,60 @@ def fetch_direct_track_changes_page(track_code):
         if html:
             return html, url
     return None, None
+
+
+def fetch_mobile_track_changes_page(track_code):
+    url = MOBILE_LATE_CHANGES_TRACK_URL.format(track_code=track_code)
+    html = fetch_static_page(url)
+    if html:
+        return html, url
+    return None, None
+
+
+def parse_mobile_track_changes(html, track_code):
+    """
+    Parse Equibase mobile scratches/changes pages as a last-ditch fallback.
+    These pages are simpler and often survive when other late-changes paths do not.
+    """
+    if not html:
+        return []
+
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    if "TODAY'S SCRATCHES AND CHANGES" not in text.upper():
+        logger.warning(f"Unexpected mobile late-changes page format for {track_code}")
+        return []
+
+    changes = []
+    race_blocks = re.finditer(
+        r'<table[^>]*bgcolor="#008000"[^>]*>.*?<b>Race\s+(\d+)</b>.*?</table>(.*?)(?=<table[^>]*bgcolor="#008000"[^>]*>.*?<b>Race\s+\d+</b>|$)',
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    for match in race_blocks:
+        race_number = int(match.group(1))
+        block = match.group(2)
+        item_matches = re.finditer(
+            r'(?:<p>\s*<b>#\s*([^<:\s]+)\s+(.+?):\s*</b>\s*</p>\s*)?<p>\s*<ChangeDescWeb>\s*(.*?)\s*</ChangeDescWeb>\s*</p>',
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
+        for item in item_matches:
+            program_number = normalize_pgm(item.group(1)) if item.group(1) else None
+            horse_name = normalize_name(item.group(2)) if item.group(2) else ""
+            description = BeautifulSoup(item.group(3), "html.parser").get_text(" ", strip=True)
+            description = re.sub(r"\s+", " ", description).strip()
+            if not description:
+                continue
+            changes.append({
+                "race_number": race_number,
+                "program_number": program_number,
+                "horse_name": horse_name,
+                "change_type": determine_change_type(description),
+                "description": description,
+            })
+
+    return changes
 
 def determine_change_type(description):
     """
@@ -973,8 +1028,14 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
         for trk in active_tracks:
             html, source_url = fetch_direct_track_changes_page(trk)
             if not html:
-                continue
-            changes = parse_track_changes(html, trk)
+                changes = []
+            else:
+                changes = parse_track_changes(html, trk)
+            if not changes:
+                mobile_html, mobile_url = fetch_mobile_track_changes_page(trk)
+                if mobile_html:
+                    changes = parse_mobile_track_changes(mobile_html, trk)
+                    source_url = mobile_url
             if changes:
                 count = update_changes_in_db(trk, today, changes)
                 total_changes_processed += count

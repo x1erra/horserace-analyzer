@@ -1014,300 +1014,21 @@ def get_claims():
 
 @app.route('/api/changes', methods=['GET'])
 def get_changes():
-    """
-    Get all race changes (scratches, jockey changes, etc.)
-    Query params:
-    - view: 'upcoming' (default) or 'all'
-    - mode: 'upcoming' (default) or 'history'
-    - page: Page number (default 1)
-    - limit: Results per page (default 20)
-    - track: Filter by track code (e.g., 'SA', 'DMR')
-    
-    This endpoint merges data from:
-    1. hranalyzer_race_entries (existing scratches with scratched=True)
-    2. hranalyzer_changes (new changes table for jockey changes, etc.)
-    """
+    """Public API wrapper around the shared changes feed logic used by MCP."""
     try:
-        # Get query parameters
-        view_mode = request.args.get('mode', 'upcoming') # 'upcoming' or 'history'
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 20))
-        track_filter = request.args.get('track', 'All') # New track filter
-        
-        start = (page - 1) * limit
-        end = start + limit
-        
-        today = date.today().isoformat()
-        
-        supabase = get_supabase_client()
-        
-        all_changes = []
-        
-        # =======================================================================
-        # DEDUPLICATION FIX: Fetch detailed changes FIRST (Source 2), then
-        # skip generic entries from Source 1 if a detailed scratch exists.
-        # =======================================================================
-        
-        # Set to track entry_ids that have detailed scratch records
-        entries_with_detailed_scratches = set()
-        
-        # --- SOURCE 2 (FIRST): Detailed Changes from hranalyzer_changes table ---
-        try:
-            changes_query = supabase.table('hranalyzer_changes')\
-                .select('''
-                    id,
-                    entry_id,
-                    change_type,
-                    description,
-                    created_at,
-                    entry:hranalyzer_race_entries(
-                        id,
-                        program_number,
-                        horse:hranalyzer_horses(horse_name)
-                    ),
-                    race:hranalyzer_races!inner(
-                        id,
-                        track_code, 
-                        race_date, 
-                        race_number,
-                        post_time
-                    )
-                ''')
-                
-            if view_mode == 'upcoming':
-                changes_query = changes_query.eq('race.race_date', today)
-            else:
-                changes_query = changes_query.lt('race.race_date', today)
+        from mcp_server import get_changes as mcp_get_changes
 
-            # Apply Track Filter
-            if track_filter != 'All':
-                changes_query = changes_query.eq('race.track_code', track_filter)
-
-            changes_response = changes_query.execute()
-            
-            for item in changes_response.data or []:
-                race = item.get('race') or {}
-                entry = item.get('entry') or {}
-                horse = entry.get('horse') or {}
-                
-                # Track entry_ids that have detailed scratch records
-                if item.get('change_type') == 'Scratch' and item.get('entry_id'):
-                    entries_with_detailed_scratches.add(item['entry_id'])
-                
-                all_changes.append({
-                    'id': item['id'],
-                    'race_id': race.get('id'),
-                    'race_date': str(race.get('race_date')),
-                    'track_code': race.get('track_code'),
-                    'race_number': race.get('race_number'),
-                    'post_time': race.get('post_time', 'N/A'),
-                    'program_number': entry.get('program_number', '-'),
-                    'horse_name': horse.get('horse_name', 'Race-wide'),
-                    'change_type': item['change_type'],
-                    'description': item['description'],
-                    'change_time': item.get('created_at'),
-                    '_source': 'changes'
-                })
-
-        except Exception as e:
-            # hranalyzer_changes table might not exist yet, that's OK
-            print(f"DEBUG: Error fetching hranalyzer_changes: {e}")
-            pass
-        
-        # --- SOURCE 1 (SECOND): Generic Scratches from hranalyzer_race_entries ---
-        # ONLY add entries that don't already have detailed scratch records
-        scratch_query = supabase.table('hranalyzer_race_entries')\
-            .select('''
-                id,
-                program_number,
-                scratched,
-                updated_at,
-                horse:hranalyzer_horses(horse_name),
-                race:hranalyzer_races!inner(
-                    id, 
-                    track_code, 
-                    race_date, 
-                    race_number,
-                    post_time
-                )
-            ''')\
-            .eq('scratched', True)
-            
-        if view_mode == 'upcoming':
-            scratch_query = scratch_query.eq('race.race_date', today)
-        else:
-            scratch_query = scratch_query.lt('race.race_date', today)
-            
-        # Apply Track Filter
-        if track_filter != 'All':
-            scratch_query = scratch_query.eq('race.track_code', track_filter)
-            
-        scratch_response = scratch_query.execute()
-        
-        for item in scratch_response.data or []:
-            entry_id = item['id']
-            
-            # SKIP if this entry already has a detailed scratch in hranalyzer_changes
-            if entry_id in entries_with_detailed_scratches:
-                continue
-                
-            race = item.get('race') or {}
-            horse = item.get('horse') or {}
-            
-            # Construct a standardized change object
-            change = {
-                'id': entry_id,
-                'race_id': race.get('id'),
-                'track_code': race.get('track_code'),
-                'race_date': str(race.get('race_date')),
-                'race_number': race.get('race_number'),
-                'program_number': item.get('program_number'),
-                'horse_name': horse.get('horse_name'),
-                'change_type': 'Scratch',
-                'description': 'Scratched',
-                'change_time': item.get('updated_at'),
-                'post_time': race.get('post_time'),
-                '_source': 'entries'
-            }
-            all_changes.append(change)
-        
-        # ---------------------------------------------------------------------
-        # BROAD NORMALIZATION & PRIORITY SELECTION
-        # ---------------------------------------------------------------------
-        
-        def get_type_class(item):
-            t = (item.get('change_type') or "").lower()
-            desc = (item.get('description') or "").lower()
-            
-            # Helper: Is this effectively a scratch?
-            is_scratch_related = 'scratch' in t or ('scratch' in desc and 'reason' in desc)
-            
-            if is_scratch_related: return 'scratch'
-            if 'jockey' in t: return 'jockey'
-            if 'weight' in t: return 'weight'
-            if 'cancelled' in t: return 'cancelled'
-            return 'other'
-
-        def normalize_identity(item):
-            # Extract and clean PGM
-            pgm = str(item.get('program_number') or "").strip().upper().lstrip('0')
-            if pgm in ["-", "NONE", "NULL"]: pgm = ""
-            
-            # Extract and clean Horse Name
-            h_name = str(item.get('horse_name') or "").strip().lower()
-            if h_name in ["", "race-wide", "unknown", "none", "null"]:
-                h_name = "RACE_WIDE"
-                
-            # Identity Anchor: PGM is king if it looks like a number/code, else Horse Name
-            if pgm:
-                return f"PGM_{pgm}"
-            return h_name
-
-        # Normalization Step
-        normalized_map = {} # (track, date, race, identity, type_class) -> [candidates]
-        
-        for item in all_changes:
-            track = str(item.get('track_code') or "").strip().upper()
-            r_date = str(item.get('race_date') or "").strip()[:10] # YYYY-MM-DD
-            r_num = str(item.get('race_number') or "").strip()
-            
-            identity = normalize_identity(item)
-            t_class = get_type_class(item)
-            
-            # Grouping key for logical events
-            # For Race-wide messages, we include a slice of description to keep different ones separate
-            if identity == "RACE_WIDE":
-                desc_slug = (item.get('description') or "").strip()[:30].lower()
-                event_key = (track, r_date, r_num, identity, t_class, desc_slug)
-            else:
-                event_key = (track, r_date, r_num, identity, t_class)
-            
-            if event_key not in normalized_map:
-                normalized_map[event_key] = []
-            normalized_map[event_key].append(item)
-
-        final_list = []
-        
-        for event_key, candidates in normalized_map.items():
-            if not candidates: continue
-            
-            if len(candidates) == 1:
-                # If single candidate is effectively a scratch but labeled "Other", fix it for UI
-                c = candidates[0]
-                if get_type_class(c) == 'scratch' and c.get('change_type') == 'Other':
-                     c['change_type'] = 'Scratch'
-                final_list.append(c)
-                continue
-                
-            # Final Selection Strategy: LATEST TIME WINS
-            # User wants the most recently created entry to be the source of truth.
-            def final_ranking(c):
-                # Parse timestamp
-                ts = c.get('change_time')
-                if not ts:
-                    return "" # Low priority
-                return str(ts)
-            
-            # Sort by time descending (latest first)
-            candidates.sort(key=final_ranking, reverse=True)
-            
-            # Select the winner (latest)
-            winner = candidates[0]
-            
-            # If the winner is a scratch-related update (e.g. "Other" reason change),
-            # ensure it displays as a standardized "Scratch" alert in the UI.
-            if get_type_class(winner) == 'scratch' and winner.get('change_type') == 'Other':
-                winner['change_type'] = 'Scratch'
-                
-            final_list.append(winner)
-
-        # --- FILTER: Only horse-specific changes (exclude Race-wide) unless it's a legitimate cancellation ---
-        # Also EXCLUDE 'Wagering' type or generic wagering text to prevent "plaguing" the user
-        final_list = [
-            c for c in final_list 
-            if c.get('horse_name') not in (None, '', 'Race-wide', 'Race-Wide') 
-            or c.get('change_type') == 'Race Cancelled'
-        ]
-        
-        # Strict Wagering Filter
-        final_list = [
-            c for c in final_list
-            if c.get('change_type') != 'Wagering'
-            and 'wagering' not in (c.get('description') or '').lower()
-        ]
-
-        # --- FINAL SORTING ---
-        if view_mode == 'upcoming':
-            final_list.sort(key=lambda x: (
-                str(x.get('race_date') or ''),
-                str(x.get('track_code') or ''),
-                int(str(x.get('race_number') or 0)),
-                normalize_identity(x)
-            ))
-        else:
-            final_list.sort(key=lambda x: (
-                str(x.get('race_date') or ''),
-                str(x.get('track_code') or ''),
-                int(str(x.get('race_number') or 0)),
-                normalize_identity(x)
-            ), reverse=True)
-        
-        # --- Pagination ---
-        total_count = len(final_list)
-        # Fix: end is start + limit, so [start:end] gives exactly 'limit' results.
-        paginated_changes = final_list[start:end]
-
-        
-        for c in paginated_changes:
-            c.pop('_source', None)
-            
-        return jsonify({
-            'changes': paginated_changes,
-            'count': total_count,
-            'page': page,
-            'limit': limit,
-            'total_pages': (total_count + limit - 1) // limit if limit > 0 else 1
-        })
+        result = mcp_get_changes(
+            view=request.args.get('view', 'upcoming'),
+            mode=request.args.get('mode', ''),
+            page=int(request.args.get('page', 1)),
+            limit=int(request.args.get('limit', 20)),
+            track=request.args.get('track', 'All'),
+            start_date=request.args.get('start_date', ''),
+            end_date=request.args.get('end_date', ''),
+            race_number=int(request.args.get('race_number', 0)),
+        )
+        return jsonify(result)
 
     except Exception as e:
         import traceback
@@ -1386,101 +1107,20 @@ def get_race_changes(race_id):
 
 @app.route('/api/scratches', methods=['GET'])
 def get_scratches():
-    """
-    Get all scratches suitable for display
-    Query params:
-    - view: 'upcoming' (default) or 'all'
-    - page: Page number (default 1)
-    - limit: Results per page (default 20)
-    """
+    """Public API wrapper around the shared scratches feed logic used by MCP."""
     try:
-        supabase = get_supabase_client()
-        view_mode = request.args.get('view', 'upcoming')
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 20))
-        today = date.today().isoformat()
-        
-        # Calculate offset
-        start = (page - 1) * limit
-        end = start + limit - 1
-        
-        # Base query for scratches
-        # We need count='exact' to get total distinct count
-        query = supabase.table('hranalyzer_race_entries')\
-            .select('''
-                id, program_number, scratched, updated_at,
-                horse:hranalyzer_horses(horse_name),
-                trainer:hranalyzer_trainers(trainer_name),
-                race:hranalyzer_races!inner(
-                    id, track_code, race_date, race_number, post_time, race_status,
-                    track:hranalyzer_tracks(track_name)
-                )
-            ''', count='exact')\
-            .eq('scratched', True)
-            
-        # Filter and Sort
-        if view_mode == 'upcoming':
-             # Upcoming: Soonest first (ASC), then Track, then Race
-             query = query.gte('race.race_date', today)\
-                .order('race_date', foreign_table='race')\
-                .order('track_code', foreign_table='race')\
-                .order('race_number', foreign_table='race')\
-                .order('id')
-        else:
-             # All History: Most recent first (DESC), then Track, then Race, then ID
-             query = query.lte('race.race_date', today)\
-                .order('race_date', desc=True, foreign_table='race')\
-                .order('track_code', foreign_table='race')\
-                .order('race_number', foreign_table='race')\
-                .order('id')
-             
-        # Apply pagination
-        response = query.range(start, end).execute()
-        
-        count = response.count if response.count is not None else 0
-        data = response.data
-        
-        scratches = []
-        for item in data:
-            # Safe access
-            race = item.get('race') or {}
-            track = race.get('track') or {}
-            horse = item.get('horse') or {}
-            trainer = item.get('trainer') or {}
-            
-            # Calculate time safely
-            formatted_time = "N/A"
-            if race.get('post_time'):
-                 formatted_time = format_to_12h(race['post_time'])
-            
-            scratches.append({
-                'id': item['id'],
-                'race_date': race.get('race_date'),
-                'track_code': race.get('track_code'),
-                'track_name': track.get('track_name', race.get('track_code')),
-                'race_number': race.get('race_number'),
-                'post_time': formatted_time,
-                'program_number': item['program_number'],
-                'horse_name': horse.get('horse_name', 'Unknown'),
-                'trainer_name': trainer.get('trainer_name', 'Unknown'),
-                'status': 'Scratched'
-            })
-            
-        return jsonify({
-            'scratches': scratches,
-            'count': count,
-            'page': page,
-            'limit': limit,
-            'total_pages': (count + limit - 1) // limit if limit > 0 else 1
-        })
-            
-        # Sort by Date (desc), Track, Race
-        scratches.sort(key=lambda x: (x['race_date'], x['track_code'], x['race_number']), reverse=True)
-        
-        return jsonify({
-            'scratches': scratches,
-            'count': len(scratches)
-        })
+        from mcp_server import get_scratches as mcp_get_scratches
+
+        result = mcp_get_scratches(
+            view=request.args.get('view', 'upcoming'),
+            page=int(request.args.get('page', 1)),
+            limit=int(request.args.get('limit', 20)),
+            track=request.args.get('track', 'All'),
+            start_date=request.args.get('start_date', ''),
+            end_date=request.args.get('end_date', ''),
+            race_number=int(request.args.get('race_number', 0)),
+        )
+        return jsonify(result)
 
     except Exception as e:
         traceback.print_exc()
