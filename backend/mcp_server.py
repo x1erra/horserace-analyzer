@@ -349,7 +349,7 @@ def _build_feed_metadata(items, requested_view, applied_view, fallback_applied=F
     }
 
 
-def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date=""):
+def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
     """Mirror backend change merge and dedupe logic for MCP consumers."""
     supabase = get_supabase_client()
     today = date.today().isoformat()
@@ -384,6 +384,8 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
 
         if track != "All":
             changes_query = changes_query.eq("race.track_code", track)
+        if race_number:
+            changes_query = changes_query.eq("race.race_number", race_number)
 
         changes_response = changes_query.execute()
         change_rows = changes_response.data or []
@@ -434,6 +436,8 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
 
     if track != "All":
         scratch_query = scratch_query.eq("race.track_code", track)
+    if race_number:
+        scratch_query = scratch_query.eq("race.race_number", race_number)
 
     scratch_response = scratch_query.execute()
     scratch_rows = scratch_response.data or []
@@ -1255,6 +1259,7 @@ def get_scratches(
     track: str = "All",
     start_date: str = "",
     end_date: str = "",
+    race_number: int = 0,
 ) -> dict:
     """Get scratches with pagination and backend-parity fields."""
     supabase = get_supabase_client()
@@ -1293,6 +1298,8 @@ def get_scratches(
 
         if track != "All":
             query = query.eq("race.track_code", track)
+        if race_number:
+            query = query.eq("race.race_number", race_number)
 
         if applied_view == "upcoming" and not (start_date or end_date):
             query = (
@@ -1350,7 +1357,7 @@ def get_scratches(
             }
         )
 
-    count = response.count or 0
+    count = response.count if response.count is not None else len(scratches)
     return {
         "scratches": scratches,
         "count": count,
@@ -1376,6 +1383,7 @@ def get_changes(
     track: str = "All",
     start_date: str = "",
     end_date: str = "",
+    race_number: int = 0,
 ) -> dict:
     """Get normalized, deduplicated changes feed matching backend semantics."""
     requested_view = mode or view or "upcoming"
@@ -1389,6 +1397,7 @@ def get_changes(
         track=track or "All",
         start_date=start_date,
         end_date=end_date,
+        race_number=max(race_number, 0),
     )
     applied_view = resolved_mode
     fallback_applied = False
@@ -1408,6 +1417,7 @@ def get_changes(
             track=track or "All",
             start_date=start_date,
             end_date=end_date,
+            race_number=max(race_number, 0),
         )
         fallback_applied = True
         fallback_reason = "No upcoming changes found; returning the most recent historical changes instead."
@@ -1483,7 +1493,7 @@ def get_race_changes(race_id: str) -> dict:
 
 
 @mcp.tool()
-def get_claims(track: str = "", start_date: str = "", end_date: str = "", limit: int = 100) -> dict:
+def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_number: int = 0, limit: int = 100) -> dict:
     """Get claims with race context and IDs."""
     supabase = get_supabase_client()
     limit = min(max(limit, 1), 500)
@@ -1508,6 +1518,8 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", limit:
         if start_date and race["race_date"] < start_date:
             continue
         if end_date and race["race_date"] > end_date:
+            continue
+        if race_number and race["race_number"] != race_number:
             continue
 
         claims.append(

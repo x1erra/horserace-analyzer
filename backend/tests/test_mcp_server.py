@@ -255,7 +255,15 @@ class TestMcpServer(unittest.TestCase):
             result = mcp_server.get_changes(view="all", page=2, limit=15, track="GP")
 
         self.assertEqual(result["count"], 0)
-        mock_feed.assert_called_once_with(mode="all", page=2, limit=15, track="GP", start_date="", end_date="")
+        mock_feed.assert_called_once_with(
+            mode="all",
+            page=2,
+            limit=15,
+            track="GP",
+            start_date="",
+            end_date="",
+            race_number=0,
+        )
 
     def test_get_changes_falls_back_to_all_when_upcoming_is_empty(self):
         with patch.object(
@@ -291,6 +299,21 @@ class TestMcpServer(unittest.TestCase):
             track="SA",
             start_date="2026-03-01",
             end_date="2026-03-31",
+            race_number=0,
+        )
+
+    def test_get_changes_passes_race_number_through(self):
+        with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
+            mcp_server.get_changes(track="GP", start_date="2026-04-06", end_date="2026-04-06", race_number=4)
+
+        mock_feed.assert_called_once_with(
+            mode="upcoming",
+            page=1,
+            limit=20,
+            track="GP",
+            start_date="2026-04-06",
+            end_date="2026-04-06",
+            race_number=4,
         )
 
     def test_get_scratches_falls_back_to_all_when_upcoming_is_empty(self):
@@ -329,6 +352,53 @@ class TestMcpServer(unittest.TestCase):
         self.assertTrue(result["meta"]["fallback_applied"])
         self.assertEqual(result["meta"]["applied_view"], "all")
         self.assertIn("historical scratches", result["meta"]["fallback_reason"])
+
+    def test_get_scratches_filters_by_race_number(self):
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_race_entries": [
+                    {
+                        "id": "entry-1",
+                        "program_number": "5",
+                        "scratched": True,
+                        "horse": {"horse_name": "Race Four Horse"},
+                        "trainer": {"trainer_name": "Trainer A"},
+                        "race": {
+                            "id": "race-1",
+                            "race_date": "2026-04-06",
+                            "track_code": "GP",
+                            "race_number": 4,
+                            "post_time": "14:00:00",
+                            "track": {"track_name": "Gulfstream Park"},
+                        },
+                    },
+                    {
+                        "id": "entry-2",
+                        "program_number": "6",
+                        "scratched": True,
+                        "horse": {"horse_name": "Race Five Horse"},
+                        "trainer": {"trainer_name": "Trainer B"},
+                        "race": {
+                            "id": "race-2",
+                            "race_date": "2026-04-06",
+                            "track_code": "GP",
+                            "race_number": 5,
+                            "post_time": "14:30:00",
+                            "track": {"track_name": "Gulfstream Park"},
+                        },
+                    },
+                ]
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase), patch.object(
+            mcp_server, "date", FakeDate
+        ):
+            result = mcp_server.get_scratches(view="all", track="GP", start_date="2026-04-06", end_date="2026-04-06", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["scratches"][0]["horse_name"], "Race Four Horse")
+        self.assertEqual(result["scratches"][0]["race_number"], 4)
 
     def test_get_horse_profile_requires_identifier(self):
         with patch.object(mcp_server, "get_supabase_client", return_value=SupabaseStub(Response(data=[]))):
@@ -506,6 +576,51 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["changes"][0]["change_time"], "2026-03-31T12:00:00Z")
         self.assertEqual(result["changes"][0]["horse_name"], "A Lister")
         self.assertEqual(result["changes"][0]["race_key"], "SA-20260331-3")
+
+    def test_get_claims_filters_by_race_number(self):
+        supabase = SupabaseStub(
+            Response(
+                data=[
+                    {
+                        "id": "claim-1",
+                        "horse_name": "Horse A",
+                        "program_number": "5",
+                        "new_trainer_name": "Trainer A",
+                        "new_owner_name": "Owner A",
+                        "claim_price": 25000,
+                        "hranalyzer_races": {
+                            "race_key": "GP-20260406-4",
+                            "track_code": "GP",
+                            "race_date": "2026-04-06",
+                            "race_number": 4,
+                            "hranalyzer_tracks": {"track_name": "Gulfstream Park"},
+                        },
+                    },
+                    {
+                        "id": "claim-2",
+                        "horse_name": "Horse B",
+                        "program_number": "2",
+                        "new_trainer_name": "Trainer B",
+                        "new_owner_name": "Owner B",
+                        "claim_price": 32000,
+                        "hranalyzer_races": {
+                            "race_key": "GP-20260406-5",
+                            "track_code": "GP",
+                            "race_date": "2026-04-06",
+                            "race_number": 5,
+                            "hranalyzer_tracks": {"track_name": "Gulfstream Park"},
+                        },
+                    },
+                ]
+            )
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_claims(track="GP", start_date="2026-04-06", end_date="2026-04-06", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["claims"][0]["race_number"], 4)
+        self.assertEqual(result["claims"][0]["horse_name"], "Horse A")
 
 
 if __name__ == "__main__":
