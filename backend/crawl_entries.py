@@ -17,6 +17,25 @@ from crawl_equibase import get_or_create_track, get_or_create_participant, norma
 
 logger = logging.getLogger(__name__)
 
+DRF_RACING_DATES_URL = "https://www1.drf.com/Entries/RacingDates.do"
+STATIC_ENTRY_HOSTS = [
+    ("tvg.equibase.com", "equibase_tvg_entries"),
+    ("www.equibase.com", "equibase_entries"),
+]
+BLOCKED_PAGE_PATTERNS = (
+    "visid_incap",
+    "incap_ses",
+    "request unsuccessful",
+    "access denied",
+    "incapsula",
+)
+NO_CARD_PATTERNS = (
+    "404 - file or directory not found",
+    "<title>404",
+)
+
+_drf_schedule_cache = None
+
 # Map Equibase codes to HRN slugs
 HRN_TRACK_MAP = {
     'GP': 'gulfstream-park',
@@ -51,7 +70,7 @@ def clean_horse_name(raw_name):
     horse_name = re.sub(r'\s*\([^)]*\)\s*$', '', horse_name)
     return horse_name.strip() or "Unknown"
 
-def get_static_entry_url(track_code, race_date):
+def get_static_entry_url(track_code, race_date, host="www.equibase.com"):
     """
     Construct the static URL for a track's entries
     Format: https://www.equibase.com/static/entry/{CODE}{MM}{DD}{YY}USA-EQB.html
@@ -61,8 +80,98 @@ def get_static_entry_url(track_code, race_date):
     yy = race_date.strftime('%y')
     
     # Standard format
-    url = f"https://www.equibase.com/static/entry/{track_code}{mm}{dd}{yy}USA-EQB.html"
+    url = f"https://{host}/static/entry/{track_code}{mm}{dd}{yy}USA-EQB.html"
     return url
+
+
+def parse_drf_racing_dates(html_content):
+    """Parse DRF's racing dates page into {track_code: [(start_date, end_date), ...]}."""
+    soup = BeautifulSoup(html_content, 'html.parser')
+    schedule = {}
+
+    for row in soup.find_all('tr'):
+        cells = row.find_all('td')
+        if len(cells) < 2:
+            continue
+
+        track_code = cells[1].get_text(" ", strip=True).upper()
+        if not re.fullmatch(r'[A-Z0-9]{2,4}', track_code):
+            continue
+
+        ranges = []
+        row_text = row.get_text(" ", strip=True)
+        for start_text, end_text in re.findall(r'(\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})', row_text):
+            try:
+                ranges.append((
+                    datetime.strptime(start_text, "%m/%d/%Y").date(),
+                    datetime.strptime(end_text, "%m/%d/%Y").date(),
+                ))
+            except ValueError:
+                continue
+
+        if ranges:
+            schedule[track_code] = ranges
+
+    return schedule
+
+
+def fetch_drf_racing_dates(force_refresh=False):
+    """Fetch and cache DRF's published track/date schedule."""
+    global _drf_schedule_cache
+
+    if _drf_schedule_cache is not None and not force_refresh:
+        return _drf_schedule_cache
+
+    try:
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+        }
+        response = requests.get(DRF_RACING_DATES_URL, headers=headers, timeout=20)
+        response.raise_for_status()
+        _drf_schedule_cache = parse_drf_racing_dates(response.text)
+    except Exception as exc:
+        logger.warning(f"Failed to fetch DRF racing dates: {exc}")
+        _drf_schedule_cache = {}
+
+    return _drf_schedule_cache
+
+
+def track_has_card_via_drf(track_code, race_date, schedule=None):
+    """Return True/False when DRF knows the answer, otherwise None."""
+    schedule = schedule if schedule is not None else fetch_drf_racing_dates()
+    ranges = schedule.get(track_code.upper())
+    if not ranges:
+        return None
+
+    for start_date, end_date in ranges:
+        if start_date <= race_date <= end_date:
+            return True
+    return False
+
+
+def classify_static_page(content, size):
+    """Differentiate blocked HTML from a genuine missing-card 404 page."""
+    text = (content or "").lower()
+    if size and size < 5000 and any(pattern in text for pattern in BLOCKED_PAGE_PATTERNS):
+        return "blocked"
+    if any(pattern in text for pattern in NO_CARD_PATTERNS):
+        return "no_card"
+    if size and size < 5000:
+        return "blocked"
+    return "success"
+
+
+def attach_source_to_races(races, source_name):
+    annotated = []
+    for race in races or []:
+        race_copy = dict(race)
+        race_copy['source'] = source_name
+        annotated.append(race_copy)
+    return annotated
+
 
 def fetch_static_page(url, retries=3):
     """
@@ -70,6 +179,7 @@ def fetch_static_page(url, retries=3):
     Requests/Curl with specific headers failed. PowerShell IWR works.
     """
     temp_file = f"temp_entry_{int(time.time())}.html"
+    last_error = None
     
     for attempt in range(retries):
         try:
@@ -83,25 +193,46 @@ def fetch_static_page(url, retries=3):
             
             if result.returncode == 0 and os.path.exists(temp_file):
                 size = os.path.getsize(temp_file)
-                if size < 5000:
-                    logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked.")
-                    # If blocked, maybe try waiting or retry
-                else:
-                    # Success
-                    with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                    
-                    # Cleanup
-                    try: os.remove(temp_file) 
-                    except: pass
-                    
-                    return content
+                with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+                classification = classify_static_page(content, size)
+
+                # Cleanup
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
+
+                if classification == "success":
+                    return {
+                        "status": "success",
+                        "content": content,
+                        "size": size,
+                    }
+
+                if classification == "no_card":
+                    logger.info(f"Static entries not found for {url} (404/no card).")
+                    return {
+                        "status": "no_card",
+                        "content": content,
+                        "size": size,
+                    }
+
+                logger.warning(f"Downloaded file too small ({size} bytes). Likely blocked.")
+                return {
+                    "status": "blocked",
+                    "content": content,
+                    "size": size,
+                }
             else:
+                 last_error = result.stderr or "PowerShell failed"
                  logger.warning(f"PowerShell failed: {result.stderr}")
                  
             time.sleep(2)
             
         except Exception as e:
+            last_error = str(e)
             logger.error(f"Error fetching {url}: {e}")
             time.sleep(2)
             
@@ -110,7 +241,12 @@ def fetch_static_page(url, retries=3):
         try: os.remove(temp_file)
         except: pass
         
-    return None
+    return {
+        "status": "error",
+        "content": None,
+        "size": 0,
+        "error": last_error,
+    }
 
 def parse_entries_html(html_content, track_code, race_date):
     """
@@ -584,6 +720,56 @@ def fetch_hrn_entries(track_code, race_date):
         logger.error(f"HRN Fetch Error: {e}")
         return []
 
+
+def fetch_entry_card(track_code, race_date):
+    """
+    Layered source chain:
+    1. HRN
+    2. TVG Equibase static entries
+    3. Legacy Equibase static entries
+    Returns a result object with status + races + source metadata.
+    """
+    races = fetch_hrn_entries(track_code, race_date)
+    if races:
+        return {
+            "status": "success",
+            "races": attach_source_to_races(races, "hrn_entries"),
+            "source": "hrn_entries",
+        }
+
+    logger.info(f"HRN empty/failed for {track_code}. Trying fallback sources...")
+
+    for host, source_name in STATIC_ENTRY_HOSTS:
+        url = get_static_entry_url(track_code, race_date, host=host)
+        fetch_result = fetch_static_page(url)
+
+        if fetch_result["status"] == "success":
+            races = parse_entries_html(fetch_result["content"], track_code, race_date)
+            if races:
+                return {
+                    "status": "success",
+                    "races": attach_source_to_races(races, source_name),
+                    "source": source_name,
+                }
+            logger.info(f"{source_name} returned HTML but no parsable entries for {track_code}")
+            continue
+
+        if fetch_result["status"] == "blocked":
+            logger.warning(f"{source_name} appears blocked for {track_code}")
+            continue
+
+        if fetch_result["status"] == "no_card":
+            logger.info(f"{source_name} reports no card for {track_code} on {race_date}")
+            continue
+
+        logger.warning(f"{source_name} failed for {track_code}: {fetch_result.get('error')}")
+
+    return {
+        "status": "empty",
+        "races": [],
+        "source": None,
+    }
+
 def insert_upcoming_race(supabase, track_code, race_date, race_data, allow_completed_update=False):
     """
     Insert upcoming race into DB
@@ -702,21 +888,24 @@ def crawl_entries(target_date=None, tracks=None, allow_completed_update=False):
         
     logger.info(f"Crawling entries for {target_date}")
     supabase = get_supabase_client()
+    drf_schedule = fetch_drf_racing_dates()
     
-    stats = {'races_found': 0, 'races_inserted': 0}
+    stats = {
+        'races_found': 0,
+        'races_inserted': 0,
+        'tracks_skipped_no_card': 0,
+    }
     
     for track_code in tracks:
         try:
-            # 1. TRY HRN PRIMARY
-            races = fetch_hrn_entries(track_code, target_date)
-            
-            if not races:
-                logger.info(f"HRN empty/failed for {track_code}. Trying Fallback (Equibase)...")
-                # 2. TRY EQUIBASE FALLBACK
-                url = get_static_entry_url(track_code, target_date)
-                html = fetch_static_page(url)
-                if html:
-                    races = parse_entries_html(html, track_code, target_date)
+            has_card = track_has_card_via_drf(track_code, target_date, drf_schedule)
+            if has_card is False:
+                logger.info(f"Skipping {track_code} for {target_date}: DRF schedule shows no card.")
+                stats['tracks_skipped_no_card'] += 1
+                continue
+
+            fetch_result = fetch_entry_card(track_code, target_date)
+            races = fetch_result["races"]
             
             if races:
                 logger.info(f"Found {len(races)} races for {track_code}")
@@ -726,7 +915,10 @@ def crawl_entries(target_date=None, tracks=None, allow_completed_update=False):
                     if insert_upcoming_race(supabase, track_code, target_date, race, allow_completed_update=allow_completed_update):
                         stats['races_inserted'] += 1
             else:
-                logger.info(f"All sources empty for {track_code}")
+                if has_card is True:
+                    logger.warning(f"Expected card for {track_code} on {target_date}, but all entry sources failed.")
+                else:
+                    logger.info(f"All sources empty for {track_code}")
                 
             
             # Sleep slightly to be polite to HRN/Equibase
