@@ -152,6 +152,7 @@ Available MCP tools:
 - `get_claims`
 
 See [backend/MCP_TOOLS.md](/Users/stevendamato/Projects/horserace-analyzer/backend/MCP_TOOLS.md) for usage guidance and how to interpret `get_feed_freshness()`.
+See [backend/OPERATOR_RUNBOOK.md](/Users/stevendamato/Projects/horserace-analyzer/backend/OPERATOR_RUNBOOK.md) for deployment, alert, and production triage guidance.
 
 ## Database Schema
 
