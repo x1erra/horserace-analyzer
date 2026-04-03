@@ -322,7 +322,34 @@ def _build_change_record(item, entry_snapshots, race_snapshots, source, default_
     }
 
 
-def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
+def _resolve_date_filtered_query(query, mode, today, start_date="", end_date=""):
+    """Apply date filtering to a Supabase query."""
+    if start_date:
+        query = query.gte("race.race_date", start_date)
+    elif mode == "upcoming":
+        query = query.eq("race.race_date", today)
+    elif mode == "history":
+        query = query.lt("race.race_date", today)
+
+    if end_date:
+        query = query.lte("race.race_date", end_date)
+
+    return query
+
+
+def _build_feed_metadata(items, requested_view, applied_view, fallback_applied=False, fallback_reason=""):
+    dates = [item.get("race_date") for item in items if item.get("race_date")]
+    return {
+        "requested_view": requested_view,
+        "applied_view": applied_view,
+        "fallback_applied": fallback_applied,
+        "fallback_reason": fallback_reason or None,
+        "latest_race_date": max(dates) if dates else None,
+        "earliest_race_date": min(dates) if dates else None,
+    }
+
+
+def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date=""):
     """Mirror backend change merge and dedupe logic for MCP consumers."""
     supabase = get_supabase_client()
     today = date.today().isoformat()
@@ -347,10 +374,13 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
             )
         )
 
-        if mode == "upcoming":
-            changes_query = changes_query.eq("race.race_date", today)
-        elif mode == "history":
-            changes_query = changes_query.lt("race.race_date", today)
+        changes_query = _resolve_date_filtered_query(
+            changes_query,
+            mode,
+            today,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         if track != "All":
             changes_query = changes_query.eq("race.track_code", track)
@@ -394,10 +424,13 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
         .eq("scratched", True)
     )
 
-    if mode == "upcoming":
-        scratch_query = scratch_query.eq("race.race_date", today)
-    elif mode == "history":
-        scratch_query = scratch_query.lt("race.race_date", today)
+    scratch_query = _resolve_date_filtered_query(
+        scratch_query,
+        mode,
+        today,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     if track != "All":
         scratch_query = scratch_query.eq("race.track_code", track)
@@ -474,7 +507,8 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All"):
         and "wagering" not in (item.get("description") or "").lower()
     ]
 
-    if mode == "history":
+    sort_desc = mode in {"history", "all"} or bool(start_date or end_date)
+    if sort_desc:
         final_list.sort(
             key=lambda item: (
                 str(item.get("race_date") or ""),
@@ -1214,54 +1248,89 @@ def get_horse_profile(horse_id: str = "", horse_name: str = "") -> dict:
 
 
 @mcp.tool()
-def get_scratches(view: str = "upcoming", page: int = 1, limit: int = 20) -> dict:
+def get_scratches(
+    view: str = "upcoming",
+    page: int = 1,
+    limit: int = 20,
+    track: str = "All",
+    start_date: str = "",
+    end_date: str = "",
+) -> dict:
     """Get scratches with pagination and backend-parity fields."""
     supabase = get_supabase_client()
     today = date.today().isoformat()
     page = max(page, 1)
     limit = min(max(limit, 1), 200)
-    start = (page - 1) * limit
-    end = start + limit - 1
+    requested_view = view or "upcoming"
 
-    query = (
-        supabase.table("hranalyzer_race_entries")
-        .select(
-            """
-                id, program_number, scratched, updated_at,
-                horse:hranalyzer_horses(horse_name),
-                trainer:hranalyzer_trainers(trainer_name),
-                race:hranalyzer_races!inner(
-                    id, track_code, race_date, race_number, post_time, race_status,
-                    track:hranalyzer_tracks(track_name)
-                )
-            """,
-            count="exact",
-        )
-        .eq("scratched", True)
-    )
-
-    if view == "upcoming":
+    def run_query(applied_view):
+        start = (page - 1) * limit
+        end = start + limit - 1
         query = (
-            query.gte("race.race_date", today)
-            .order("race_date", foreign_table="race")
-            .order("track_code", foreign_table="race")
-            .order("race_number", foreign_table="race")
-            .order("id")
-        )
-    else:
-        query = (
-            query.lte("race.race_date", today)
-            .order("race_date", desc=True, foreign_table="race")
-            .order("track_code", foreign_table="race")
-            .order("race_number", foreign_table="race")
-            .order("id")
+            supabase.table("hranalyzer_race_entries")
+            .select(
+                """
+                    id, program_number, scratched, updated_at,
+                    horse:hranalyzer_horses(horse_name),
+                    trainer:hranalyzer_trainers(trainer_name),
+                    race:hranalyzer_races!inner(
+                        id, track_code, race_date, race_number, post_time, race_status,
+                        track:hranalyzer_tracks(track_name)
+                    )
+                """,
+                count="exact",
+            )
+            .eq("scratched", True)
         )
 
-    response = query.range(start, end).execute()
+        query = _resolve_date_filtered_query(
+            query,
+            applied_view,
+            today,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        if track != "All":
+            query = query.eq("race.track_code", track)
+
+        if applied_view == "upcoming" and not (start_date or end_date):
+            query = (
+                query.order("race_date", foreign_table="race")
+                .order("track_code", foreign_table="race")
+                .order("race_number", foreign_table="race")
+                .order("id")
+            )
+        else:
+            query = (
+                query.order("race_date", desc=True, foreign_table="race")
+                .order("track_code", foreign_table="race")
+                .order("race_number", foreign_table="race")
+                .order("id")
+            )
+
+        return query.range(start, end).execute()
+
+    applied_view = requested_view if requested_view in {"upcoming", "history", "all"} else "upcoming"
+    response = run_query(applied_view)
+    fallback_applied = False
+    fallback_reason = ""
+
+    if (
+        applied_view == "upcoming"
+        and not start_date
+        and not end_date
+        and not response.data
+    ):
+        applied_view = "all"
+        response = run_query(applied_view)
+        fallback_applied = True
+        fallback_reason = "No upcoming scratches found; returning the most recent historical scratches instead."
+
     scratches = []
-    for item in response.data:
+    for item in response.data or []:
         race = item.get("race") or {}
-        track = race.get("track") or {}
+        track_info = race.get("track") or {}
         horse = item.get("horse") or {}
         trainer = item.get("trainer") or {}
         scratches.append(
@@ -1270,7 +1339,7 @@ def get_scratches(view: str = "upcoming", page: int = 1, limit: int = 20) -> dic
                 "race_id": race.get("id"),
                 "race_date": race.get("race_date"),
                 "track_code": race.get("track_code"),
-                "track_name": track.get("track_name", race.get("track_code")),
+                "track_name": track_info.get("track_name", race.get("track_code")),
                 "race_number": race.get("race_number"),
                 "post_time": format_to_12h(race.get("post_time")),
                 "program_number": item.get("program_number"),
@@ -1288,16 +1357,69 @@ def get_scratches(view: str = "upcoming", page: int = 1, limit: int = 20) -> dic
         "page": page,
         "limit": limit,
         "total_pages": (count + limit - 1) // limit if limit > 0 else 1,
+        "meta": _build_feed_metadata(
+            scratches,
+            requested_view=requested_view,
+            applied_view=applied_view,
+            fallback_applied=fallback_applied,
+            fallback_reason=fallback_reason,
+        ),
     }
 
 
 @mcp.tool()
-def get_changes(view: str = "upcoming", mode: str = "", page: int = 1, limit: int = 20, track: str = "All") -> dict:
+def get_changes(
+    view: str = "upcoming",
+    mode: str = "",
+    page: int = 1,
+    limit: int = 20,
+    track: str = "All",
+    start_date: str = "",
+    end_date: str = "",
+) -> dict:
     """Get normalized, deduplicated changes feed matching backend semantics."""
-    resolved_mode = mode or ("history" if view == "all" else view)
-    if resolved_mode not in {"upcoming", "history", "all"}:
-        resolved_mode = "upcoming"
-    return fetch_change_feed(mode=resolved_mode, page=page, limit=min(max(limit, 1), 200), track=track or "All")
+    requested_view = mode or view or "upcoming"
+    resolved_mode = requested_view if requested_view in {"upcoming", "history", "all"} else "upcoming"
+    limit = min(max(limit, 1), 200)
+
+    result = fetch_change_feed(
+        mode=resolved_mode,
+        page=page,
+        limit=limit,
+        track=track or "All",
+        start_date=start_date,
+        end_date=end_date,
+    )
+    applied_view = resolved_mode
+    fallback_applied = False
+    fallback_reason = ""
+
+    if (
+        resolved_mode == "upcoming"
+        and not start_date
+        and not end_date
+        and result.get("count", 0) == 0
+    ):
+        applied_view = "all"
+        result = fetch_change_feed(
+            mode=applied_view,
+            page=page,
+            limit=limit,
+            track=track or "All",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        fallback_applied = True
+        fallback_reason = "No upcoming changes found; returning the most recent historical changes instead."
+
+    result["meta"] = _build_feed_metadata(
+        result.get("changes", []),
+        requested_view=requested_view,
+        applied_view=applied_view,
+        fallback_applied=fallback_applied,
+        fallback_reason=fallback_reason,
+    )
+    return result
 
 
 @mcp.tool()

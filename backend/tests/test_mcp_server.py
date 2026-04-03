@@ -94,6 +94,59 @@ class SupabaseStub:
         return QueryStub(self.response)
 
 
+class SequenceQueryStub:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def eq(self, *args, **kwargs):
+        return self
+
+    def in_(self, *args, **kwargs):
+        return self
+
+    def lt(self, *args, **kwargs):
+        return self
+
+    def lte(self, *args, **kwargs):
+        return self
+
+    def gte(self, *args, **kwargs):
+        return self
+
+    def ilike(self, *args, **kwargs):
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def range(self, *args, **kwargs):
+        return self
+
+    def single(self):
+        return self
+
+    def execute(self):
+        index = min(self.owner.index, len(self.owner.responses) - 1)
+        response = self.owner.responses[index]
+        self.owner.index += 1
+        return response
+
+
+class SequenceSupabaseStub:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.index = 0
+
+    def table(self, _name):
+        return SequenceQueryStub(self)
+
+
 class QueryRouterStub:
     def __init__(self, rows, single=False):
         self.rows = list(rows)
@@ -197,12 +250,85 @@ class TestMcpServer(unittest.TestCase):
         for tool_name in expected_tools:
             self.assertTrue(hasattr(mcp_server, tool_name), f"Missing MCP tool function: {tool_name}")
 
-    def test_get_changes_maps_view_all_to_history_mode(self):
+    def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
             result = mcp_server.get_changes(view="all", page=2, limit=15, track="GP")
 
         self.assertEqual(result["count"], 0)
-        mock_feed.assert_called_once_with(mode="history", page=2, limit=15, track="GP")
+        mock_feed.assert_called_once_with(mode="all", page=2, limit=15, track="GP", start_date="", end_date="")
+
+    def test_get_changes_falls_back_to_all_when_upcoming_is_empty(self):
+        with patch.object(
+            mcp_server,
+            "fetch_change_feed",
+            side_effect=[
+                {"changes": [], "count": 0, "page": 1, "limit": 20, "total_pages": 0},
+                {
+                    "changes": [{"race_date": "2026-03-27", "track_code": "GP", "race_number": 1}],
+                    "count": 1,
+                    "page": 1,
+                    "limit": 20,
+                    "total_pages": 1,
+                },
+            ],
+        ) as mock_feed:
+            result = mcp_server.get_changes()
+
+        self.assertEqual(result["count"], 1)
+        self.assertTrue(result["meta"]["fallback_applied"])
+        self.assertEqual(result["meta"]["applied_view"], "all")
+        self.assertIn("historical changes", result["meta"]["fallback_reason"])
+        self.assertEqual(mock_feed.call_count, 2)
+
+    def test_get_changes_passes_date_filters_through(self):
+        with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
+            mcp_server.get_changes(view="all", start_date="2026-03-01", end_date="2026-03-31", track="SA")
+
+        mock_feed.assert_called_once_with(
+            mode="all",
+            page=1,
+            limit=20,
+            track="SA",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+
+    def test_get_scratches_falls_back_to_all_when_upcoming_is_empty(self):
+        supabase = SequenceSupabaseStub(
+            [
+                Response(data=[], count=0),
+                Response(
+                    data=[
+                        {
+                            "id": "entry-1",
+                            "program_number": "5",
+                            "horse": {"horse_name": "A Lister"},
+                            "trainer": {"trainer_name": "Bob Baffert"},
+                            "race": {
+                                "id": "race-1",
+                                "race_date": "2026-03-27",
+                                "track_code": "SA",
+                                "race_number": 3,
+                                "post_time": "14:00:00",
+                                "track": {"track_name": "Santa Anita"},
+                            },
+                        }
+                    ],
+                    count=1,
+                ),
+            ]
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase), patch.object(
+            mcp_server, "date", FakeDate
+        ):
+            result = mcp_server.get_scratches()
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["scratches"][0]["horse_name"], "A Lister")
+        self.assertTrue(result["meta"]["fallback_applied"])
+        self.assertEqual(result["meta"]["applied_view"], "all")
+        self.assertIn("historical scratches", result["meta"]["fallback_reason"])
 
     def test_get_horse_profile_requires_identifier(self):
         with patch.object(mcp_server, "get_supabase_client", return_value=SupabaseStub(Response(data=[]))):
