@@ -177,7 +177,7 @@ def parse_mobile_track_changes(html, track_code):
             program_number = normalize_pgm(item.group(1)) if item.group(1) else None
             horse_name = normalize_name(item.group(2)) if item.group(2) else ""
             description = BeautifulSoup(item.group(3), "html.parser").get_text(" ", strip=True)
-            description = re.sub(r"\s+", " ", description).strip()
+            description = normalize_change_description(description)
             if not description:
                 continue
             changes.append({
@@ -204,6 +204,8 @@ def determine_change_type(description):
         return 'Weight Change'
     elif 'blinker' in desc_lower or 'equipment' in desc_lower:
         return 'Equipment Change'
+    elif 'first start since reported as' in desc_lower or 'reported as gelding' in desc_lower:
+        return 'Horse Note'
     elif 'cancel' in desc_lower:
         # Use centralized validation to avoid false positives (e.g. Wagering cancelled)
         if is_valid_cancellation(description):
@@ -215,6 +217,28 @@ def determine_change_type(description):
         return 'Other'
     
     return 'Other'
+
+
+def normalize_change_description(description):
+    """Clean Equibase late-change descriptions into a stable, human-readable form."""
+    if not description:
+        return ""
+
+    description = re.sub(r"\s+", " ", description).strip()
+    description = re.sub(r"\s*;\s*", "; ", description)
+    description = re.sub(r"\s*-\s+", " - ", description)
+
+    parts = []
+    seen = set()
+    for raw_part in [part.strip() for part in description.split(";") if part.strip()]:
+        cleaned_part = re.sub(r"\s+-\s+[YN]$", "", raw_part, flags=re.IGNORECASE).strip()
+        canonical = cleaned_part.lower()
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        parts.append(cleaned_part)
+
+    return "; ".join(parts)
 
 def is_valid_cancellation(text):
     """
@@ -426,7 +450,7 @@ def parse_track_changes(html, track_code):
         # Change description
         change_cell = row.find('td', class_='changes')
         if change_cell:
-            change_desc = change_cell.get_text(strip=True)
+            change_desc = normalize_change_description(change_cell.get_text(strip=True))
             
         if change_desc:
             change_type = determine_change_type(change_desc)
@@ -611,7 +635,7 @@ def parse_rss_changes(xml_content, track_code):
                  else:
                     ctype = 'Other'
             
-            desc = remainder
+            desc = normalize_change_description(remainder)
             
             changes.append({
                 'race_number': r_num,
@@ -716,7 +740,7 @@ def update_changes_in_db(track_code, race_date, change_list):
                 # SMART DEDUPLICATION
                 existing_record = existing_res.data[0]
                 existing_desc = existing_record['description'] or ""
-                new_desc = item['description']
+                new_desc = normalize_change_description(item['description'])
                 
                 should_update = False
                 final_desc = existing_desc
@@ -733,8 +757,9 @@ def update_changes_in_db(track_code, race_date, change_list):
                     
                 # C) Merge: If both are valid, merge if different
                 else:
-                    if new_desc not in existing_desc:
-                         final_desc = f"{existing_desc}; {new_desc}"
+                    normalized_existing = normalize_change_description(existing_desc)
+                    if new_desc and new_desc not in normalized_existing:
+                         final_desc = normalize_change_description(f"{normalized_existing}; {new_desc}")
                          if len(final_desc) > 500: final_desc = final_desc[:497] + "..."
                          should_update = True
                 
@@ -750,7 +775,7 @@ def update_changes_in_db(track_code, race_date, change_list):
                     'race_id': race_id,
                     'entry_id': entry_id,
                     'change_type': item['change_type'],
-                    'description': item['description']
+                    'description': normalize_change_description(item['description'])
                 }
                 
                 try:

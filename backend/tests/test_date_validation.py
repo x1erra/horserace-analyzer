@@ -12,7 +12,9 @@ from crawl_scratches import (
     LEGACY_LATE_CHANGES_TRACK_URL,
     MOBILE_LATE_CHANGES_TRACK_URL,
     TVG_LATE_CHANGES_TRACK_URL,
+    determine_change_type,
     fetch_direct_track_changes_page,
+    normalize_change_description,
     parse_mobile_track_changes,
     parse_rss_changes,
     parse_track_changes,
@@ -128,6 +130,20 @@ class TestDateValidation(unittest.TestCase):
         self.assertEqual(changes[0]["change_type"], "Scratch")
         self.assertEqual(changes[0]["description"], "Scratched - Veterinarian")
         self.assertEqual(changes[1]["description"], "Temp Rail Distance set at 45 ft.")
+
+    def test_gelding_note_is_classified_as_horse_note(self):
+        self.assertEqual(
+            determine_change_type("First Start Since Reported as Gelding - Y"),
+            "Horse Note",
+        )
+
+    def test_normalize_change_description_dedupes_gelding_note_noise(self):
+        self.assertEqual(
+            normalize_change_description(
+                "First Start Since Reported as Gelding; First Start Since Reported as Gelding - Y"
+            ),
+            "First Start Since Reported as Gelding",
+        )
 
 if __name__ == '__main__':
     unittest.main()

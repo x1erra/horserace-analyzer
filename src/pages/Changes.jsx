@@ -39,6 +39,7 @@ const getChangeIcon = (type) => {
         case 'Scratch': return <ShieldAlert className="w-4 h-4 text-red-500" />;
         case 'Jockey Change': return <Shuffle className="w-4 h-4 text-blue-400" />;
         case 'Equipment Change': return <Info className="w-4 h-4 text-yellow-400" />;
+        case 'Horse Note': return <Info className="w-4 h-4 text-amber-300" />;
         default: return <Info className="w-4 h-4 text-gray-400" />;
     }
 };
@@ -48,6 +49,7 @@ const getChangeColor = (type) => {
         case 'Scratch': return 'bg-red-500/10 text-red-500 border-red-500/20';
         case 'Jockey Change': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
         case 'Equipment Change': return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+        case 'Horse Note': return 'bg-amber-500/10 text-amber-300 border-amber-500/20';
         default: return 'bg-gray-500/10 text-gray-400 border-gray-500/20';
     }
 };
@@ -77,6 +79,7 @@ const getDisplayChangeType = (item) => {
     if (/wagering/i.test(description)) return 'Wagering Change';
     if (/owner/i.test(description)) return 'Owner Change';
     if (/trainer/i.test(description)) return 'Trainer Change';
+    if (/first start since reported as|reported as gelding/i.test(description)) return 'Horse Note';
 
     return 'General Update';
 };
