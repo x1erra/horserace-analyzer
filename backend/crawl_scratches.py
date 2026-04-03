@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 EQUIBASE_BASE_URL = "https://www.equibase.com/static/latechanges/html/"
 LATE_CHANGES_INDEX_URL = "https://www.equibase.com/static/latechanges/html/latechanges.html"
+TVG_LATE_CHANGES_TRACK_URL = "https://tvg.equibase.com/static/latechanges/html/latechanges{track_code}-USA.html"
+LEGACY_LATE_CHANGES_TRACK_URL = "https://www.equibase.com/static/latechanges/html/latechanges{track_code}-USA.html"
 
 def fetch_static_page(url, retries=3):
     """
@@ -117,6 +119,21 @@ def parse_late_changes_index():
                 links.append({'track_code': code, 'url': full_url})
                 
     return links
+
+
+def fetch_direct_track_changes_page(track_code):
+    """
+    Fetch a late-changes page directly for a specific track code.
+    This avoids relying on the legacy index page to enumerate available tracks.
+
+    Returns: tuple[str|None, str|None] => (html, source_url)
+    """
+    for template in (TVG_LATE_CHANGES_TRACK_URL, LEGACY_LATE_CHANGES_TRACK_URL):
+        url = template.format(track_code=track_code)
+        html = fetch_static_page(url)
+        if html:
+            return html, url
+    return None, None
 
 def determine_change_type(description):
     """
@@ -948,6 +965,22 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
             
     except Exception as e:
         logger.error(f"RSS Scan Loop failed: {e}")
+
+    # 0.5. Direct per-track HTML fetch on TVG/legacy static hosts
+    # This is more reliable than the legacy index page and covers tracks like GP
+    # even when the index is blocked or incomplete.
+    try:
+        for trk in active_tracks:
+            html, source_url = fetch_direct_track_changes_page(trk)
+            if not html:
+                continue
+            changes = parse_track_changes(html, trk)
+            if changes:
+                count = update_changes_in_db(trk, today, changes)
+                total_changes_processed += count
+                logger.info(f"Direct late-changes HTML processed {count} record(s) for {trk} via {source_url}")
+    except Exception as e:
+        logger.error(f"Direct track late-changes fetch failed: {e}")
 
     # 1. Try Equibase Track Pages (HTML Fallback)
     try:

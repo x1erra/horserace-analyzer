@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 # Add parent dir to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from crawl_scratches import parse_rss_changes, parse_track_changes
+from crawl_scratches import (
+    LEGACY_LATE_CHANGES_TRACK_URL,
+    TVG_LATE_CHANGES_TRACK_URL,
+    fetch_direct_track_changes_page,
+    parse_rss_changes,
+    parse_track_changes,
+)
 
 class TestDateValidation(unittest.TestCase):
     
@@ -82,6 +88,22 @@ class TestDateValidation(unittest.TestCase):
         changes = parse_track_changes(html, 'TEST')
         # Should reject entire page
         self.assertEqual(len(changes), 0)
+
+    def test_direct_track_page_prefers_tvg_host(self):
+        with patch("crawl_scratches.fetch_static_page", side_effect=["<html>ok</html>"]) as fetch_mock:
+            html, source_url = fetch_direct_track_changes_page("GP")
+
+        self.assertEqual(html, "<html>ok</html>")
+        self.assertEqual(source_url, TVG_LATE_CHANGES_TRACK_URL.format(track_code="GP"))
+        fetch_mock.assert_called_once_with(TVG_LATE_CHANGES_TRACK_URL.format(track_code="GP"))
+
+    def test_direct_track_page_falls_back_to_legacy_host(self):
+        with patch("crawl_scratches.fetch_static_page", side_effect=[None, "<html>ok</html>"]) as fetch_mock:
+            html, source_url = fetch_direct_track_changes_page("GP")
+
+        self.assertEqual(html, "<html>ok</html>")
+        self.assertEqual(source_url, LEGACY_LATE_CHANGES_TRACK_URL.format(track_code="GP"))
+        self.assertEqual(fetch_mock.call_count, 2)
 
 if __name__ == '__main__':
     unittest.main()
