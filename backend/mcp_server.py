@@ -19,6 +19,7 @@ load_dotenv()
 # Import the shared Supabase client
 sys.path.insert(0, os.path.dirname(__file__))
 from supabase_client import get_supabase_client
+from runtime_state import summarize_freshness
 
 
 mcp = FastMCP(
@@ -347,6 +348,12 @@ def _build_feed_metadata(items, requested_view, applied_view, fallback_applied=F
         "latest_race_date": max(dates) if dates else None,
         "earliest_race_date": min(dates) if dates else None,
     }
+
+
+def _track_matches(track_filter, race_track_code, race_track_name):
+    if not track_filter:
+        return True
+    return track_filter in {race_track_code, race_track_name}
 
 
 def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
@@ -681,6 +688,204 @@ def get_filter_options(summary_date: str = "") -> dict:
         "today_summary": sorted(summary_map.values(), key=lambda item: item["track_name"]),
         "summary_date": target_summary_date,
     }
+
+
+@mcp.tool()
+def get_feed_freshness() -> dict:
+    """Expose crawler freshness and open alerts directly to MCP consumers."""
+    freshness, alerts = summarize_freshness()
+    open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
+    return {
+        "crawler": freshness,
+        "alerts": open_alerts,
+        "status": "healthy" if not open_alerts else "degraded",
+        "alert_count": len(open_alerts),
+    }
+
+
+@mcp.tool()
+def get_entries(
+    track: str = "",
+    race_date: str = "",
+    race_number: int = 0,
+    include_scratched: bool = True,
+    limit: int = 20,
+) -> dict:
+    """Get card entries for a specific date/track/race slice."""
+    supabase = get_supabase_client()
+    target_date = race_date or date.today().isoformat()
+    limit = min(max(limit, 1), 100)
+
+    query = (
+        supabase.table("hranalyzer_races")
+        .select("*, hranalyzer_tracks(track_name, location, timezone)")
+        .eq("race_date", target_date)
+        .order("race_number")
+    )
+    if track and len(track) <= 4 and track.upper() == track:
+        query = query.eq("track_code", track)
+    if race_number:
+        query = query.eq("race_number", race_number)
+
+    raw_races = query.limit(limit).execute().data or []
+    filtered_races = [
+        race for race in raw_races
+        if _track_matches(track, race.get("track_code"), (race.get("hranalyzer_tracks") or {}).get("track_name"))
+    ]
+
+    if not filtered_races:
+        return {"entries": [], "count": 0, "race_date": target_date}
+
+    race_ids = [race["id"] for race in filtered_races]
+    entries_rows = (
+        supabase.table("hranalyzer_race_entries")
+        .select(
+            """
+                race_id, id, program_number, post_position, morning_line_odds, final_odds,
+                scratched, weight, medication, equipment,
+                hranalyzer_horses(horse_name),
+                hranalyzer_jockeys(jockey_name),
+                hranalyzer_trainers(trainer_name)
+            """
+        )
+        .in_("race_id", race_ids)
+        .order("program_number")
+        .execute()
+        .data
+        or []
+    )
+
+    entries_by_race = {}
+    for row in entries_rows:
+        if not include_scratched and row.get("scratched"):
+            continue
+        entries_by_race.setdefault(row["race_id"], []).append(
+            {
+                "id": row["id"],
+                "program_number": row.get("program_number"),
+                "post_position": row.get("post_position"),
+                "horse_name": (row.get("hranalyzer_horses") or {}).get("horse_name", "Unknown"),
+                "jockey_name": (row.get("hranalyzer_jockeys") or {}).get("jockey_name", "N/A"),
+                "trainer_name": (row.get("hranalyzer_trainers") or {}).get("trainer_name", "N/A"),
+                "morning_line_odds": row.get("morning_line_odds"),
+                "final_odds": row.get("final_odds"),
+                "scratched": row.get("scratched", False),
+                "weight": row.get("weight"),
+                "medication": row.get("medication"),
+                "equipment": row.get("equipment"),
+            }
+        )
+
+    payload = []
+    for race in filtered_races:
+        track_info = race.get("hranalyzer_tracks") or {}
+        payload.append(
+            {
+                "race_key": race["race_key"],
+                "track_code": race["track_code"],
+                "track_name": track_info.get("track_name", race["track_code"]),
+                "race_date": race["race_date"],
+                "race_number": race["race_number"],
+                "post_time": format_to_12h(race.get("post_time")),
+                "race_type": race.get("race_type"),
+                "surface": race.get("surface"),
+                "distance": race.get("distance"),
+                "purse": race.get("purse"),
+                "race_status": race.get("race_status"),
+                "entries": entries_by_race.get(race["id"], []),
+            }
+        )
+
+    return {"entries": payload, "count": len(payload), "race_date": target_date}
+
+
+@mcp.tool()
+def get_results(track: str = "", race_date: str = "", race_number: int = 0, limit: int = 20) -> dict:
+    """Get result summaries for exact race/date filters without full race-detail fetches."""
+    supabase = get_supabase_client()
+    target_date = race_date or date.today().isoformat()
+    limit = min(max(limit, 1), 100)
+
+    query = (
+        supabase.table("hranalyzer_races")
+        .select("*, hranalyzer_tracks(track_name, location, timezone)")
+        .eq("race_date", target_date)
+        .order("race_number")
+    )
+    if track and len(track) <= 4 and track.upper() == track:
+        query = query.eq("track_code", track)
+    if race_number:
+        query = query.eq("race_number", race_number)
+
+    raw_races = query.limit(limit).execute().data or []
+    filtered_races = [
+        race for race in raw_races
+        if _track_matches(track, race.get("track_code"), (race.get("hranalyzer_tracks") or {}).get("track_name"))
+    ]
+
+    if not filtered_races:
+        return {"results": [], "count": 0, "race_date": target_date}
+
+    race_ids = [race["id"] for race in filtered_races]
+    entries_rows = (
+        supabase.table("hranalyzer_race_entries")
+        .select(
+            """
+                race_id, program_number, finish_position, final_odds,
+                win_payout, place_payout, show_payout,
+                hranalyzer_horses(horse_name),
+                hranalyzer_trainers(trainer_name)
+            """
+        )
+        .in_("race_id", race_ids)
+        .execute()
+        .data
+        or []
+    )
+
+    results_by_race = {}
+    for row in entries_rows:
+        if row.get("finish_position") in [1, 2, 3]:
+            results_by_race.setdefault(row["race_id"], []).append(
+                {
+                    "position": row["finish_position"],
+                    "program_number": row.get("program_number"),
+                    "horse_name": (row.get("hranalyzer_horses") or {}).get("horse_name", "Unknown"),
+                    "trainer_name": (row.get("hranalyzer_trainers") or {}).get("trainer_name", "N/A"),
+                    "final_odds": row.get("final_odds"),
+                    "win_payout": row.get("win_payout"),
+                    "place_payout": row.get("place_payout"),
+                    "show_payout": row.get("show_payout"),
+                }
+            )
+
+    payload = []
+    for race in filtered_races:
+        top_finishers = sorted(results_by_race.get(race["id"], []), key=lambda item: item["position"])
+        track_info = race.get("hranalyzer_tracks") or {}
+        payload.append(
+            {
+                "race_key": race["race_key"],
+                "track_code": race["track_code"],
+                "track_name": track_info.get("track_name", race["track_code"]),
+                "race_date": race["race_date"],
+                "race_number": race["race_number"],
+                "post_time": format_to_12h(race.get("post_time")),
+                "race_status": derive_live_race_status(
+                    race["race_date"],
+                    race.get("post_time"),
+                    race.get("race_status"),
+                    track_info.get("timezone", "America/New_York"),
+                    has_results=bool(top_finishers),
+                ),
+                "final_time": race.get("final_time"),
+                "winner_program_number": race.get("winner_program_number"),
+                "winner": top_finishers[0]["horse_name"] if top_finishers else None,
+                "results": top_finishers,
+            }
+        )
+
+    return {"results": payload, "count": len(payload), "race_date": target_date}
 
 
 @mcp.tool()

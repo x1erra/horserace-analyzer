@@ -233,9 +233,12 @@ class TestMcpServer(unittest.TestCase):
     def test_expected_tool_surface_exists(self):
         expected_tools = {
             "get_health",
+            "get_feed_freshness",
             "get_tracks",
             "get_recent_uploads",
             "get_filter_options",
+            "get_entries",
+            "get_results",
             "get_todays_races",
             "get_past_races",
             "get_race_details",
@@ -249,6 +252,24 @@ class TestMcpServer(unittest.TestCase):
 
         for tool_name in expected_tools:
             self.assertTrue(hasattr(mcp_server, tool_name), f"Missing MCP tool function: {tool_name}")
+
+    def test_get_feed_freshness_surfaces_open_alerts(self):
+        with patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {"entries": {"stale": False}, "results": {"stale": True}},
+                [
+                    {"key": "crawl-stale:results", "status": "open"},
+                    {"key": "crawl-stale:entries", "status": "resolved"},
+                ],
+            ),
+        ):
+            result = mcp_server.get_feed_freshness()
+
+        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(result["alert_count"], 1)
+        self.assertEqual(result["alerts"][0]["key"], "crawl-stale:results")
 
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
@@ -399,6 +420,144 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["scratches"][0]["horse_name"], "Race Four Horse")
         self.assertEqual(result["scratches"][0]["race_number"], 4)
+
+    def test_get_entries_filters_track_date_and_race_number(self):
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_races": [
+                    {
+                        "id": "race-1",
+                        "race_key": "GP-20260406-4",
+                        "track_code": "GP",
+                        "race_date": "2026-04-06",
+                        "race_number": 4,
+                        "post_time": "14:00:00",
+                        "race_type": "Allowance",
+                        "surface": "Dirt",
+                        "distance": "6 Furlongs",
+                        "purse": "$44,000",
+                        "race_status": "upcoming",
+                        "hranalyzer_tracks": {"track_name": "Gulfstream Park", "timezone": "America/New_York"},
+                    },
+                    {
+                        "id": "race-2",
+                        "race_key": "GP-20260406-5",
+                        "track_code": "GP",
+                        "race_date": "2026-04-06",
+                        "race_number": 5,
+                        "post_time": "14:30:00",
+                        "race_type": "Claiming",
+                        "surface": "Turf",
+                        "distance": "1 Mile",
+                        "purse": "$20,000",
+                        "race_status": "upcoming",
+                        "hranalyzer_tracks": {"track_name": "Gulfstream Park", "timezone": "America/New_York"},
+                    },
+                ],
+                "hranalyzer_race_entries": [
+                    {
+                        "id": "entry-1",
+                        "race_id": "race-1",
+                        "program_number": "5",
+                        "post_position": 5,
+                        "morning_line_odds": "4/1",
+                        "final_odds": None,
+                        "scratched": False,
+                        "weight": 122,
+                        "medication": "L",
+                        "equipment": "b",
+                        "hranalyzer_horses": {"horse_name": "Target Horse"},
+                        "hranalyzer_jockeys": {"jockey_name": "Jockey A"},
+                        "hranalyzer_trainers": {"trainer_name": "Trainer A"},
+                    },
+                    {
+                        "id": "entry-2",
+                        "race_id": "race-2",
+                        "program_number": "6",
+                        "post_position": 6,
+                        "morning_line_odds": "6/1",
+                        "final_odds": None,
+                        "scratched": False,
+                        "weight": 120,
+                        "medication": None,
+                        "equipment": None,
+                        "hranalyzer_horses": {"horse_name": "Other Horse"},
+                        "hranalyzer_jockeys": {"jockey_name": "Jockey B"},
+                        "hranalyzer_trainers": {"trainer_name": "Trainer B"},
+                    },
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_entries(track="GP", race_date="2026-04-06", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["entries"][0]["race_key"], "GP-20260406-4")
+        self.assertEqual(result["entries"][0]["entries"][0]["horse_name"], "Target Horse")
+
+    def test_get_results_filters_track_date_and_race_number(self):
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_races": [
+                    {
+                        "id": "race-1",
+                        "race_key": "GP-20260406-4",
+                        "track_code": "GP",
+                        "race_date": "2026-04-06",
+                        "race_number": 4,
+                        "post_time": "14:00:00",
+                        "race_status": "completed",
+                        "final_time": "1:10.55",
+                        "winner_program_number": "5",
+                        "hranalyzer_tracks": {"track_name": "Gulfstream Park", "timezone": "America/New_York"},
+                    },
+                    {
+                        "id": "race-2",
+                        "race_key": "GP-20260406-5",
+                        "track_code": "GP",
+                        "race_date": "2026-04-06",
+                        "race_number": 5,
+                        "post_time": "14:30:00",
+                        "race_status": "completed",
+                        "final_time": "1:35.10",
+                        "winner_program_number": "6",
+                        "hranalyzer_tracks": {"track_name": "Gulfstream Park", "timezone": "America/New_York"},
+                    },
+                ],
+                "hranalyzer_race_entries": [
+                    {
+                        "race_id": "race-1",
+                        "program_number": "5",
+                        "finish_position": 1,
+                        "final_odds": "3.20",
+                        "win_payout": "8.40",
+                        "place_payout": "4.20",
+                        "show_payout": "2.80",
+                        "hranalyzer_horses": {"horse_name": "Winner Horse"},
+                        "hranalyzer_trainers": {"trainer_name": "Trainer A"},
+                    },
+                    {
+                        "race_id": "race-2",
+                        "program_number": "6",
+                        "finish_position": 1,
+                        "final_odds": "4.10",
+                        "win_payout": "10.20",
+                        "place_payout": "5.00",
+                        "show_payout": "3.10",
+                        "hranalyzer_horses": {"horse_name": "Other Winner"},
+                        "hranalyzer_trainers": {"trainer_name": "Trainer B"},
+                    },
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_results(track="GP", race_date="2026-04-06", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["results"][0]["race_key"], "GP-20260406-4")
+        self.assertEqual(result["results"][0]["winner"], "Winner Horse")
 
     def test_get_horse_profile_requires_identifier(self):
         with patch.object(mcp_server, "get_supabase_client", return_value=SupabaseStub(Response(data=[]))):
