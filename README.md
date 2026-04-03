@@ -135,9 +135,12 @@ The project also exposes a read-only MCP server for AI agents at `http://<host>:
 Available MCP tools:
 
 - `get_health`
+- `get_feed_freshness`
 - `get_tracks`
 - `get_recent_uploads`
 - `get_filter_options`
+- `get_entries`
+- `get_results`
 - `get_todays_races`
 - `get_past_races`
 - `get_race_details`
@@ -147,6 +150,8 @@ Available MCP tools:
 - `get_changes`
 - `get_race_changes`
 - `get_claims`
+
+See [backend/MCP_TOOLS.md](/Users/stevendamato/Projects/horserace-analyzer/backend/MCP_TOOLS.md) for usage guidance and how to interpret `get_feed_freshness()`.
 
 ## Database Schema
 

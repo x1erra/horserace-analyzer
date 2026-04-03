@@ -258,7 +258,10 @@ class TestMcpServer(unittest.TestCase):
             mcp_server,
             "summarize_freshness",
             return_value=(
-                {"entries": {"stale": False}, "results": {"stale": True}},
+                {
+                    "entries": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:04:07Z"},
+                    "results": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
+                },
                 [
                     {"key": "crawl-stale:results", "status": "open"},
                     {"key": "crawl-stale:entries", "status": "resolved"},
@@ -267,9 +270,32 @@ class TestMcpServer(unittest.TestCase):
         ):
             result = mcp_server.get_feed_freshness()
 
-        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(result["status"], "stale")
+        self.assertIn("results", result["stale_crawlers"])
+        self.assertEqual(result["crawler"]["entries"]["status"], "fresh")
+        self.assertEqual(result["crawler"]["results"]["status"], "stale")
         self.assertEqual(result["alert_count"], 1)
         self.assertEqual(result["alerts"][0]["key"], "crawl-stale:results")
+        self.assertIn("Use status and stale_crawlers first", result["how_to_read"])
+
+    def test_get_feed_freshness_reports_startup_grace_clearly(self):
+        with patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {"stale": False, "in_progress": False, "within_startup_grace": True, "last_success_at": None},
+                    "results": {"stale": False, "in_progress": False, "within_startup_grace": True, "last_success_at": None},
+                    "scratches": {"stale": False, "in_progress": False, "within_startup_grace": True, "last_success_at": None},
+                },
+                [],
+            ),
+        ):
+            result = mcp_server.get_feed_freshness()
+
+        self.assertEqual(result["status"], "warming_up")
+        self.assertEqual(set(result["warming_up_crawlers"]), {"entries", "results", "scratches"})
+        self.assertFalse(result["all_crawlers_fresh"])
 
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:

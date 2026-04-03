@@ -695,11 +695,61 @@ def get_feed_freshness() -> dict:
     """Expose crawler freshness and open alerts directly to MCP consumers."""
     freshness, alerts = summarize_freshness()
     open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
+    crawler = {}
+    stale_crawlers = []
+    fresh_crawlers = []
+    warming_up_crawlers = []
+    in_progress_crawlers = []
+
+    for crawl_name, item in freshness.items():
+        crawl_status = "fresh"
+        if item.get("within_startup_grace") and not item.get("last_success_at"):
+            crawl_status = "warming_up"
+            warming_up_crawlers.append(crawl_name)
+        elif item.get("stale"):
+            crawl_status = "stale"
+            stale_crawlers.append(crawl_name)
+        elif item.get("in_progress"):
+            crawl_status = "in_progress"
+            in_progress_crawlers.append(crawl_name)
+        else:
+            fresh_crawlers.append(crawl_name)
+
+        crawler[crawl_name] = {**item, "status": crawl_status}
+
+    if stale_crawlers:
+        overall_status = "stale"
+        summary = f"Stale crawlers: {', '.join(stale_crawlers)}."
+    elif warming_up_crawlers:
+        overall_status = "warming_up"
+        summary = (
+            "Crawler startup grace is active. Freshness timestamps may still be empty while services warm up."
+        )
+    elif open_alerts:
+        overall_status = "degraded"
+        summary = f"There are {len(open_alerts)} open runtime alert(s), but crawler freshness is current."
+    elif in_progress_crawlers:
+        overall_status = "healthy"
+        summary = f"All crawlers are healthy. Active crawl(s): {', '.join(in_progress_crawlers)}."
+    else:
+        overall_status = "healthy"
+        summary = "All crawler freshness checks are healthy."
+
     return {
-        "crawler": freshness,
+        "crawler": crawler,
         "alerts": open_alerts,
-        "status": "healthy" if not open_alerts else "degraded",
+        "status": overall_status,
+        "summary": summary,
+        "all_crawlers_fresh": not stale_crawlers and not warming_up_crawlers,
+        "stale_crawlers": stale_crawlers,
+        "fresh_crawlers": fresh_crawlers,
+        "warming_up_crawlers": warming_up_crawlers,
+        "in_progress_crawlers": in_progress_crawlers,
         "alert_count": len(open_alerts),
+        "how_to_read": (
+            "Use status and stale_crawlers first. Per-crawler status will be one of fresh, in_progress, "
+            "warming_up, or stale."
+        ),
     }
 
 
