@@ -220,11 +220,15 @@ class TestRuntimeState(unittest.TestCase):
 
             self.runtime_state.evaluate_runtime_alerts()
             state = self.runtime_state.load_state()
+            self.assertEqual([a for a in state["alerts"] if a.get("status") == "open"], [])
+
+            self.runtime_state.evaluate_runtime_alerts()
+            state = self.runtime_state.load_state()
             open_alerts = [a for a in state["alerts"] if a.get("status") == "open"]
 
         self.assertEqual(len(open_alerts), 1)
         self.assertEqual(open_alerts[0]["key"], "crawl-stale:entries")
-        self.assertEqual(open_alerts[0]["details"]["stale_evaluations"], 2)
+        self.assertEqual(open_alerts[0]["details"]["stale_evaluations"], 3)
         self.assertIn("stale_since", open_alerts[0]["details"])
 
     def test_crawl_alert_tracking_resets_when_fresh_again(self):
@@ -257,7 +261,12 @@ class TestRuntimeState(unittest.TestCase):
             [],
         )
 
-        with patch.object(self.runtime_state, "summarize_freshness", side_effect=[stale_payload, stale_payload, fresh_payload]):
+        with patch.object(
+            self.runtime_state,
+            "summarize_freshness",
+            side_effect=[stale_payload, stale_payload, stale_payload, fresh_payload],
+        ):
+            self.runtime_state.evaluate_runtime_alerts()
             self.runtime_state.evaluate_runtime_alerts()
             self.runtime_state.evaluate_runtime_alerts()
             self.runtime_state.evaluate_runtime_alerts()
