@@ -257,10 +257,19 @@ def _format_alert_detail_value(value):
     return str(value)
 
 
+def _normalize_alert_details(details):
+    normalized = dict(details or {})
+    nested = normalized.pop("last_details", None)
+    if isinstance(nested, dict):
+        for key, value in nested.items():
+            normalized.setdefault(key, value)
+    return normalized
+
+
 def _build_alert_payload(alert):
     severity = (alert.get("severity") or "warning").upper()
     status = (alert.get("status") or "open").upper()
-    details = alert.get("details") or {}
+    details = _normalize_alert_details(alert.get("details") or {})
     is_resolved = status == "RESOLVED"
 
     headline = alert.get("message", alert.get("key", "Unknown alert"))
@@ -272,22 +281,21 @@ def _build_alert_payload(alert):
         content = f"TrackData alert {status.lower()}: {headline}"
 
     preferred_detail_order = [
-        "phase",
-        "target_date",
         "last_success_at",
-        "last_attempt_at",
         "age_minutes",
-        "threshold_minutes",
-        "in_progress",
-        "within_startup_grace",
-        "startup_grace_reason",
-        "stale",
+        "last_attempt_at",
+        "target_date",
+        "phase",
         "tracks_checked",
         "races_found",
         "today_races_found",
         "changes_processed",
+        "in_progress",
+        "within_startup_grace",
+        "startup_grace_reason",
+        "threshold_minutes",
+        "stale",
         "last_error",
-        "last_details",
     ]
 
     detail_lines = []
@@ -296,6 +304,11 @@ def _build_alert_payload(alert):
         if key in seen or key not in details:
             continue
         seen.add(key)
+        value = details.get(key)
+        if key in {"in_progress", "within_startup_grace"} and not value:
+            continue
+        if key == "stale" and (not value or is_resolved):
+            continue
         formatted = _format_alert_detail_value(details.get(key))
         if formatted is not None:
             detail_lines.append(f"**{key}**: {formatted}")
@@ -481,23 +494,24 @@ def summarize_freshness(now=None):
     return freshness, state.get("alerts", [])
 
 
-def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False):
+def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False, include_crawl_alerts=True):
     freshness, _alerts = summarize_freshness()
 
     def mutator(state):
-        for crawl_type, item in freshness.items():
-            key = f"crawl-stale:{crawl_type}"
-            if item["stale"]:
-                upsert_alert(
-                    state,
-                    key=key,
-                    severity="warning" if crawl_type == "entries" else "critical",
-                    message=f"{crawl_type.title()} crawl is stale",
-                    details=item,
-                )
-            else:
-                suppress_resolved_notification = item.get("within_startup_grace") and not item.get("last_success_at")
-                resolve_alert(state, key, details=item, notify=not suppress_resolved_notification)
+        if include_crawl_alerts:
+            for crawl_type, item in freshness.items():
+                key = f"crawl-stale:{crawl_type}"
+                if item["stale"]:
+                    upsert_alert(
+                        state,
+                        key=key,
+                        severity="warning" if crawl_type == "entries" else "critical",
+                        message=f"{crawl_type.title()} crawl is stale",
+                        details=item,
+                    )
+                else:
+                    suppress_resolved_notification = item.get("within_startup_grace") and not item.get("last_success_at")
+                    resolve_alert(state, key, details=item, notify=not suppress_resolved_notification)
 
         if during_racing_hours and today_summary_total == 0:
             upsert_alert(

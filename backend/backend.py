@@ -629,6 +629,7 @@ def get_filter_options():
         evaluate_runtime_alerts(
             today_summary_total=total_races if target_summary_date == today else None,
             during_racing_hours=during_racing_hours and target_summary_date == today,
+            include_crawl_alerts=False,
         )
 
         return jsonify(payload)

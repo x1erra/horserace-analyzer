@@ -99,9 +99,40 @@ class TestRuntimeState(unittest.TestCase):
         description = payload["embeds"][0]["description"]
         self.assertIn("**last_success_at**: 2026-04-02T22:46:41Z", description)
         self.assertIn("**age_minutes**: 0", description)
-        self.assertIn("**stale**: no", description)
         self.assertNotIn("last_attempt_at", description)
         self.assertNotIn("last_error", description)
+        self.assertNotIn("stale", description)
+
+    def test_payload_flattens_last_details_and_omits_false_flags(self):
+        payload = self.runtime_state._build_alert_payload(  # pylint: disable=protected-access
+            {
+                "key": "crawl-stale:scratches",
+                "severity": "critical",
+                "message": "Scratches crawl is stale",
+                "status": "open",
+                "details": {
+                    "last_success_at": None,
+                    "last_attempt_at": "2026-04-03T01:47:39Z",
+                    "in_progress": False,
+                    "within_startup_grace": False,
+                    "stale": True,
+                    "last_details": {
+                        "phase": "startup",
+                        "target_date": "2026-04-02",
+                        "changes_processed": 3,
+                    },
+                },
+            }
+        )
+
+        description = payload["embeds"][0]["description"]
+        self.assertIn("**phase**: startup", description)
+        self.assertIn("**target_date**: 2026-04-02", description)
+        self.assertIn("**changes_processed**: 3", description)
+        self.assertIn("**stale**: yes", description)
+        self.assertNotIn("last_details", description)
+        self.assertNotIn("in_progress", description)
+        self.assertNotIn("within_startup_grace", description)
 
     def test_startup_grace_resolution_does_not_dispatch_noise(self):
         os.environ["ALERT_WEBHOOK_URL"] = "https://discord.example/webhook"
@@ -120,6 +151,17 @@ class TestRuntimeState(unittest.TestCase):
         self.assertEqual(post_mock.call_count, 1)
         first_payload = post_mock.call_args_list[0].kwargs["json"]
         self.assertIn("TrackData alert open", first_payload["content"])
+
+    def test_dashboard_alert_evaluation_does_not_open_crawl_stale_alerts(self):
+        self.runtime_state.evaluate_runtime_alerts(
+            today_summary_total=5,
+            during_racing_hours=True,
+            include_crawl_alerts=False,
+        )
+
+        _freshness, alerts = self.runtime_state.summarize_freshness()
+        open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
+        self.assertEqual(open_alerts, [])
 
 
 if __name__ == "__main__":
