@@ -216,6 +216,72 @@ class TestCrawlEquibase(unittest.TestCase):
 
         self.assertIsNone(race)
 
+    def test_crawl_specific_races_only_processes_requested_targets(self):
+        supabase = MagicMock()
+        race_lookup = MagicMock()
+        race_lookup.eq.return_value.execute.return_value.data = []
+        supabase.table.return_value.select.return_value = race_lookup
+
+        with patch.object(crawl_equibase, "get_supabase_client", return_value=supabase), \
+             patch.object(crawl_equibase, "download_full_card_pdf", return_value=None), \
+             patch.object(
+                 crawl_equibase,
+                 "extract_race_from_pdf",
+                 side_effect=[
+                     {"race_number": 8, "horses": [{"horse_name": "Alpha"}]},
+                     {"race_number": 3, "horses": [{"horse_name": "Bravo"}]},
+                 ],
+             ) as extract_race, \
+             patch.object(crawl_equibase, "insert_race_to_db", return_value=True) as insert_race, \
+             patch.object(crawl_equibase, "time") as time_mod:
+            stats = crawl_equibase.crawl_specific_races(
+                crawl_equibase.date.fromisoformat("2026-04-02"),
+                [("SA", 8), ("MVR", 3)],
+            )
+
+        self.assertEqual(stats["races_requested"], 2)
+        self.assertEqual(stats["races_inserted"], 2)
+        self.assertEqual(extract_race.call_count, 2)
+        insert_calls = [call.args[3]["race_number"] for call in insert_race.call_args_list]
+        self.assertEqual(insert_calls, [8, 3])
+        self.assertEqual(time_mod.sleep.call_count, 2)
+
+    def test_crawl_specific_races_skips_verified_races(self):
+        supabase = MagicMock()
+
+        race_query = MagicMock()
+        entries_query = MagicMock()
+
+        def table_side_effect(name):
+            table_mock = MagicMock()
+            if name == "hranalyzer_races":
+                table_mock.select.return_value = race_query
+            elif name == "hranalyzer_race_entries":
+                table_mock.select.return_value = entries_query
+            else:
+                table_mock.select.return_value = MagicMock()
+            return table_mock
+
+        supabase.table.side_effect = table_side_effect
+        race_query.eq.return_value.execute.return_value.data = [{"id": "race-1", "race_status": "completed"}]
+        entries_query.eq.return_value.gt.return_value.execute.return_value.data = [
+            {"id": "e1", "finish_position": 1},
+            {"id": "e2", "finish_position": 2},
+            {"id": "e3", "finish_position": 3},
+        ]
+
+        with patch.object(crawl_equibase, "get_supabase_client", return_value=supabase), \
+             patch.object(crawl_equibase, "download_full_card_pdf", return_value=None), \
+             patch.object(crawl_equibase, "extract_race_from_pdf") as extract_race:
+            stats = crawl_equibase.crawl_specific_races(
+                crawl_equibase.date.fromisoformat("2026-04-02"),
+                [("SA", 8)],
+            )
+
+        self.assertEqual(stats["races_requested"], 1)
+        self.assertEqual(stats["races_skipped_verified"], 1)
+        extract_race.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

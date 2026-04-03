@@ -14,6 +14,7 @@ import base64
 import tempfile
 import requests
 import subprocess
+from collections import defaultdict
 import cloudscraper
 import pdfplumber
 from datetime import datetime, date
@@ -2018,6 +2019,126 @@ def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
         logger.error(f"Error marking scratches: {e}")
 
 
+def race_is_completed_and_verified(supabase, race_key: str) -> Tuple[bool, Optional[Dict], int]:
+    """
+    Determine whether a race already has a trustworthy set of results in the DB.
+    """
+    try:
+        existing = supabase.table('hranalyzer_races').select('id, race_status').eq('race_key', race_key).execute()
+        if not existing.data:
+            return False, None, 0
+
+        race_record = existing.data[0]
+        if race_record.get('race_status') != 'completed':
+            return False, race_record, 0
+
+        has_winner = False
+        finisher_count = 0
+        try:
+            w_check = supabase.table('hranalyzer_race_entries')\
+                .select('id, finish_position')\
+                .eq('race_id', race_record['id'])\
+                .gt('finish_position', 0)\
+                .execute()
+            if w_check.data:
+                has_winner = any(e['finish_position'] == 1 for e in w_check.data)
+                finisher_count = len(w_check.data)
+        except Exception as e:
+            logger.debug(f"Error checking winner for {race_key}: {e}")
+
+        return has_winner and finisher_count >= 3, race_record, finisher_count
+    except Exception as e:
+        logger.debug(f"Error checking status for {race_key}: {e}")
+        return False, None, 0
+
+
+def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]]) -> Dict:
+    """
+    Retry a focused list of exact races, rather than sweeping all race numbers.
+    """
+    grouped_targets = defaultdict(set)
+    for track_code, race_number in race_targets or []:
+        normalized_track = str(track_code or '').strip().upper()
+        if not normalized_track:
+            continue
+        try:
+            normalized_race = int(race_number)
+        except (TypeError, ValueError):
+            continue
+        grouped_targets[normalized_track].add(normalized_race)
+
+    stats = {
+        'date': target_date.strftime('%Y-%m-%d'),
+        'tracks_checked': len(grouped_targets),
+        'races_requested': sum(len(races) for races in grouped_targets.values()),
+        'races_found': 0,
+        'races_inserted': 0,
+        'races_failed': 0,
+        'races_skipped_verified': 0,
+        'success': True,
+    }
+
+    if not grouped_targets:
+        return stats
+
+    logger.info(
+        "Retrying %s unresolved races for %s",
+        stats['races_requested'],
+        target_date,
+    )
+
+    supabase = get_supabase_client()
+
+    for track_code in grouped_targets:
+        full_card_race_map = {}
+        full_card_pdf = download_full_card_pdf(track_code, target_date)
+        if full_card_pdf:
+            try:
+                full_card_race_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                if full_card_race_map:
+                    logger.info(
+                        "Loaded %s races from full-card cache for unresolved %s retries on %s",
+                        len(full_card_race_map),
+                        track_code,
+                        target_date,
+                    )
+            except Exception as e:
+                logger.warning(f"Could not build full-card cache for unresolved {track_code} retries: {e}")
+                full_card_race_map = {}
+
+        for race_num in sorted(grouped_targets[track_code]):
+            race_key = f"{track_code}-{target_date.strftime('%Y%m%d')}-{race_num}"
+            verified, _, finisher_count = race_is_completed_and_verified(supabase, race_key)
+            if verified:
+                logger.info(
+                    "Skipping unresolved retry for %s (already verified with %s finishers)",
+                    race_key,
+                    finisher_count,
+                )
+                stats['races_skipped_verified'] += 1
+                continue
+
+            race_data = extract_race_from_pdf(
+                build_equibase_url(track_code, target_date, race_num),
+                max_retries=2,
+                cached_full_card_races=full_card_race_map,
+            )
+            if not race_data or not race_data.get('horses'):
+                logger.warning(f"Unresolved retry could not fetch {race_key}")
+                stats['races_failed'] += 1
+                continue
+
+            stats['races_found'] += 1
+            if insert_race_to_db(supabase, track_code, target_date, race_data, race_num):
+                stats['races_inserted'] += 1
+            else:
+                stats['races_failed'] += 1
+
+            time.sleep(1)
+
+    return stats
+
+
 def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
     """
     Crawl historical races for a specific date
@@ -2074,40 +2195,17 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
             try:
                 # Check if race is already completed in DB to avoid re-downloading
                 race_key = f"{track_code}-{target_date.strftime('%Y%m%d')}-{race_num}"
-                existing = supabase.table('hranalyzer_races').select('id, race_status').eq('race_key', race_key).execute()
-                
-                if existing.data and len(existing.data) > 0:
-                    race_record = existing.data[0]
-                    status = race_record['race_status']
-                    
-                    if status == 'completed':
-                        # Verify it has a winner AND enough finishers to be a full result.
-                        # A race with only 1 finisher likely suffered a partial PDF parse —
-                        # allow re-crawling so the full results can be captured.
-                        has_winner = False
-                        finisher_count = 0
-                        try:
-                            w_check = supabase.table('hranalyzer_race_entries')\
-                                .select('id, finish_position')\
-                                .eq('race_id', race_record['id'])\
-                                .gt('finish_position', 0)\
-                                .execute()
-                            if w_check.data:
-                                has_winner = any(e['finish_position'] == 1 for e in w_check.data)
-                                finisher_count = len(w_check.data)
-                        except Exception as e:
-                            logger.debug(f"Error checking winner for {race_key}: {e}")
-
-                        if has_winner and finisher_count >= 3:
-                            logger.info(f"Skipping {race_key} (Already Completed & Verified with {finisher_count} finishers)")
-                            race_num += 1
-                            # We found a valid completed race, so track has races
-                            track_had_races = True
-                            continue
-                        elif has_winner:
-                            logger.warning(f"Race {race_key} has winner but only {finisher_count} finisher(s). Re-crawling for full results...")
-                        else:
-                            logger.warning(f"Race {race_key} marked completed but has no winner. Re-crawling...")
+                verified, race_record, finisher_count = race_is_completed_and_verified(supabase, race_key)
+                if verified:
+                    logger.info(f"Skipping {race_key} (Already Completed & Verified with {finisher_count} finishers)")
+                    race_num += 1
+                    track_had_races = True
+                    continue
+                if race_record and race_record.get('race_status') == 'completed':
+                    if finisher_count > 0:
+                        logger.warning(f"Race {race_key} has winner but only {finisher_count} finisher(s). Re-crawling for full results...")
+                    else:
+                        logger.warning(f"Race {race_key} marked completed but has no winner. Re-crawling...")
             except Exception as e:
                 logger.debug(f"Error checking status for {race_key}: {e}")
 

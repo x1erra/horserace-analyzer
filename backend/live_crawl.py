@@ -6,7 +6,7 @@ import os
 import tempfile
 import pytz
 from datetime import datetime, date, timedelta
-from crawl_equibase import crawl_historical_races, COMMON_TRACKS
+from crawl_equibase import crawl_historical_races, crawl_specific_races, COMMON_TRACKS
 from crawl_entries import crawl_entries
 from crawl_scratches import crawl_late_changes
 from bet_resolution import resolve_all_pending_bets
@@ -36,6 +36,61 @@ HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "crawler_heartbeat")
 
 def record_crawl_result(crawl_type, success, **details):
     update_crawl_status(crawl_type, success=success, details=details)
+
+
+def parse_post_time_to_iso(race_date_str, post_time_str, tz_name="America/New_York"):
+    if not post_time_str:
+        return None
+
+    parsed_time = None
+    clean_time = str(post_time_str).strip().upper()
+    for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M:%S", "%H:%M"):
+        try:
+            parsed_time = datetime.strptime(clean_time, fmt).time()
+            break
+        except ValueError:
+            continue
+
+    if parsed_time and race_date_str:
+        try:
+            target_date = datetime.strptime(race_date_str, "%Y-%m-%d").date()
+            localized = pytz.timezone(tz_name or "America/New_York").localize(
+                datetime.combine(target_date, parsed_time)
+            )
+            return localized.isoformat()
+        except Exception:
+            return None
+    return None
+
+
+def derive_live_race_status(
+    race_date_str,
+    post_time_str,
+    stored_status,
+    tz_name="America/New_York",
+    has_results=False,
+    grace_minutes=20,
+):
+    if has_results or stored_status == "completed":
+        return "completed"
+    if stored_status in {"cancelled", "delayed"}:
+        return stored_status
+    if stored_status == "past_drf_only":
+        return "past"
+
+    post_time_iso = parse_post_time_to_iso(race_date_str, post_time_str, tz_name)
+    if not post_time_iso:
+        return stored_status or "upcoming"
+
+    try:
+        post_dt = datetime.fromisoformat(post_time_iso)
+        now_dt = datetime.now(post_dt.tzinfo)
+        if now_dt >= post_dt + timedelta(minutes=grace_minutes):
+            return "past"
+    except Exception:
+        return stored_status or "upcoming"
+
+    return "upcoming"
 
 
 def dedupe_track_codes(track_codes):
@@ -70,6 +125,41 @@ def get_crawl_tracks_for_date(target_date, fallback_tracks=None):
         return known_tracks
     logger.info("No known tracks in DB for %s. Falling back to configured track list.", target_date)
     return list(fallback_tracks)
+
+
+def get_unresolved_race_targets_for_date(target_date):
+    supabase = get_supabase_client()
+    target_date_str = target_date.strftime("%Y-%m-%d")
+    response = (
+        supabase.table("hranalyzer_races")
+        .select("track_code, race_number, race_date, post_time, race_status, hranalyzer_tracks(timezone), hranalyzer_race_entries(finish_position)")
+        .eq("race_date", target_date_str)
+        .order("track_code")
+        .order("race_number")
+        .execute()
+    )
+
+    targets = []
+    for row in response.data or []:
+        entries = row.get("hranalyzer_race_entries") or []
+        finishers = [e for e in entries if isinstance(e.get("finish_position"), int) and e.get("finish_position") > 0]
+        has_results = any(e.get("finish_position") in [1, 2, 3] for e in finishers)
+        current_status = derive_live_race_status(
+            row.get("race_date"),
+            row.get("post_time"),
+            row.get("race_status"),
+            ((row.get("hranalyzer_tracks") or {}).get("timezone") or "America/New_York"),
+            has_results=has_results,
+        )
+
+        if current_status == "past":
+            targets.append((row.get("track_code"), row.get("race_number")))
+            continue
+
+        if row.get("race_status") == "completed" and len(finishers) < 3:
+            targets.append((row.get("track_code"), row.get("race_number")))
+
+    return dedupe_track_codes([f"{track}-{race}" for track, race in targets]), targets
 
 
 def run_entries_refresh_for_date(target_date):
@@ -118,8 +208,22 @@ def run_results_refresh(today_date, current_hour):
     stats_yesterday = {}
     today_tracks = get_crawl_tracks_for_date(today_date)
     yesterday_tracks = get_crawl_tracks_for_date(today_date - timedelta(days=1))
+    unresolved_labels, unresolved_targets = get_unresolved_race_targets_for_date(today_date)
     if current_hour >= 11 or current_hour < 2:
         logger.info("Racing hours (or late night check) active. Crawling results...")
+        if unresolved_targets:
+            logger.info(
+                "Retrying unresolved same-day races before broad results sweep: %s",
+                ", ".join(unresolved_labels),
+            )
+            unresolved_stats = crawl_specific_races(today_date, unresolved_targets)
+            logger.info(
+                "Unresolved retry results: requested=%s inserted=%s failed=%s skipped_verified=%s",
+                unresolved_stats.get("races_requested", 0),
+                unresolved_stats.get("races_inserted", 0),
+                unresolved_stats.get("races_failed", 0),
+                unresolved_stats.get("races_skipped_verified", 0),
+            )
         stats_today = crawl_historical_races(today_date, today_tracks)
         record_crawl_result(
             'results',
@@ -128,6 +232,7 @@ def run_results_refresh(today_date, current_hour):
             target_date=today_date.isoformat(),
             tracks_checked=len(today_tracks),
             races_found=stats_today.get('races_found', 0),
+            unresolved_retry_count=len(unresolved_targets),
         )
         stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), yesterday_tracks)
         record_crawl_result(
@@ -138,6 +243,7 @@ def run_results_refresh(today_date, current_hour):
             tracks_checked=len(yesterday_tracks),
             races_found=stats_yesterday.get('races_found', 0),
             today_races_found=stats_today.get('races_found', 0),
+            unresolved_retry_count=len(unresolved_targets),
         )
     else:
         logger.info("Slow hours. Performing maintenance check on yesterday's results...")
