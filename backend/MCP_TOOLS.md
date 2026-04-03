@@ -34,6 +34,12 @@ Examples:
 - “Show me Santa Anita race 8 results for April 2.”
   - `get_results(track="SA", race_date="2026-04-02", race_number=8)`
 
+Scratch/change semantics:
+- `get_scratches` is the canonical scratches feed. It merges normalized scratch-type late changes with scratched race entries, so it can surface scratches even when the late-change record lands before every database side effect has propagated.
+- `get_changes` is broader. It includes scratches plus jockey, weight, equipment, cancellation, and post-time changes.
+- If you only care about scratches, prefer `get_scratches`.
+- If you want the full late-changes picture for a race/card, use `get_changes`.
+
 ## Feed views
 
 For `get_scratches` and `get_changes`:

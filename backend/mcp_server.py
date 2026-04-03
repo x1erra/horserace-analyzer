@@ -350,6 +350,35 @@ def _build_feed_metadata(items, requested_view, applied_view, fallback_applied=F
     }
 
 
+def _is_scratch_feed_item(item):
+    """Return True when a normalized change record represents a scratch."""
+    return get_type_class(item) == "scratch"
+
+
+def _format_scratch_feed_item(item):
+    """Map a normalized scratch/change record into the scratches API shape."""
+    description = item.get("description") or "Scratched"
+    return {
+        "id": item.get("entry_id") or item.get("id"),
+        "change_id": item.get("id"),
+        "race_id": item.get("race_id"),
+        "race_key": item.get("race_key"),
+        "race_date": item.get("race_date"),
+        "track_code": item.get("track_code"),
+        "track_name": item.get("track_name", item.get("track_code")),
+        "race_number": item.get("race_number"),
+        "post_time": format_to_12h(item.get("post_time")),
+        "program_number": item.get("program_number"),
+        "horse_name": item.get("horse_name", "Unknown"),
+        "trainer_name": item.get("trainer_name", "Unknown"),
+        "status": "Scratched",
+        "description": description,
+        "change_type": item.get("change_type") or "Scratch",
+        "change_time": item.get("change_time"),
+        "updated_at": item.get("change_time"),
+    }
+
+
 def _track_matches(track_filter, race_track_code, race_track_name):
     if not track_filter:
         return True
@@ -399,9 +428,9 @@ def _detect_pipeline_activity():
 
     try:
         scratches_probe = (
-            supabase.table("hranalyzer_race_entries")
+            supabase.table("hranalyzer_changes")
             .select("id, race:hranalyzer_races!inner(race_date)")
-            .eq("scratched", True)
+            .eq("change_type", "Scratch")
             .gte("race.race_date", yesterday_str)
             .lte("race.race_date", today_str)
             .limit(1)
@@ -410,6 +439,21 @@ def _detect_pipeline_activity():
         signals["scratches_data_present"] = bool(scratches_probe.data)
     except Exception:
         pass
+
+    if not signals["scratches_data_present"]:
+        try:
+            scratches_probe = (
+                supabase.table("hranalyzer_race_entries")
+                .select("id, race:hranalyzer_races!inner(race_date)")
+                .eq("scratched", True)
+                .gte("race.race_date", yesterday_str)
+                .lte("race.race_date", today_str)
+                .limit(1)
+                .execute()
+            )
+            signals["scratches_data_present"] = bool(scratches_probe.data)
+        except Exception:
+            pass
 
     active_signals = [name.replace("_data_present", "") for name, active in signals.items() if active]
     return {
@@ -660,6 +704,30 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
         "page": page,
         "limit": limit,
         "total_pages": (len(final_list) + limit - 1) // limit if limit > 0 else 1,
+    }
+
+
+def fetch_scratch_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
+    """Return scratches using the normalized change feed so late-change scratches are never invisible."""
+    change_feed = fetch_change_feed(
+        mode=mode,
+        page=1,
+        limit=10000,
+        track=track,
+        start_date=start_date,
+        end_date=end_date,
+        race_number=race_number,
+    )
+    scratch_items = [_format_scratch_feed_item(item) for item in change_feed.get("changes", []) if _is_scratch_feed_item(item)]
+    start = max(page - 1, 0) * limit
+    end = start + limit
+    paginated = scratch_items[start:end]
+    return {
+        "scratches": paginated,
+        "count": len(scratch_items),
+        "page": page,
+        "limit": limit,
+        "total_pages": (len(scratch_items) + limit - 1) // limit if limit > 0 else 1,
     }
 
 
@@ -1656,65 +1724,21 @@ def get_scratches(
     end_date: str = "",
     race_number: int = 0,
 ) -> dict:
-    """Get scratches with pagination and backend-parity fields."""
-    supabase = get_supabase_client()
-    today = date.today().isoformat()
+    """Get scratches with pagination, using the normalized change feed plus scratched entries."""
     page = max(page, 1)
     limit = min(max(limit, 1), 200)
     requested_view = view or "upcoming"
 
-    def run_query(applied_view):
-        start = (page - 1) * limit
-        end = start + limit - 1
-        query = (
-            supabase.table("hranalyzer_race_entries")
-            .select(
-                """
-                    id, program_number, scratched, updated_at,
-                    horse:hranalyzer_horses(horse_name),
-                    trainer:hranalyzer_trainers(trainer_name),
-                    race:hranalyzer_races!inner(
-                        id, track_code, race_date, race_number, post_time, race_status,
-                        track:hranalyzer_tracks(track_name)
-                    )
-                """,
-                count="exact",
-            )
-            .eq("scratched", True)
-        )
-
-        query = _resolve_date_filtered_query(
-            query,
-            applied_view,
-            today,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        if track != "All":
-            query = query.eq("race.track_code", track)
-        if race_number:
-            query = query.eq("race.race_number", race_number)
-
-        if applied_view == "upcoming" and not (start_date or end_date):
-            query = (
-                query.order("race_date", foreign_table="race")
-                .order("track_code", foreign_table="race")
-                .order("race_number", foreign_table="race")
-                .order("id")
-            )
-        else:
-            query = (
-                query.order("race_date", desc=True, foreign_table="race")
-                .order("track_code", foreign_table="race")
-                .order("race_number", foreign_table="race")
-                .order("id")
-            )
-
-        return query.range(start, end).execute()
-
     applied_view = requested_view if requested_view in {"upcoming", "history", "all"} else "upcoming"
-    response = run_query(applied_view)
+    result = fetch_scratch_feed(
+        mode=applied_view,
+        page=page,
+        limit=limit,
+        track=track or "All",
+        start_date=start_date,
+        end_date=end_date,
+        race_number=max(race_number, 0),
+    )
     fallback_applied = False
     fallback_reason = ""
 
@@ -1722,43 +1746,29 @@ def get_scratches(
         applied_view == "upcoming"
         and not start_date
         and not end_date
-        and not response.data
+        and result.get("count", 0) == 0
     ):
         applied_view = "all"
-        response = run_query(applied_view)
+        result = fetch_scratch_feed(
+            mode=applied_view,
+            page=page,
+            limit=limit,
+            track=track or "All",
+            start_date=start_date,
+            end_date=end_date,
+            race_number=max(race_number, 0),
+        )
         fallback_applied = True
         fallback_reason = "No upcoming scratches found; returning the most recent historical scratches instead."
 
-    scratches = []
-    for item in response.data or []:
-        race = item.get("race") or {}
-        track_info = race.get("track") or {}
-        horse = item.get("horse") or {}
-        trainer = item.get("trainer") or {}
-        scratches.append(
-            {
-                "id": item["id"],
-                "race_id": race.get("id"),
-                "race_date": race.get("race_date"),
-                "track_code": race.get("track_code"),
-                "track_name": track_info.get("track_name", race.get("track_code")),
-                "race_number": race.get("race_number"),
-                "post_time": format_to_12h(race.get("post_time")),
-                "program_number": item.get("program_number"),
-                "horse_name": horse.get("horse_name", "Unknown"),
-                "trainer_name": trainer.get("trainer_name", "Unknown"),
-                "status": "Scratched",
-                "updated_at": item.get("updated_at"),
-            }
-        )
-
-    count = response.count if response.count is not None else len(scratches)
+    scratches = result.get("scratches", [])
+    count = result.get("count", len(scratches))
     return {
         "scratches": scratches,
         "count": count,
-        "page": page,
-        "limit": limit,
-        "total_pages": (count + limit - 1) // limit if limit > 0 else 1,
+        "page": result.get("page", page),
+        "limit": result.get("limit", limit),
+        "total_pages": result.get("total_pages", (count + limit - 1) // limit if limit > 0 else 1),
         "meta": _build_feed_metadata(
             scratches,
             requested_view=requested_view,

@@ -420,33 +420,32 @@ class TestMcpServer(unittest.TestCase):
         )
 
     def test_get_scratches_falls_back_to_all_when_upcoming_is_empty(self):
-        supabase = SequenceSupabaseStub(
-            [
-                Response(data=[], count=0),
-                Response(
-                    data=[
+        with patch.object(
+            mcp_server,
+            "fetch_scratch_feed",
+            side_effect=[
+                {"scratches": [], "count": 0, "page": 1, "limit": 20, "total_pages": 0},
+                {
+                    "scratches": [
                         {
                             "id": "entry-1",
+                            "race_date": "2026-03-27",
+                            "track_code": "SA",
+                            "track_name": "Santa Anita",
+                            "race_number": 3,
+                            "post_time": "2:00 PM",
                             "program_number": "5",
-                            "horse": {"horse_name": "A Lister"},
-                            "trainer": {"trainer_name": "Bob Baffert"},
-                            "race": {
-                                "id": "race-1",
-                                "race_date": "2026-03-27",
-                                "track_code": "SA",
-                                "race_number": 3,
-                                "post_time": "14:00:00",
-                                "track": {"track_name": "Santa Anita"},
-                            },
+                            "horse_name": "A Lister",
+                            "trainer_name": "Bob Baffert",
+                            "status": "Scratched",
                         }
                     ],
-                    count=1,
-                ),
-            ]
-        )
-
-        with patch.object(mcp_server, "get_supabase_client", return_value=supabase), patch.object(
-            mcp_server, "date", FakeDate
+                    "count": 1,
+                    "page": 1,
+                    "limit": 20,
+                    "total_pages": 1,
+                },
+            ],
         ):
             result = mcp_server.get_scratches()
 
@@ -457,51 +456,98 @@ class TestMcpServer(unittest.TestCase):
         self.assertIn("historical scratches", result["meta"]["fallback_reason"])
 
     def test_get_scratches_filters_by_race_number(self):
-        supabase = SupabaseRouterStub(
-            {
-                "hranalyzer_race_entries": [
+        with patch.object(
+            mcp_server,
+            "fetch_scratch_feed",
+            return_value={
+                "scratches": [
                     {
                         "id": "entry-1",
+                        "race_date": "2026-04-06",
+                        "track_code": "GP",
+                        "track_name": "Gulfstream Park",
+                        "race_number": 4,
+                        "post_time": "2:00 PM",
                         "program_number": "5",
-                        "scratched": True,
-                        "horse": {"horse_name": "Race Four Horse"},
-                        "trainer": {"trainer_name": "Trainer A"},
-                        "race": {
-                            "id": "race-1",
-                            "race_date": "2026-04-06",
-                            "track_code": "GP",
-                            "race_number": 4,
-                            "post_time": "14:00:00",
-                            "track": {"track_name": "Gulfstream Park"},
-                        },
-                    },
-                    {
-                        "id": "entry-2",
-                        "program_number": "6",
-                        "scratched": True,
-                        "horse": {"horse_name": "Race Five Horse"},
-                        "trainer": {"trainer_name": "Trainer B"},
-                        "race": {
-                            "id": "race-2",
-                            "race_date": "2026-04-06",
-                            "track_code": "GP",
-                            "race_number": 5,
-                            "post_time": "14:30:00",
-                            "track": {"track_name": "Gulfstream Park"},
-                        },
-                    },
-                ]
-            }
-        )
-
-        with patch.object(mcp_server, "get_supabase_client", return_value=supabase), patch.object(
-            mcp_server, "date", FakeDate
-        ):
+                        "horse_name": "Race Four Horse",
+                        "trainer_name": "Trainer A",
+                        "status": "Scratched",
+                    }
+                ],
+                "count": 1,
+                "page": 1,
+                "limit": 20,
+                "total_pages": 1,
+            },
+        ) as mock_feed:
             result = mcp_server.get_scratches(view="all", track="GP", start_date="2026-04-06", end_date="2026-04-06", race_number=4)
 
+        mock_feed.assert_called_once_with(
+            mode="all",
+            page=1,
+            limit=20,
+            track="GP",
+            start_date="2026-04-06",
+            end_date="2026-04-06",
+            race_number=4,
+        )
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["scratches"][0]["horse_name"], "Race Four Horse")
         self.assertEqual(result["scratches"][0]["race_number"], 4)
+
+    def test_fetch_scratch_feed_uses_normalized_change_feed(self):
+        with patch.object(
+            mcp_server,
+            "fetch_change_feed",
+            return_value={
+                "changes": [
+                    {
+                        "id": "chg-1",
+                        "entry_id": "entry-1",
+                        "race_id": "race-1",
+                        "race_key": "GP-20260403-4",
+                        "race_date": "2026-04-03",
+                        "track_code": "GP",
+                        "track_name": "Gulfstream Park",
+                        "race_number": 4,
+                        "post_time": "14:00:00",
+                        "program_number": "5",
+                        "horse_name": "Scratch Horse",
+                        "trainer_name": "Trainer A",
+                        "change_type": "Scratch",
+                        "description": "Veterinarian",
+                        "change_time": "2026-04-03T12:00:00Z",
+                    },
+                    {
+                        "id": "chg-2",
+                        "entry_id": "entry-2",
+                        "race_id": "race-1",
+                        "race_key": "GP-20260403-4",
+                        "race_date": "2026-04-03",
+                        "track_code": "GP",
+                        "track_name": "Gulfstream Park",
+                        "race_number": 4,
+                        "post_time": "14:00:00",
+                        "program_number": "6",
+                        "horse_name": "Weight Horse",
+                        "trainer_name": "Trainer B",
+                        "change_type": "Weight Change",
+                        "description": "+2 lbs",
+                        "change_time": "2026-04-03T12:05:00Z",
+                    },
+                ],
+                "count": 2,
+                "page": 1,
+                "limit": 10000,
+                "total_pages": 1,
+            },
+        ):
+            result = mcp_server.fetch_scratch_feed(track="GP", start_date="2026-04-03", end_date="2026-04-03", race_number=4)
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["scratches"][0]["horse_name"], "Scratch Horse")
+        self.assertEqual(result["scratches"][0]["description"], "Veterinarian")
+        self.assertEqual(result["scratches"][0]["change_type"], "Scratch")
 
     def test_get_entries_filters_track_date_and_race_number(self):
         supabase = SupabaseRouterStub(
