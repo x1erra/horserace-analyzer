@@ -98,6 +98,12 @@ const getDisplayDetails = (item) => {
     return `${changeType} reported for this horse.`;
 };
 
+const isRaceWideChange = (item) => {
+    const horseName = (item.horse_name || '').trim().toLowerCase();
+    const programNumber = (item.program_number || '').trim();
+    return !horseName || horseName === 'race-wide' || !programNumber || programNumber === '-';
+};
+
 export default function Changes() {
     const [changes, setChanges] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -174,6 +180,7 @@ export default function Changes() {
     };
 
     const paginate = (pageNumber) => setCurrentPage(pageNumber);
+    const visibleChanges = changes.filter((item) => !isRaceWideChange(item));
 
     return (
         <div className="space-y-8">
@@ -227,9 +234,9 @@ export default function Changes() {
                         <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
                         <p className="text-gray-400">Checking for updates...</p>
                     </div>
-                ) : changes.length === 0 ? (
+                ) : visibleChanges.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-                        <p className="text-lg">No late changes reported {selectedTrack !== 'All' ? `for ${selectedTrack}` : ''}.</p>
+                        <p className="text-lg">No horse-specific late changes reported {selectedTrack !== 'All' ? `for ${selectedTrack}` : ''}.</p>
                     </div>
                 ) : (
                     <>
@@ -247,7 +254,7 @@ export default function Changes() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-purple-900/20">
-                                    {changes.map((item) => (
+                                    {visibleChanges.map((item) => (
                                         <tr key={item.id} className="hover:bg-purple-900/10 transition-colors group">
                                             <td className="p-4 text-gray-300 font-medium whitespace-nowrap">
                                                 {item.race_date ? format(parseISO(item.race_date), 'MMM d, yyyy') : '-'}
@@ -309,7 +316,7 @@ export default function Changes() {
 
                         {/* Mobile Card View */}
                         <div className="md:hidden space-y-4 p-4">
-                            {changes.map((item) => (
+                            {visibleChanges.map((item) => (
                                 <div key={item.id} className="bg-purple-900/10 border border-purple-900/30 rounded-lg p-4 space-y-3">
                                     {/* Header: Date, Track, Race */}
                                     <div className="flex items-center justify-between text-sm">
