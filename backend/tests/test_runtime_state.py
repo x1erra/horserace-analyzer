@@ -195,6 +195,80 @@ class TestRuntimeState(unittest.TestCase):
         open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
         self.assertEqual(open_alerts, [])
 
+    def test_crawl_alert_requires_multiple_stale_evaluations_before_opening(self):
+        with patch.object(
+            self.runtime_state,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {
+                        "stale": True,
+                        "threshold_minutes": 300,
+                        "last_success_at": None,
+                        "last_attempt_at": None,
+                        "last_error": None,
+                    },
+                    "results": {"stale": False},
+                    "scratches": {"stale": False},
+                },
+                [],
+            ),
+        ):
+            self.runtime_state.evaluate_runtime_alerts()
+            state = self.runtime_state.load_state()
+            self.assertEqual([a for a in state["alerts"] if a.get("status") == "open"], [])
+
+            self.runtime_state.evaluate_runtime_alerts()
+            state = self.runtime_state.load_state()
+            open_alerts = [a for a in state["alerts"] if a.get("status") == "open"]
+
+        self.assertEqual(len(open_alerts), 1)
+        self.assertEqual(open_alerts[0]["key"], "crawl-stale:entries")
+        self.assertEqual(open_alerts[0]["details"]["stale_evaluations"], 2)
+        self.assertIn("stale_since", open_alerts[0]["details"])
+
+    def test_crawl_alert_tracking_resets_when_fresh_again(self):
+        stale_payload = (
+            {
+                "entries": {
+                    "stale": True,
+                    "threshold_minutes": 300,
+                    "last_success_at": None,
+                    "last_attempt_at": None,
+                    "last_error": None,
+                },
+                "results": {"stale": False},
+                "scratches": {"stale": False},
+            },
+            [],
+        )
+        fresh_payload = (
+            {
+                "entries": {
+                    "stale": False,
+                    "threshold_minutes": 300,
+                    "last_success_at": "2026-04-03T06:12:43Z",
+                    "last_attempt_at": "2026-04-03T06:12:43Z",
+                    "last_error": None,
+                },
+                "results": {"stale": False},
+                "scratches": {"stale": False},
+            },
+            [],
+        )
+
+        with patch.object(self.runtime_state, "summarize_freshness", side_effect=[stale_payload, stale_payload, fresh_payload]):
+            self.runtime_state.evaluate_runtime_alerts()
+            self.runtime_state.evaluate_runtime_alerts()
+            self.runtime_state.evaluate_runtime_alerts()
+
+        state = self.runtime_state.load_state()
+        entries_status = state["crawl_status"]["entries"]
+        self.assertNotIn("stale_since", entries_status)
+        self.assertNotIn("stale_evaluations", entries_status)
+        alert = next(alert for alert in state["alerts"] if alert["key"] == "crawl-stale:entries")
+        self.assertEqual(alert["status"], "resolved")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ DEFAULT_ENTRIES_STALE_MINUTES = 300
 DEFAULT_RESULTS_STALE_MINUTES = 30
 DEFAULT_SCRATCHES_STALE_MINUTES = 20
 DEFAULT_ACTIVE_ATTEMPT_GRACE_MINUTES = 20
+DEFAULT_CRAWL_ALERT_CONFIRM_EVALUATIONS = 2
 ALERT_DISPATCH_TIMEOUT_SECONDS = 10
 
 logger = logging.getLogger(__name__)
@@ -551,22 +552,41 @@ def summarize_freshness(now=None):
     return freshness, state.get("alerts", [])
 
 
+def _reset_stale_tracking(status):
+    status.pop("stale_since", None)
+    status.pop("stale_evaluations", None)
+
+
 def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False, include_crawl_alerts=True):
     freshness, _alerts = summarize_freshness()
+    required_stale_evaluations = int(
+        os.getenv("CRAWL_ALERT_CONFIRM_EVALUATIONS", str(DEFAULT_CRAWL_ALERT_CONFIRM_EVALUATIONS))
+    )
 
     def mutator(state):
         if include_crawl_alerts:
             for crawl_type, item in freshness.items():
                 key = f"crawl-stale:{crawl_type}"
+                status = state.setdefault("crawl_status", {}).setdefault(crawl_type, {})
                 if item["stale"]:
-                    upsert_alert(
-                        state,
-                        key=key,
-                        severity="warning" if crawl_type == "entries" else "critical",
-                        message=f"{crawl_type.title()} crawl is stale",
-                        details=item,
-                    )
+                    stale_evaluations = int(status.get("stale_evaluations", 0)) + 1
+                    status["stale_evaluations"] = stale_evaluations
+                    status.setdefault("stale_since", utc_now())
+
+                    if stale_evaluations >= required_stale_evaluations:
+                        upsert_alert(
+                            state,
+                            key=key,
+                            severity="warning" if crawl_type == "entries" else "critical",
+                            message=f"{crawl_type.title()} crawl is stale",
+                            details={
+                                **item,
+                                "stale_since": status.get("stale_since"),
+                                "stale_evaluations": stale_evaluations,
+                            },
+                        )
                 else:
+                    _reset_stale_tracking(status)
                     suppress_resolved_notification = item.get("within_startup_grace") and not item.get("last_success_at")
                     resolve_alert(state, key, details=item, notify=not suppress_resolved_notification)
 
