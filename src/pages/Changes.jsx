@@ -52,6 +52,49 @@ const getChangeColor = (type) => {
     }
 };
 
+const getDisplayHorseName = (item) => {
+    const horseName = (item.horse_name || '').trim();
+    if (!horseName || horseName.toLowerCase() === 'race-wide') {
+        return 'Race-wide change';
+    }
+    return horseName;
+};
+
+const getDisplayChangeType = (item) => {
+    const changeType = (item.change_type || '').trim();
+    const description = (item.description || '').trim();
+
+    if (changeType && changeType !== 'Other') {
+        return changeType;
+    }
+
+    if (!description) {
+        return 'General Update';
+    }
+
+    if (/track condition/i.test(description)) return 'Track Condition';
+    if (/post time|delay|delayed/i.test(description)) return 'Post Time Change';
+    if (/wagering/i.test(description)) return 'Wagering Change';
+    if (/owner/i.test(description)) return 'Owner Change';
+    if (/trainer/i.test(description)) return 'Trainer Change';
+
+    return 'General Update';
+};
+
+const getDisplayDetails = (item) => {
+    const description = (item.description || '').trim();
+    if (description) {
+        return description;
+    }
+
+    const changeType = getDisplayChangeType(item);
+    if (getDisplayHorseName(item) === 'Race-wide change') {
+        return `${changeType} affecting this race.`;
+    }
+
+    return `${changeType} reported for this horse.`;
+};
+
 export default function Changes() {
     const [changes, setChanges] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -236,22 +279,29 @@ export default function Changes() {
                                                         })()
                                                     ) : (
                                                         <div className="w-8 h-8 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
-                                                            -
+                                                            R
                                                         </div>
                                                     )}
-                                                    <span className="text-white font-medium group-hover:text-purple-400 transition-colors">
-                                                        {item.horse_name || 'Race-wide'}
-                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <div className="text-white font-medium group-hover:text-purple-400 transition-colors">
+                                                            {getDisplayHorseName(item)}
+                                                        </div>
+                                                        {getDisplayHorseName(item) === 'Race-wide change' && (
+                                                            <div className="text-xs text-gray-500">
+                                                                Applies to the entire race
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </td>
                                             <td className="p-4 text-center">
-                                                <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
-                                                    {getChangeIcon(item.change_type)}
-                                                    {item.change_type}
+                                                <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(getDisplayChangeType(item))}`}>
+                                                    {getChangeIcon(getDisplayChangeType(item))}
+                                                    {getDisplayChangeType(item)}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-gray-400 text-sm max-w-xs break-words">
-                                                {item.description || '-'}
+                                                {getDisplayDetails(item)}
                                             </td>
                                         </tr>
                                     ))}
@@ -298,22 +348,27 @@ export default function Changes() {
                                             })()
                                         ) : (
                                             <div className="w-10 h-10 rounded-md bg-gray-800 flex items-center justify-center text-gray-500 text-xs">
-                                                -
+                                                R
                                             </div>
                                         )}
-                                        <span className="text-white font-lg font-bold">
-                                            {item.horse_name || 'Race-wide'}
-                                        </span>
+                                        <div>
+                                            <div className="text-white font-lg font-bold">
+                                                {getDisplayHorseName(item)}
+                                            </div>
+                                            {getDisplayHorseName(item) === 'Race-wide change' && (
+                                                <div className="text-xs text-gray-500">Applies to the entire race</div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Change Details */}
                                     <div className="flex items-start justify-between gap-4 pt-2 border-t border-purple-900/20">
-                                        <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(item.change_type)}`}>
-                                            {getChangeIcon(item.change_type)}
-                                            {item.change_type}
+                                        <span className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getChangeColor(getDisplayChangeType(item))}`}>
+                                            {getChangeIcon(getDisplayChangeType(item))}
+                                            {getDisplayChangeType(item)}
                                         </span>
                                         <span className="text-gray-400 text-sm text-right flex-1 leading-tight">
-                                            {item.description || '-'}
+                                            {getDisplayDetails(item)}
                                         </span>
                                     </div>
                                 </div>
