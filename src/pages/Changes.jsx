@@ -116,6 +116,7 @@ export default function Changes() {
     const [itemsPerPage, setItemsPerPage] = useState(20);
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
     const [availableTracks, setAvailableTracks] = useState(['All']);
 
     // Fetch filter options on mount
@@ -151,6 +152,7 @@ export default function Changes() {
                 setChanges(response.data.changes || []);
                 setTotalPages(response.data.total_pages || 1);
                 setTotalCount(response.data.count || 0);
+                setHasMore(Boolean(response.data.has_more));
                 setError(null);
             } catch (err) {
                 console.error("Error fetching changes:", err);
@@ -411,13 +413,14 @@ export default function Changes() {
                                 </button>
 
                                 <span className="text-sm text-gray-400">
-                                    Page <span className="font-medium text-white">{currentPage}</span> of <span className="font-medium text-white">{totalPages}</span>
+                                    Page <span className="font-medium text-white">{currentPage}</span>
+                                    {viewMode === 'history' ? null : <> of <span className="font-medium text-white">{totalPages}</span></>}
                                 </span>
 
                                 <button
                                     onClick={() => paginate(currentPage + 1)}
-                                    disabled={currentPage === totalPages}
-                                    className={`px-3 py-1 rounded text-sm font-medium transition ${currentPage === totalPages
+                                    disabled={viewMode === 'history' ? !hasMore : currentPage === totalPages}
+                                    className={`px-3 py-1 rounded text-sm font-medium transition ${(viewMode === 'history' ? !hasMore : currentPage === totalPages)
                                         ? 'bg-purple-900/10 text-purple-800 cursor-not-allowed opacity-50'
                                         : 'bg-purple-900/30 text-purple-200 hover:bg-purple-900/50'
                                         }`}

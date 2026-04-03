@@ -593,14 +593,21 @@ def _freshness_guidance(status, summary):
     }
 
 
-def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
-    """Mirror backend change merge and dedupe logic for MCP consumers."""
-    supabase = get_supabase_client()
-    today = date.today().isoformat()
-    start = max(page - 1, 0) * limit
-    end = start + limit
+def _fetch_normalized_change_batch(
+    supabase,
+    mode,
+    today,
+    track,
+    start_date,
+    end_date,
+    race_number,
+    change_range=None,
+    scratch_range=None,
+):
+    """Fetch and normalize a bounded change batch so history mode can page incrementally."""
     all_changes = []
     entries_with_detailed_scratches = set()
+    change_rows = []
 
     try:
         changes_query = (
@@ -630,6 +637,8 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
             changes_query = changes_query.eq("race.track_code", track)
         if race_number:
             changes_query = changes_query.eq("race.race_number", race_number)
+        if change_range is not None:
+            changes_query = changes_query.order("created_at", desc=True).range(change_range[0], change_range[1])
 
         changes_response = changes_query.execute()
         change_rows = changes_response.data or []
@@ -647,13 +656,11 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
         )
 
         for item in change_rows:
-
             if item.get("change_type") == "Scratch" and item.get("entry_id"):
                 entries_with_detailed_scratches.add(item["entry_id"])
-
             all_changes.append(_build_change_record(item, entry_snapshots, race_snapshots, "changes"))
     except Exception:
-        pass
+        change_rows = []
 
     scratch_query = (
         supabase.table("hranalyzer_race_entries")
@@ -682,6 +689,8 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
         scratch_query = scratch_query.eq("race.track_code", track)
     if race_number:
         scratch_query = scratch_query.eq("race.race_number", race_number)
+    if scratch_range is not None:
+        scratch_query = scratch_query.order("updated_at", desc=True).range(scratch_range[0], scratch_range[1])
 
     scratch_response = scratch_query.execute()
     scratch_rows = scratch_response.data or []
@@ -709,24 +718,93 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
             )
         )
 
-    final_list = _normalize_change_list(all_changes, sort_desc=mode in {"history", "all"} or bool(start_date or end_date))
-    final_list = [
+    normalized = _normalize_change_list(all_changes, sort_desc=mode in {"history", "all"} or bool(start_date or end_date))
+    normalized = [
         item
-        for item in final_list
+        for item in normalized
         if item.get("change_type") != "Wagering"
         and "wagering" not in (item.get("description") or "").lower()
     ]
 
-    paginated = final_list[start:end]
-    for item in paginated:
-        item.pop("_source", None)
+    return {
+        "changes": normalized,
+        "raw_change_count": len(change_rows),
+        "raw_scratch_count": len(scratch_rows),
+    }
+
+
+def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
+    """Mirror backend change merge and dedupe logic for MCP consumers."""
+    supabase = get_supabase_client()
+    today = date.today().isoformat()
+    start = max(page - 1, 0) * limit
+    end = start + limit
+    history_like = mode in {"history", "all"} or bool(start_date or end_date)
+
+    if not history_like:
+        batch = _fetch_normalized_change_batch(
+            supabase,
+            mode,
+            today,
+            track,
+            start_date,
+            end_date,
+            race_number,
+        )
+        final_list = batch["changes"]
+        return {
+            "changes": final_list[start:end],
+            "count": len(final_list),
+            "page": page,
+            "limit": limit,
+            "total_pages": (len(final_list) + limit - 1) // limit if limit > 0 else 1,
+            "has_more": page * limit < len(final_list),
+        }
+
+    chunk_size = max(limit * 4, 100)
+    offset = 0
+    collected = []
+    has_more = False
+    exhausted = False
+
+    while True:
+        batch = _fetch_normalized_change_batch(
+            supabase,
+            mode,
+            today,
+            track,
+            start_date,
+            end_date,
+            race_number,
+            change_range=(offset, offset + chunk_size - 1),
+            scratch_range=(offset, offset + chunk_size - 1),
+        )
+
+        collected.extend(batch["changes"])
+        final_list = _normalize_change_list(collected, sort_desc=True)
+        final_list = [
+            item
+            for item in final_list
+            if item.get("change_type") != "Wagering"
+            and "wagering" not in (item.get("description") or "").lower()
+        ]
+
+        exhausted = batch["raw_change_count"] < chunk_size and batch["raw_scratch_count"] < chunk_size
+        if len(final_list) > end:
+            has_more = True
+            break
+        if exhausted:
+            has_more = False
+            break
+        offset += chunk_size
 
     return {
-        "changes": paginated,
+        "changes": final_list[start:end],
         "count": len(final_list),
         "page": page,
         "limit": limit,
-        "total_pages": (len(final_list) + limit - 1) // limit if limit > 0 else 1,
+        "total_pages": (len(final_list) + limit - 1) // limit if exhausted and limit > 0 else max(page + (1 if has_more else 0), 1),
+        "has_more": has_more,
     }
 
 

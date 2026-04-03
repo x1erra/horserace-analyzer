@@ -818,6 +818,59 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["count"], 0)
         self.assertEqual(result["changes"], [])
 
+    def test_get_changes_history_uses_incremental_paging(self):
+        history_date = "2026-03-30"
+        change_rows = [
+            {
+                "id": f"chg-{idx}",
+                "entry_id": f"entry-{idx}",
+                "race_id": "race-1",
+                "change_type": "Jockey Change",
+                "description": f"Jockey changed to Rider {idx}",
+                "created_at": f"2026-03-30T12:{idx % 60:02d}:00Z",
+                "race": {"id": "race-1", "race_date": history_date, "track_code": "SA"},
+            }
+            for idx in range(101)
+        ]
+        entry_rows = [
+            {
+                "id": f"entry-{idx}",
+                "race_id": "race-1",
+                "program_number": str(idx + 1),
+                "weight": 124,
+                "horse": {"horse_name": f"Horse {idx}"},
+                "jockey": {"jockey_name": f"Rider {idx}"},
+                "trainer": {"trainer_name": "Trainer A"},
+            }
+            for idx in range(101)
+        ]
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_changes": change_rows,
+                "hranalyzer_race_entries": entry_rows,
+                "hranalyzer_races": [
+                    {
+                        "id": "race-1",
+                        "race_key": "SA-20260331-3",
+                        "track_code": "SA",
+                        "race_date": history_date,
+                        "race_number": 3,
+                        "post_time": "14:00:00",
+                        "track": {"track_name": "Santa Anita"},
+                    }
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase), patch.object(
+            mcp_server, "date", FakeDate
+        ):
+            result = mcp_server.get_changes(view="history", track="SA", page=1, limit=20)
+
+        self.assertEqual(len(result["changes"]), 20)
+        self.assertTrue(result["has_more"])
+        self.assertEqual(result["page"], 1)
+
     def test_get_race_changes_uses_created_at_and_bulk_hydration(self):
         supabase = SupabaseRouterStub(
             {
