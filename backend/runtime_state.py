@@ -367,7 +367,7 @@ def _build_alert_payload(alert):
             detail_lines.append(f"**{_humanize_alert_detail_key(key)}:** {formatted}")
 
     reason = _describe_alert_reason(alert, details, is_resolved)
-    description_parts = []
+    description_parts = [f"**Issue:** {headline}"]
     if reason:
         description_parts.append(f"**Why:** {reason}")
     if detail_lines:

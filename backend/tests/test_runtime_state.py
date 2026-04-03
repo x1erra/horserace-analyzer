@@ -98,12 +98,13 @@ class TestRuntimeState(unittest.TestCase):
         self.assertIn("TrackData alert resolved", payload["content"])
         self.assertEqual(payload["embeds"][0]["title"], "Entries crawl is stale")
         description = payload["embeds"][0]["description"]
+        self.assertIn("**Issue:** Entries crawl is stale", description)
         self.assertIn("**Why:** A successful entries crawl was recorded.", description)
         self.assertIn("**Last Success:** 2026-04-02T22:46:41Z", description)
         self.assertIn("**Age (minutes):** 0", description)
         self.assertNotIn("last_attempt_at", description)
         self.assertNotIn("last_error", description)
-        self.assertNotIn("stale", description)
+        self.assertNotIn("**stale**", description)
         self.assertNotIn("count", description)
 
     def test_payload_flattens_last_details_and_omits_false_flags(self):
@@ -129,6 +130,7 @@ class TestRuntimeState(unittest.TestCase):
         )
 
         description = payload["embeds"][0]["description"]
+        self.assertIn("**Issue:** Scratches crawl is stale", description)
         self.assertIn(
             "**Why:** No recent successful scratches crawl has been recorded.",
             description,
@@ -139,7 +141,7 @@ class TestRuntimeState(unittest.TestCase):
         self.assertNotIn("last_details", description)
         self.assertNotIn("in_progress", description)
         self.assertNotIn("within_startup_grace", description)
-        self.assertNotIn("stale", description)
+        self.assertNotIn("**stale**", description)
         self.assertNotIn("count", description)
 
     def test_dashboard_summary_failure_payload_explains_reason(self):
@@ -158,6 +160,7 @@ class TestRuntimeState(unittest.TestCase):
         )
 
         description = payload["embeds"][0]["description"]
+        self.assertIn("**Issue:** Dashboard summary failed repeatedly for 2026-04-03", description)
         self.assertIn(
             "**Why:** The dashboard summary endpoint has failed repeatedly for 2026-04-03 (3 times). Latest error: Invalid API key",
             description,
