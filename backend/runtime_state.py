@@ -212,7 +212,7 @@ def upsert_alert(state, key, severity, message, details=None):
         alerts[:] = alerts[-limit:]
 
 
-def resolve_alert(state, key, details=None):
+def resolve_alert(state, key, details=None, notify=True):
     for alert in state.get("alerts", []):
         if alert.get("key") == key:
             if details is not None:
@@ -220,7 +220,7 @@ def resolve_alert(state, key, details=None):
             if alert.get("status") != "resolved":
                 alert["status"] = "resolved"
                 alert["resolved_at"] = utc_now()
-                alert["notified_resolved"] = False
+                alert["notified_resolved"] = not notify
             break
 
 
@@ -236,21 +236,76 @@ def _alert_color(severity):
     }.get(severity, 9807270)
 
 
+def _format_alert_detail_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        parts = []
+        for key, nested_value in value.items():
+            formatted = _format_alert_detail_value(nested_value)
+            if formatted is not None:
+                parts.append(f"{key}={formatted}")
+        return ", ".join(parts) if parts else None
+    if isinstance(value, list):
+        parts = [_format_alert_detail_value(item) for item in value]
+        parts = [item for item in parts if item is not None]
+        return ", ".join(parts) if parts else None
+    return str(value)
+
+
 def _build_alert_payload(alert):
     severity = (alert.get("severity") or "warning").upper()
     status = (alert.get("status") or "open").upper()
     details = alert.get("details") or {}
+    is_resolved = status == "RESOLVED"
+
+    headline = alert.get("message", alert.get("key", "Unknown alert"))
+    if is_resolved and details.get("last_success_at"):
+        content = f"TrackData alert resolved: {headline}"
+    elif is_resolved and details.get("within_startup_grace"):
+        content = f"TrackData startup grace: {headline}"
+    else:
+        content = f"TrackData alert {status.lower()}: {headline}"
+
+    preferred_detail_order = [
+        "phase",
+        "target_date",
+        "last_success_at",
+        "last_attempt_at",
+        "age_minutes",
+        "threshold_minutes",
+        "in_progress",
+        "within_startup_grace",
+        "startup_grace_reason",
+        "stale",
+        "tracks_checked",
+        "races_found",
+        "today_races_found",
+        "changes_processed",
+        "last_error",
+        "last_details",
+    ]
 
     detail_lines = []
-    for key, value in details.items():
-        detail_lines.append(f"**{key}**: {value}")
+    seen = set()
+    for key in preferred_detail_order + list(details.keys()):
+        if key in seen or key not in details:
+            continue
+        seen.add(key)
+        formatted = _format_alert_detail_value(details.get(key))
+        if formatted is not None:
+            detail_lines.append(f"**{key}**: {formatted}")
 
     description = "\n".join(detail_lines) if detail_lines else "No additional details."
     if alert.get("count"):
         description += f"\n**count**: {alert['count']}"
 
     return {
-        "content": f"TrackData alert {status.lower()}: {alert.get('message', alert.get('key', 'Unknown alert'))}",
+        "content": content,
         "embeds": [
             {
                 "title": alert.get("key", "trackdata-alert"),
@@ -357,6 +412,7 @@ def update_crawl_status(crawl_type, success, details=None):
                     "last_success_at": now,
                     "last_details": details,
                     "last_error": None,
+                    "age_minutes": 0,
                     "stale": False,
                 },
             )
@@ -417,6 +473,10 @@ def summarize_freshness(now=None):
             "within_startup_grace": within_startup_grace,
             "in_progress": in_progress,
         }
+        if within_startup_grace and not status.get("last_success_at"):
+            freshness[crawl_type]["startup_grace_reason"] = (
+                f"Suppressing stale alerts for {startup_grace_minutes} minutes after deploy/startup"
+            )
 
     return freshness, state.get("alerts", [])
 
@@ -436,7 +496,8 @@ def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False)
                     details=item,
                 )
             else:
-                resolve_alert(state, key, details=item)
+                suppress_resolved_notification = item.get("within_startup_grace") and not item.get("last_success_at")
+                resolve_alert(state, key, details=item, notify=not suppress_resolved_notification)
 
         if during_racing_hours and today_summary_total == 0:
             upsert_alert(

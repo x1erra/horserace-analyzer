@@ -77,6 +77,50 @@ class TestRuntimeState(unittest.TestCase):
         self.assertIn("TrackData alert resolved", second_payload["content"])
         self.assertEqual(second_payload["embeds"][0]["fields"][1]["value"], "RESOLVED")
 
+    def test_resolved_payload_omits_empty_detail_values(self):
+        payload = self.runtime_state._build_alert_payload(  # pylint: disable=protected-access
+            {
+                "key": "crawl-stale:entries",
+                "severity": "warning",
+                "message": "Entries crawl is stale",
+                "status": "resolved",
+                "count": 2,
+                "details": {
+                    "last_success_at": "2026-04-02T22:46:41Z",
+                    "age_minutes": 0,
+                    "stale": False,
+                    "last_attempt_at": None,
+                    "last_error": None,
+                },
+            }
+        )
+
+        self.assertIn("TrackData alert resolved", payload["content"])
+        description = payload["embeds"][0]["description"]
+        self.assertIn("**last_success_at**: 2026-04-02T22:46:41Z", description)
+        self.assertIn("**age_minutes**: 0", description)
+        self.assertIn("**stale**: no", description)
+        self.assertNotIn("last_attempt_at", description)
+        self.assertNotIn("last_error", description)
+
+    def test_startup_grace_resolution_does_not_dispatch_noise(self):
+        os.environ["ALERT_WEBHOOK_URL"] = "https://discord.example/webhook"
+
+        with patch.object(self.runtime_state.requests, "post") as post_mock:
+            post_mock.return_value.raise_for_status.return_value = None
+            self.runtime_state.raise_alert(
+                "crawl-stale:results",
+                "critical",
+                "Results crawl is stale",
+                {"stale": True, "threshold_minutes": 30},
+            )
+            self.runtime_state.mark_runtime_boot("scheduler")
+            self.runtime_state.evaluate_runtime_alerts()
+
+        self.assertEqual(post_mock.call_count, 1)
+        first_payload = post_mock.call_args_list[0].kwargs["json"]
+        self.assertIn("TrackData alert open", first_payload["content"])
+
 
 if __name__ == "__main__":
     unittest.main()
