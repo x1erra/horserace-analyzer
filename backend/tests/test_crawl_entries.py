@@ -63,6 +63,42 @@ class TestCrawlEntries(unittest.TestCase):
         self.assertEqual(races[0]["entries"][0]["horse_name"], "Gentlemens Game")
         self.assertEqual(races[0]["entries"][0]["morning_line_odds"], "20/1")
 
+    def test_fetch_hrn_entries_strips_numeric_suffix_from_horse_name(self):
+        html = """
+        <html>
+          <body>
+            <table>
+              <tr>
+                <th>#</th>
+                <th>PP</th>
+                <th>Horse</th>
+                <th>Trainer / Jockey</th>
+                <th>ML</th>
+              </tr>
+              <tr>
+                <td>7</td>
+                <td>7</td>
+                <td data-label="Horse / Sire">
+                  <h4>Nyfive (97)</h4>
+                </td>
+                <td>
+                  <p>Trainer Name</p>
+                  <p>Jockey Name</p>
+                </td>
+                <td>4/1</td>
+              </tr>
+            </table>
+          </body>
+        </html>
+        """
+        response = types.SimpleNamespace(status_code=200, text=html)
+
+        with patch.object(crawl_entries.requests, "get", return_value=response):
+            races = crawl_entries.fetch_hrn_entries("GP", date.fromisoformat("2026-04-02"))
+
+        self.assertEqual(len(races), 1)
+        self.assertEqual(races[0]["entries"][0]["horse_name"], "Nyfive")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,22 @@ class TestRuntimeState(unittest.TestCase):
         self.assertEqual(freshness["entries"]["last_details"]["total_races_found"], 12)
         self.assertFalse(freshness["entries"]["stale"])
 
+    def test_startup_grace_suppresses_initial_stale_alerts(self):
+        self.runtime_state.mark_runtime_boot("scheduler")
+        freshness, _alerts = self.runtime_state.summarize_freshness()
+
+        self.assertFalse(freshness["entries"]["stale"])
+        self.assertFalse(freshness["results"]["stale"])
+        self.assertFalse(freshness["scratches"]["stale"])
+        self.assertTrue(freshness["entries"]["within_startup_grace"])
+
+    def test_recent_attempt_marks_crawl_in_progress(self):
+        self.runtime_state.mark_crawl_attempt("results", {"phase": "scheduled"})
+        freshness, _alerts = self.runtime_state.summarize_freshness()
+
+        self.assertTrue(freshness["results"]["in_progress"])
+        self.assertFalse(freshness["results"]["stale"])
+
     def test_dispatches_discord_notification_once_for_open_and_resolved_alert(self):
         os.environ["ALERT_WEBHOOK_URL"] = "https://discord.example/webhook"
 
@@ -59,6 +75,7 @@ class TestRuntimeState(unittest.TestCase):
         second_payload = post_mock.call_args_list[1].kwargs["json"]
         self.assertIn("TrackData alert open", first_payload["content"])
         self.assertIn("TrackData alert resolved", second_payload["content"])
+        self.assertEqual(second_payload["embeds"][0]["fields"][1]["value"], "RESOLVED")
 
 
 if __name__ == "__main__":

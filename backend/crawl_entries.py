@@ -38,6 +38,19 @@ HRN_TRACK_MAP = {
     'WO': 'woodbine'
 }
 
+
+def clean_horse_name(raw_name):
+    """Normalize display names scraped from entries pages."""
+    if not raw_name:
+        return "Unknown"
+
+    horse_name = " ".join(str(raw_name).split()).strip()
+    # Remove speed-figure / rating suffixes like "Nyfive (97)".
+    horse_name = re.sub(r'\s*\(\d{1,3}\)\s*$', '', horse_name)
+    # Keep parity with the static parser: strip any remaining trailing parenthetical.
+    horse_name = re.sub(r'\s*\([^)]*\)\s*$', '', horse_name)
+    return horse_name.strip() or "Unknown"
+
 def get_static_entry_url(track_code, race_date):
     """
     Construct the static URL for a track's entries
@@ -196,7 +209,7 @@ def parse_entries_html(html_content, track_code, race_date):
                             horse_name = a_tag.get_text(strip=True)
                     
                     # Clean horse name
-                    horse_name = re.sub(r'\s*\(.*?\)', '', horse_name).strip()
+                    horse_name = clean_horse_name(horse_name)
                     
                     # Jockey
                     jockey = None
@@ -527,6 +540,7 @@ def fetch_hrn_entries(track_code, race_date):
                         else:
                             stripped_text = list(horse_part.stripped_strings)
                             horse_name = stripped_text[0] if stripped_text else "Unknown"
+                        horse_name = clean_horse_name(horse_name)
 
                     # Trainer / Jockey
                     tj_part = cols[idx_tj] if len(cols) > idx_tj else None

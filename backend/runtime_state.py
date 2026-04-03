@@ -13,6 +13,10 @@ STATE_VERSION = 1
 DEFAULT_ALERT_HISTORY_LIMIT = 50
 DEFAULT_SUMMARY_FAILURE_THRESHOLD = 3
 DEFAULT_SUMMARY_FAILURE_WINDOW_MINUTES = 15
+DEFAULT_ENTRIES_STALE_MINUTES = 300
+DEFAULT_RESULTS_STALE_MINUTES = 30
+DEFAULT_SCRATCHES_STALE_MINUTES = 20
+DEFAULT_ACTIVE_ATTEMPT_GRACE_MINUTES = 20
 ALERT_DISPATCH_TIMEOUT_SECONDS = 10
 
 logger = logging.getLogger(__name__)
@@ -65,6 +69,7 @@ STATE_FILE = RUNTIME_DIR / "runtime_state.json"
 def _empty_state():
     return {
         "version": STATE_VERSION,
+        "service_boots": {},
         "crawl_status": {},
         "dashboard_summaries": {},
         "summary_failures": {},
@@ -207,9 +212,11 @@ def upsert_alert(state, key, severity, message, details=None):
         alerts[:] = alerts[-limit:]
 
 
-def resolve_alert(state, key):
+def resolve_alert(state, key, details=None):
     for alert in state.get("alerts", []):
         if alert.get("key") == key:
+            if details is not None:
+                alert["details"] = details
             if alert.get("status") != "resolved":
                 alert["status"] = "resolved"
                 alert["resolved_at"] = utc_now()
@@ -303,6 +310,33 @@ def clear_alert(key):
     dispatch_pending_alert_notifications()
 
 
+def mark_runtime_boot(service_name):
+    now = utc_now()
+
+    def mutator(state):
+        state.setdefault("service_boots", {})[service_name] = now
+
+    update_state(mutator)
+
+
+def get_recent_boot_at(service_name):
+    state = load_state()
+    value = state.get("service_boots", {}).get(service_name)
+    return parse_iso(value)
+
+
+def mark_crawl_attempt(crawl_type, details=None):
+    now = utc_now()
+    details = details or {}
+
+    def mutator(state):
+        status = state.setdefault("crawl_status", {}).setdefault(crawl_type, {})
+        status["last_attempt_at"] = now
+        status["last_details"] = details
+
+    update_state(mutator)
+
+
 def update_crawl_status(crawl_type, success, details=None):
     now = utc_now()
     details = details or {}
@@ -315,7 +349,17 @@ def update_crawl_status(crawl_type, success, details=None):
             status["last_success_at"] = now
             status["last_success_details"] = details
             status["last_error"] = None
-            resolve_alert(state, f"crawl-stale:{crawl_type}")
+            resolve_alert(
+                state,
+                f"crawl-stale:{crawl_type}",
+                details={
+                    "last_attempt_at": now,
+                    "last_success_at": now,
+                    "last_details": details,
+                    "last_error": None,
+                    "stale": False,
+                },
+            )
         else:
             status["last_error"] = details.get("error") or "Unknown crawl failure"
 
@@ -326,22 +370,41 @@ def update_crawl_status(crawl_type, success, details=None):
 def summarize_freshness(now=None):
     state = load_state()
     now_dt = now or datetime.now(UTC)
+    startup_grace_minutes = int(os.getenv("ALERT_STARTUP_GRACE_MINUTES", "15"))
+    active_attempt_grace_minutes = int(
+        os.getenv("ACTIVE_CRAWL_GRACE_MINUTES", str(DEFAULT_ACTIVE_ATTEMPT_GRACE_MINUTES))
+    )
+    scheduler_boot_at = parse_iso(state.get("service_boots", {}).get("scheduler"))
+    within_startup_grace = False
+    if scheduler_boot_at:
+        boot_age = now_dt.replace(tzinfo=scheduler_boot_at.tzinfo) - scheduler_boot_at
+        within_startup_grace = boot_age <= timedelta(minutes=startup_grace_minutes)
     thresholds = {
-        "entries": int(os.getenv("ENTRIES_STALE_MINUTES", "360")),
-        "results": int(os.getenv("RESULTS_STALE_MINUTES", "30")),
-        "scratches": int(os.getenv("SCRATCHES_STALE_MINUTES", "20")),
+        "entries": int(os.getenv("ENTRIES_STALE_MINUTES", str(DEFAULT_ENTRIES_STALE_MINUTES))),
+        "results": int(os.getenv("RESULTS_STALE_MINUTES", str(DEFAULT_RESULTS_STALE_MINUTES))),
+        "scratches": int(os.getenv("SCRATCHES_STALE_MINUTES", str(DEFAULT_SCRATCHES_STALE_MINUTES))),
     }
 
     freshness = {}
     for crawl_type, threshold_minutes in thresholds.items():
         status = state.get("crawl_status", {}).get(crawl_type, {})
         last_success_at = parse_iso(status.get("last_success_at"))
+        last_attempt_at = parse_iso(status.get("last_attempt_at"))
         age_minutes = None
         stale = True
         if last_success_at:
             age_delta = now_dt.replace(tzinfo=last_success_at.tzinfo) - last_success_at
             age_minutes = int(age_delta.total_seconds() // 60)
             stale = age_minutes > threshold_minutes
+        elif within_startup_grace:
+            stale = False
+        in_progress = False
+        if last_attempt_at:
+            if not last_success_at or last_attempt_at > last_success_at:
+                attempt_age = now_dt.replace(tzinfo=last_attempt_at.tzinfo) - last_attempt_at
+                in_progress = attempt_age <= timedelta(minutes=active_attempt_grace_minutes)
+                if in_progress:
+                    stale = False
 
         freshness[crawl_type] = {
             "last_attempt_at": status.get("last_attempt_at"),
@@ -351,6 +414,8 @@ def summarize_freshness(now=None):
             "age_minutes": age_minutes,
             "stale": stale,
             "threshold_minutes": threshold_minutes,
+            "within_startup_grace": within_startup_grace,
+            "in_progress": in_progress,
         }
 
     return freshness, state.get("alerts", [])
@@ -371,7 +436,7 @@ def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False)
                     details=item,
                 )
             else:
-                resolve_alert(state, key)
+                resolve_alert(state, key, details=item)
 
         if during_racing_hours and today_summary_total == 0:
             upsert_alert(

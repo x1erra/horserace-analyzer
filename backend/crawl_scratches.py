@@ -890,7 +890,7 @@ def crawl_otb_changes():
     return total_saved
 
 
-def crawl_late_changes(reset_first=False):
+def crawl_late_changes(reset_first=False, preferred_tracks=None):
     """
     Main entry point for crawling changes.
     """
@@ -931,6 +931,10 @@ def crawl_late_changes(reset_first=False):
                 if len(parts) >= 1:
                     active_tracks.add(parts[0])
         
+        if preferred_tracks:
+            preferred_tracks = {code.upper() for code in preferred_tracks}
+            active_tracks = {code for code in active_tracks if code in preferred_tracks}
+
         logger.info(f"Active tracks to scan: {list(active_tracks)}")
         
         # EXECUTE RESET if requested
@@ -952,6 +956,8 @@ def crawl_late_changes(reset_first=False):
             logger.info(f"Found {len(track_links)} tracks with changes on Equibase HTML index")
             for link in track_links:
                 code = link['track_code']
+                if preferred_tracks and code.upper() not in preferred_tracks:
+                    continue
                 # Skip if we already did RSS for this track? 
                 # Maybe good to double check but duplicates are handled.
                 # If RSS fails, this might work (via PowerShell)
