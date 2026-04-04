@@ -40,9 +40,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY backend/ /app/backend/
 
-# Create necessary directories
-RUN mkdir -p /app/uploads /app/logs
-
 # Expose Flask port
 EXPOSE 5001
 
