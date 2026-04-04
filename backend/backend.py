@@ -20,7 +20,6 @@ from runtime_state import (
     get_dashboard_summary_snapshot,
     record_dashboard_summary_failure,
     snapshot_dashboard_summary,
-    summarize_freshness,
 )
 import traceback
 import pytz
@@ -54,19 +53,13 @@ def allowed_file(filename):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """One-stop system health endpoint for DB, crawler freshness, and runtime alerts."""
     try:
-        supabase = get_supabase_client()
-        # Test connection
-        supabase.table('hranalyzer_tracks').select('id').limit(1).execute()
-        freshness, alerts = summarize_freshness(datetime.utcnow())
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'version': '1.0.3',
-            'crawler': freshness,
-            'alerts': [alert for alert in alerts if alert.get('status') == 'open'],
-        })
+        from mcp_server import get_health as mcp_get_health
+
+        report = mcp_get_health()
+        status_code = 500 if report.get("status") == "unhealthy" else 200
+        return jsonify(report), status_code
     except Exception as e:
         traceback.print_exc()
         return jsonify({

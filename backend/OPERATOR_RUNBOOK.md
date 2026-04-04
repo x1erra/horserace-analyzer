@@ -30,20 +30,31 @@ MCP:
 curl -4 --max-time 5 -i -H 'Accept: text/event-stream' http://127.0.0.1:8001/mcp
 ```
 
-## Freshness
+## One-Stop Health Output
+
+Treat `/api/health` and MCP `get_health()` as the source of truth.
 
 Trust these fields first:
 - `status`
+- `status_label`
 - `summary`
-- `stale_crawlers`
+- `recommended_action`
+- `database.status`
+- `crawler_summary`
 
-For `get_feed_freshness()`:
-- `healthy`: crawlers are current
-- `warming_up`: startup grace is active after deploy/restart
-- `stale`: one or more crawlers are genuinely stale
-- `degraded`: crawler freshness is current, but another runtime alert is open
+Top-level states:
+- `ok`: system health looks good
+- `starting`: startup grace is active after restart/deploy
+- `monitor_delay`: live data exists, but freshness timestamps are lagging
+- `attention_needed`: one or more crawlers truly need investigation
+- `degraded`: crawler freshness is okay, but another runtime alert is open
+- `unhealthy`: database or core service health failed
 
-Do not infer outages from `last_success_at` alone without checking `status`.
+Do not infer outages from `last_success_at` alone.
+
+If a timestamp is `null`, read:
+- `crawlers.<name>.timestamps.state`
+- `crawlers.<name>.timestamps.message`
 
 ## Alerting
 

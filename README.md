@@ -154,6 +154,10 @@ Available MCP tools:
 See [backend/MCP_TOOLS.md](/Users/stevendamato/Projects/horserace-analyzer/backend/MCP_TOOLS.md) for usage guidance and how to interpret `get_feed_freshness()`.
 See [backend/OPERATOR_RUNBOOK.md](/Users/stevendamato/Projects/horserace-analyzer/backend/OPERATOR_RUNBOOK.md) for deployment, alert, and production triage guidance.
 
+Preferred monitoring entrypoint:
+- use `get_health()` or `/api/health` as the one-stop system report
+- `get_feed_freshness()` is a backward-compatible alias to the same core health report
+
 ## Database Schema
 
 All tables use `hranalyzer_` prefix:

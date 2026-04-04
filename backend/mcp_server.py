@@ -19,7 +19,7 @@ load_dotenv()
 # Import the shared Supabase client
 sys.path.insert(0, os.path.dirname(__file__))
 from supabase_client import get_supabase_client
-from runtime_state import summarize_freshness
+from runtime_state import get_recent_boot_at, summarize_freshness, utc_now
 
 
 mcp = FastMCP(
@@ -547,31 +547,70 @@ def _detect_pipeline_activity():
 
 def _describe_crawler_status(crawl_name, item):
     if item.get("within_startup_grace") and not item.get("last_success_at"):
-        return "Startup grace is active after deploy/restart, so timestamps may still be empty."
+        return "The service recently restarted and is still within startup grace, so a first successful timestamp may not exist yet."
     if item.get("stale"):
         threshold = item.get("threshold_minutes")
         if threshold:
-            return f"No successful {crawl_name} crawl has been recorded within the {threshold}-minute threshold."
+            return f"No successful {crawl_name} crawl has been recorded within the expected {threshold}-minute window."
         return f"No recent successful {crawl_name} crawl has been recorded."
     if item.get("in_progress"):
-        return "A crawl attempt is currently active or was started recently."
-    return "A recent successful crawl is recorded."
+        return "A crawl attempt is currently running or started recently."
+    return "A recent successful crawl timestamp is recorded."
+
+
+def _status_label(status):
+    return {
+        "ok": "Healthy",
+        "starting": "Starting Up",
+        "running": "In Progress",
+        "monitor_delay": "Monitor Delay",
+        "attention_needed": "Attention Needed",
+        "degraded": "Degraded",
+        "unhealthy": "Unhealthy",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _timestamp_state_for(item, public_status):
+    if item.get("last_success_at"):
+        return {
+            "state": "recorded",
+            "message": "A successful crawl timestamp is recorded.",
+        }
+    if item.get("within_startup_grace"):
+        return {
+            "state": "pending_first_success",
+            "message": "No successful timestamp is recorded yet because startup grace is still active after restart/deploy.",
+        }
+    if public_status == "monitor_delay":
+        return {
+            "state": "monitor_delay",
+            "message": "The database shows recent activity, but the freshness timestamp has not caught up yet.",
+        }
+    if item.get("in_progress"):
+        return {
+            "state": "attempt_running",
+            "message": "A crawl attempt is running, so the next successful timestamp may not be written yet.",
+        }
+    return {
+        "state": "missing",
+        "message": "No successful crawl timestamp is recorded right now.",
+    }
 
 
 def _freshness_guidance(status, summary):
-    if status == "healthy":
+    if status == "ok":
         return {
             "risk_level": "none",
             "recommended_action": "No action needed.",
             "operator_summary": summary,
         }
-    if status == "warming_up":
+    if status == "starting":
         return {
             "risk_level": "low",
             "recommended_action": "Wait for the first full crawler pass after redeploy/startup before treating this as a problem.",
             "operator_summary": summary,
         }
-    if status == "monitoring_desynced":
+    if status == "monitor_delay":
         return {
             "risk_level": "low",
             "recommended_action": (
@@ -590,6 +629,148 @@ def _freshness_guidance(status, summary):
         "risk_level": "high",
         "recommended_action": "Investigate scheduler logs and /api/health immediately. One or more crawlers are genuinely stale.",
         "operator_summary": summary,
+    }
+
+
+def _probe_database_health():
+    try:
+        supabase = get_supabase_client()
+        supabase.table("hranalyzer_tracks").select("id").limit(1).execute()
+        return {
+            "status": "connected",
+            "label": "Connected",
+            "message": "Successfully queried the primary database.",
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "status": "disconnected",
+            "label": "Disconnected",
+            "message": "The primary database check failed.",
+            "error": str(exc),
+        }
+
+
+def _build_system_health_report():
+    freshness, alerts = summarize_freshness()
+    open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
+    db = _probe_database_health()
+    scheduler_boot = get_recent_boot_at("scheduler")
+    pipeline_activity = _detect_pipeline_activity() if db["status"] == "connected" else {
+        "entries_data_present": False,
+        "results_data_present": False,
+        "scratches_data_present": False,
+        "any_recent_data": False,
+        "active_signals": [],
+    }
+
+    crawler = {}
+    healthy_crawlers = []
+    starting_crawlers = []
+    running_crawlers = []
+    monitor_delay_crawlers = []
+    attention_needed_crawlers = []
+
+    for crawl_name, item in freshness.items():
+        signal_key = f"{crawl_name}_data_present"
+        public_status = "ok"
+        if item.get("within_startup_grace") and not item.get("last_success_at"):
+            public_status = "starting"
+            starting_crawlers.append(crawl_name)
+        elif item.get("stale") and pipeline_activity.get(signal_key):
+            public_status = "monitor_delay"
+            monitor_delay_crawlers.append(crawl_name)
+        elif item.get("stale"):
+            public_status = "attention_needed"
+            attention_needed_crawlers.append(crawl_name)
+        elif item.get("in_progress"):
+            public_status = "running"
+            running_crawlers.append(crawl_name)
+        else:
+            healthy_crawlers.append(crawl_name)
+
+        crawler[crawl_name] = {
+            "last_attempt_at": item.get("last_attempt_at"),
+            "last_success_at": item.get("last_success_at"),
+            "last_error": item.get("last_error"),
+            "last_details": item.get("last_details"),
+            "age_minutes": item.get("age_minutes"),
+            "threshold_minutes": item.get("threshold_minutes"),
+            "status": public_status,
+            "status_label": _status_label(public_status),
+            "reason": _describe_crawler_status(crawl_name, item),
+            "timestamps": {
+                "last_success_at": item.get("last_success_at"),
+                "last_attempt_at": item.get("last_attempt_at"),
+                **_timestamp_state_for(item, public_status),
+            },
+        }
+
+    if db["status"] != "connected":
+        status = "unhealthy"
+        summary = "The database connection check failed."
+    elif attention_needed_crawlers:
+        status = "attention_needed"
+        summary = f"One or more crawlers need attention: {', '.join(attention_needed_crawlers)}."
+    elif starting_crawlers:
+        status = "starting"
+        summary = "The services recently restarted and crawler timestamps are still being established."
+    elif monitor_delay_crawlers:
+        status = "monitor_delay"
+        summary = (
+            "Recent database activity is present, but one or more freshness timestamps are lagging behind the live pipeline."
+        )
+    elif open_alerts:
+        status = "degraded"
+        summary = f"There are {len(open_alerts)} open runtime alert(s), but crawler freshness is otherwise current."
+    else:
+        status = "ok"
+        if running_crawlers:
+            summary = f"System is healthy. Active crawler work is in progress: {', '.join(running_crawlers)}."
+        else:
+            summary = "System is healthy. Database connectivity and crawler freshness look good."
+
+    guidance = _freshness_guidance(status, summary)
+
+    return {
+        "status": status,
+        "status_label": _status_label(status),
+        "summary": summary,
+        "recommended_action": guidance["recommended_action"],
+        "risk_level": guidance["risk_level"],
+        "operator_summary": guidance["operator_summary"],
+        "checked_at": utc_now(),
+        "version": "1.0.3",
+        "runtime": {
+            "scheduler_boot_at": scheduler_boot.isoformat().replace("+00:00", "Z") if scheduler_boot else None,
+        },
+        "database": db,
+        "database_status": db["status"],
+        "crawlers": crawler,
+        "crawler": crawler,
+        "crawler_summary": {
+            "healthy": healthy_crawlers,
+            "starting": starting_crawlers,
+            "running": running_crawlers,
+            "monitor_delay": monitor_delay_crawlers,
+            "attention_needed": attention_needed_crawlers,
+        },
+        "open_alerts": open_alerts,
+        "alerts": open_alerts,
+        "open_alert_count": len(open_alerts),
+        "alert_count": len(open_alerts),
+        "pipeline_activity": pipeline_activity,
+        "how_to_read": (
+            "Trust status first. Use ok, starting, monitor_delay, attention_needed, degraded, and unhealthy as the only top-level states. "
+            "Per-crawler timestamps explain whether a timestamp is recorded, still pending after restart, delayed behind live data, or missing."
+        ),
+        "legacy_compatibility": {
+            "all_crawlers_fresh": not attention_needed_crawlers and not starting_crawlers and not monitor_delay_crawlers,
+            "attention_needed_crawlers": attention_needed_crawlers,
+            "starting_crawlers": starting_crawlers,
+            "running_crawlers": running_crawlers,
+            "monitor_delay_crawlers": monitor_delay_crawlers,
+        },
     }
 
 
@@ -834,13 +1015,8 @@ def fetch_scratch_feed(mode="upcoming", page=1, limit=20, track="All", start_dat
 
 @mcp.tool()
 def get_health() -> dict:
-    """Check database connectivity and MCP server health."""
-    try:
-        supabase = get_supabase_client()
-        supabase.table("hranalyzer_tracks").select("id").limit(1).execute()
-        return {"status": "healthy", "database": "connected", "version": "1.0.3"}
-    except Exception as exc:
-        return {"status": "unhealthy", "error": str(exc)}
+    """Get the full one-stop system health report."""
+    return _build_system_health_report()
 
 
 @mcp.tool()
@@ -972,95 +1148,10 @@ def get_filter_options(summary_date: str = "") -> dict:
 
 @mcp.tool()
 def get_feed_freshness() -> dict:
-    """Expose crawler freshness and open alerts directly to MCP consumers."""
-    freshness, alerts = summarize_freshness()
-    open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
-    crawler = {}
-    stale_crawlers = []
-    fresh_crawlers = []
-    warming_up_crawlers = []
-    in_progress_crawlers = []
-
-    for crawl_name, item in freshness.items():
-        crawl_status = "fresh"
-        if item.get("within_startup_grace") and not item.get("last_success_at"):
-            crawl_status = "warming_up"
-            warming_up_crawlers.append(crawl_name)
-        elif item.get("stale"):
-            crawl_status = "stale"
-            stale_crawlers.append(crawl_name)
-        elif item.get("in_progress"):
-            crawl_status = "in_progress"
-            in_progress_crawlers.append(crawl_name)
-        else:
-            fresh_crawlers.append(crawl_name)
-
-        crawler[crawl_name] = {
-            **item,
-            "status": crawl_status,
-            "reason": _describe_crawler_status(crawl_name, item),
-        }
-
-    pipeline_activity = _detect_pipeline_activity()
-
-    if stale_crawlers:
-        overall_status = "stale"
-        summary = f"Stale crawlers: {', '.join(stale_crawlers)}."
-    elif warming_up_crawlers:
-        overall_status = "warming_up"
-        summary = (
-            "Crawler startup grace is active. Freshness timestamps may still be empty while services warm up."
-        )
-    elif open_alerts:
-        overall_status = "degraded"
-        summary = f"There are {len(open_alerts)} open runtime alert(s), but crawler freshness is current."
-    elif in_progress_crawlers:
-        overall_status = "healthy"
-        summary = f"All crawlers are healthy. Active crawl(s): {', '.join(in_progress_crawlers)}."
-    else:
-        overall_status = "healthy"
-        summary = "All crawler freshness checks are healthy."
-
-    monitoring_status = overall_status
-    if overall_status == "stale" and pipeline_activity.get("any_recent_data"):
-        overall_status = "healthy"
-        monitoring_status = "desynced"
-        active_signals = pipeline_activity.get("active_signals", [])
-        signal_text = ", ".join(active_signals) if active_signals else "recent race data"
-        summary = (
-            f"Recent database activity exists for {signal_text}. The live pipeline appears healthy, "
-            "but freshness timestamps are lagging behind the current crawler state."
-        )
-    elif overall_status == "warming_up" and pipeline_activity.get("any_recent_data"):
-        summary = (
-            "Startup grace is active and recent database activity is already visible. "
-            "Crawler timestamps may still be settling after redeploy."
-        )
-
-    guidance = _freshness_guidance(overall_status, summary)
-
-    return {
-        "crawler": crawler,
-        "alerts": open_alerts,
-        "status": overall_status,
-        "monitoring_status": monitoring_status,
-        "summary": summary,
-        "risk_level": guidance["risk_level"],
-        "recommended_action": guidance["recommended_action"],
-        "operator_summary": guidance["operator_summary"],
-        "all_crawlers_fresh": not stale_crawlers and not warming_up_crawlers,
-        "stale_crawlers": stale_crawlers,
-        "fresh_crawlers": fresh_crawlers,
-        "warming_up_crawlers": warming_up_crawlers,
-        "in_progress_crawlers": in_progress_crawlers,
-        "alert_count": len(open_alerts),
-        "pipeline_activity": pipeline_activity,
-        "how_to_read": (
-            "Use status and stale_crawlers first. Per-crawler status will be one of fresh, in_progress, "
-            "warming_up, or stale. monitoring_status indicates whether the freshness monitor itself is lagging "
-            "behind live pipeline activity."
-        ),
-    }
+    """Backward-compatible alias for the one-stop system health report."""
+    report = _build_system_health_report()
+    report["tool_alias"] = "get_feed_freshness"
+    return report
 
 
 @mcp.tool()
