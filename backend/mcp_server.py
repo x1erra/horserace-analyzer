@@ -19,7 +19,7 @@ load_dotenv()
 # Import the shared Supabase client
 sys.path.insert(0, os.path.dirname(__file__))
 from supabase_client import get_supabase_client
-from runtime_state import get_recent_boot_at, summarize_freshness, utc_now
+from runtime_state import get_recent_boot_at, probe_database_health, summarize_freshness, utc_now
 
 
 mcp = FastMCP(
@@ -632,29 +632,10 @@ def _freshness_guidance(status, summary):
     }
 
 
-def _probe_database_health():
-    try:
-        supabase = get_supabase_client()
-        supabase.table("hranalyzer_tracks").select("id").limit(1).execute()
-        return {
-            "status": "connected",
-            "label": "Connected",
-            "message": "Successfully queried the primary database.",
-            "error": None,
-        }
-    except Exception as exc:
-        return {
-            "status": "disconnected",
-            "label": "Disconnected",
-            "message": "The primary database check failed.",
-            "error": str(exc),
-        }
-
-
 def _build_system_health_report():
     freshness, alerts = summarize_freshness()
     open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
-    db = _probe_database_health()
+    db = probe_database_health()
     scheduler_boot = get_recent_boot_at("scheduler")
     pipeline_activity = _detect_pipeline_activity() if db["status"] == "connected" else {
         "entries_data_present": False,

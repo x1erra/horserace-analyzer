@@ -18,6 +18,7 @@ DEFAULT_RESULTS_STALE_MINUTES = 30
 DEFAULT_SCRATCHES_STALE_MINUTES = 20
 DEFAULT_ACTIVE_ATTEMPT_GRACE_MINUTES = 20
 DEFAULT_CRAWL_ALERT_CONFIRM_EVALUATIONS = 3
+DEFAULT_DATABASE_ALERT_CONFIRM_EVALUATIONS = 2
 ALERT_DISPATCH_TIMEOUT_SECONDS = 10
 
 logger = logging.getLogger(__name__)
@@ -229,6 +230,27 @@ def _get_alert_webhook_url():
     return os.getenv("ALERT_WEBHOOK_URL")
 
 
+def probe_database_health():
+    try:
+        from supabase_client import get_supabase_client
+
+        supabase = get_supabase_client()
+        supabase.table("hranalyzer_tracks").select("id").limit(1).execute()
+        return {
+            "status": "connected",
+            "label": "Connected",
+            "message": "Successfully queried the primary database.",
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "status": "disconnected",
+            "label": "Disconnected",
+            "message": "The primary database check failed.",
+            "error": str(exc),
+        }
+
+
 def _alert_color(severity):
     return {
         "critical": 15158332,
@@ -314,6 +336,14 @@ def _describe_alert_reason(alert, details, is_resolved):
         reason += "."
         if latest_error:
             reason += f" Latest error: {latest_error}"
+        return reason
+
+    if key == "database-connectivity":
+        if is_resolved:
+            return "The primary database check is passing again."
+        reason = "The primary database check failed."
+        if last_error:
+            reason += f" Latest error: {last_error}"
         return reason
 
     if key == "dashboard-zero-races-during-racing-hours":
@@ -562,8 +592,43 @@ def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False,
     required_stale_evaluations = int(
         os.getenv("CRAWL_ALERT_CONFIRM_EVALUATIONS", str(DEFAULT_CRAWL_ALERT_CONFIRM_EVALUATIONS))
     )
+    required_db_evaluations = int(
+        os.getenv("DATABASE_ALERT_CONFIRM_EVALUATIONS", str(DEFAULT_DATABASE_ALERT_CONFIRM_EVALUATIONS))
+    )
+    db_health = probe_database_health()
 
     def mutator(state):
+        db_status = state.setdefault("database_status", {})
+        if db_health["status"] != "connected":
+            failure_evaluations = int(db_status.get("failure_evaluations", 0)) + 1
+            db_status["failure_evaluations"] = failure_evaluations
+            db_status.setdefault("failed_since", utc_now())
+
+            if failure_evaluations >= required_db_evaluations:
+                upsert_alert(
+                    state,
+                    key="database-connectivity",
+                    severity="critical",
+                    message="Database connectivity degraded",
+                    details={
+                        **db_health,
+                        "failed_since": db_status.get("failed_since"),
+                        "failure_evaluations": failure_evaluations,
+                        "last_error": db_health.get("error"),
+                    },
+                )
+        else:
+            db_status.pop("failure_evaluations", None)
+            db_status.pop("failed_since", None)
+            resolve_alert(
+                state,
+                "database-connectivity",
+                details={
+                    **db_health,
+                    "last_error": None,
+                },
+            )
+
         if include_crawl_alerts:
             for crawl_type, item in freshness.items():
                 key = f"crawl-stale:{crawl_type}"

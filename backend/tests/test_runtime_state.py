@@ -278,6 +278,81 @@ class TestRuntimeState(unittest.TestCase):
         alert = next(alert for alert in state["alerts"] if alert["key"] == "crawl-stale:entries")
         self.assertEqual(alert["status"], "resolved")
 
+    def test_database_connectivity_alert_opens_after_repeated_failures(self):
+        fresh_payload = (
+            {
+                "entries": {"stale": False},
+                "results": {"stale": False},
+                "scratches": {"stale": False},
+            },
+            [],
+        )
+
+        with patch.object(self.runtime_state, "summarize_freshness", return_value=fresh_payload), patch.object(
+            self.runtime_state,
+            "probe_database_health",
+            return_value={
+                "status": "disconnected",
+                "label": "Disconnected",
+                "message": "The primary database check failed.",
+                "error": "timed out",
+            },
+        ):
+            self.runtime_state.evaluate_runtime_alerts()
+            state = self.runtime_state.load_state()
+            self.assertEqual([a for a in state["alerts"] if a.get("status") == "open"], [])
+
+            self.runtime_state.evaluate_runtime_alerts()
+            state = self.runtime_state.load_state()
+            open_alerts = [a for a in state["alerts"] if a.get("status") == "open"]
+
+        self.assertEqual(len(open_alerts), 1)
+        self.assertEqual(open_alerts[0]["key"], "database-connectivity")
+        self.assertEqual(open_alerts[0]["details"]["failure_evaluations"], 2)
+        self.assertEqual(open_alerts[0]["details"]["last_error"], "timed out")
+
+    def test_database_connectivity_alert_resolves_after_recovery(self):
+        fresh_payload = (
+            {
+                "entries": {"stale": False},
+                "results": {"stale": False},
+                "scratches": {"stale": False},
+            },
+            [],
+        )
+
+        with patch.object(self.runtime_state, "summarize_freshness", return_value=fresh_payload), patch.object(
+            self.runtime_state,
+            "probe_database_health",
+            side_effect=[
+                {
+                    "status": "disconnected",
+                    "label": "Disconnected",
+                    "message": "The primary database check failed.",
+                    "error": "timed out",
+                },
+                {
+                    "status": "disconnected",
+                    "label": "Disconnected",
+                    "message": "The primary database check failed.",
+                    "error": "timed out",
+                },
+                {
+                    "status": "connected",
+                    "label": "Connected",
+                    "message": "Successfully queried the primary database.",
+                    "error": None,
+                },
+            ],
+        ):
+            self.runtime_state.evaluate_runtime_alerts()
+            self.runtime_state.evaluate_runtime_alerts()
+            self.runtime_state.evaluate_runtime_alerts()
+
+        state = self.runtime_state.load_state()
+        alert = next(alert for alert in state["alerts"] if alert["key"] == "database-connectivity")
+        self.assertEqual(alert["status"], "resolved")
+
 
 if __name__ == "__main__":
     unittest.main()

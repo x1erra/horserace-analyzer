@@ -379,7 +379,7 @@ class TestMcpServer(unittest.TestCase):
             },
         ), patch.object(
             mcp_server,
-            "_probe_database_health",
+            "probe_database_health",
             return_value={"status": "connected", "label": "Connected", "message": "Successfully queried the primary database.", "error": None},
         ):
             result = mcp_server.get_health()
@@ -759,7 +759,16 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["matches"], ambiguous_matches)
 
     def test_get_health_returns_unhealthy_on_connection_failure(self):
-        with patch.object(mcp_server, "get_supabase_client", side_effect=ValueError("missing key")):
+        with patch.object(
+            mcp_server,
+            "probe_database_health",
+            return_value={
+                "status": "disconnected",
+                "label": "Disconnected",
+                "message": "The primary database check failed.",
+                "error": "missing key",
+            },
+        ):
             result = mcp_server.get_health()
 
         self.assertEqual(result["status"], "unhealthy")
