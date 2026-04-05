@@ -605,7 +605,7 @@ def _status_label(status):
         "ok": "Healthy",
         "starting": "Starting Up",
         "running": "In Progress",
-        "monitor_delay": "Monitor Delay",
+        "recovering": "Recovering",
         "attention_needed": "Attention Needed",
         "degraded": "Degraded",
         "unhealthy": "Unhealthy",
@@ -623,10 +623,10 @@ def _timestamp_state_for(item, public_status):
             "state": "pending_first_success",
             "message": "No successful timestamp is recorded yet because startup grace is still active after restart/deploy.",
         }
-    if public_status == "monitor_delay":
+    if public_status == "recovering":
         return {
-            "state": "monitor_delay",
-            "message": "The database shows recent activity, but the freshness timestamp has not caught up yet.",
+            "state": "catching_up",
+            "message": "The database shows recent activity, and the freshness timestamp is still catching up.",
         }
     if item.get("in_progress"):
         return {
@@ -652,11 +652,11 @@ def _freshness_guidance(status, summary):
             "recommended_action": "Wait for the first full crawler pass after redeploy/startup before treating this as a problem.",
             "operator_summary": summary,
         }
-    if status == "monitor_delay":
+    if status == "recovering":
         return {
             "risk_level": "low",
             "recommended_action": (
-                "Data is flowing, but crawler freshness timestamps are behind. Monitor scheduler logs and only escalate "
+                "Data is flowing, but crawler freshness timestamps are still catching up. Monitor scheduler logs and only escalate "
                 "if this persists beyond one normal crawler loop."
             ),
             "operator_summary": summary,
@@ -719,7 +719,7 @@ def _build_system_health_report():
     healthy_crawlers = []
     starting_crawlers = []
     running_crawlers = []
-    monitor_delay_crawlers = []
+    recovering_crawlers = []
     attention_needed_crawlers = []
 
     for crawl_name, item in freshness.items():
@@ -729,8 +729,8 @@ def _build_system_health_report():
             public_status = "starting"
             starting_crawlers.append(crawl_name)
         elif item.get("stale") and pipeline_activity.get(signal_key):
-            public_status = "monitor_delay"
-            monitor_delay_crawlers.append(crawl_name)
+            public_status = "recovering"
+            recovering_crawlers.append(crawl_name)
         elif item.get("stale"):
             public_status = "attention_needed"
             attention_needed_crawlers.append(crawl_name)
@@ -775,10 +775,10 @@ def _build_system_health_report():
     elif starting_crawlers:
         status = "starting"
         summary = "The services recently restarted and crawler timestamps are still being established."
-    elif monitor_delay_crawlers:
-        status = "monitor_delay"
+    elif recovering_crawlers:
+        status = "recovering"
         summary = (
-            "Recent database activity is present, but one or more freshness timestamps are lagging behind the live pipeline."
+            "Recent database activity is present, and one or more freshness timestamps are still catching up."
         )
     elif open_alerts:
         status = "degraded"
@@ -812,7 +812,7 @@ def _build_system_health_report():
             "healthy": healthy_crawlers,
             "starting": starting_crawlers,
             "running": running_crawlers,
-            "monitor_delay": monitor_delay_crawlers,
+            "recovering": recovering_crawlers,
             "attention_needed": attention_needed_crawlers,
         },
         "open_alerts": open_alerts,
@@ -821,15 +821,16 @@ def _build_system_health_report():
         "alert_count": len(open_alerts),
         "pipeline_activity": pipeline_activity,
         "how_to_read": (
-            "Trust status first. Use ok, starting, monitor_delay, attention_needed, degraded, and unhealthy as the only top-level states. "
+            "Trust status first. Use ok, starting, recovering, attention_needed, degraded, and unhealthy as the only top-level states. "
             "Per-crawler timestamps explain whether a timestamp is recorded, still pending after restart, delayed behind live data, or missing."
         ),
         "legacy_compatibility": {
-            "all_crawlers_fresh": not attention_needed_crawlers and not starting_crawlers and not monitor_delay_crawlers,
+            "all_crawlers_fresh": not attention_needed_crawlers and not starting_crawlers and not recovering_crawlers,
             "attention_needed_crawlers": attention_needed_crawlers,
             "starting_crawlers": starting_crawlers,
             "running_crawlers": running_crawlers,
-            "monitor_delay_crawlers": monitor_delay_crawlers,
+            "recovering_crawlers": recovering_crawlers,
+            "monitor_delay_crawlers": recovering_crawlers,
         },
     }
 

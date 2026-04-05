@@ -322,7 +322,7 @@ class TestMcpServer(unittest.TestCase):
         self.assertIn("Wait for the first full crawler pass", result["recommended_action"])
         self.assertEqual(result["crawlers"]["entries"]["timestamps"]["state"], "pending_first_success")
 
-    def test_get_feed_freshness_reports_monitoring_desync_when_data_exists(self):
+    def test_get_feed_freshness_reports_recovering_when_data_exists(self):
         with patch.object(
             mcp_server,
             "summarize_freshness",
@@ -337,13 +337,13 @@ class TestMcpServer(unittest.TestCase):
         ):
             result = mcp_server.get_feed_freshness()
 
-        self.assertEqual(result["status"], "monitor_delay")
-        self.assertEqual(set(result["crawler_summary"]["monitor_delay"]), {"entries", "results", "scratches"})
-        self.assertIn("freshness timestamps are lagging", result["summary"])
+        self.assertEqual(result["status"], "recovering")
+        self.assertEqual(set(result["crawler_summary"]["recovering"]), {"entries", "results", "scratches"})
+        self.assertIn("still catching up", result["summary"])
         self.assertTrue(result["pipeline_activity"]["any_recent_data"])
         self.assertEqual(result["risk_level"], "low")
-        self.assertIn("Data is flowing, but crawler freshness timestamps are behind", result["recommended_action"])
-        self.assertEqual(result["crawlers"]["entries"]["status"], "monitor_delay")
+        self.assertIn("crawler freshness timestamps are still catching up", result["recommended_action"])
+        self.assertEqual(result["crawlers"]["entries"]["status"], "recovering")
         self.assertEqual(result["crawlers"]["entries"]["timestamps"]["state"], "recorded")
 
     def test_get_health_returns_same_one_stop_report_shape(self):

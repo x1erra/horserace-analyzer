@@ -45,7 +45,7 @@ Trust these fields first:
 Top-level states:
 - `ok`: system health looks good
 - `starting`: startup grace is active after restart/deploy
-- `monitor_delay`: live data exists, but freshness timestamps are lagging
+- `recovering`: live data exists, and freshness timestamps are still catching up
 - `attention_needed`: one or more crawlers truly need investigation
 - `degraded`: crawler freshness is okay, but another runtime alert is open
 - `unhealthy`: database or core service health failed

@@ -30,7 +30,7 @@ Do not invent your own interpretation from raw timestamps alone.
 Trust `status` first:
 - `ok`: system health looks good
 - `starting`: the stack recently restarted and timestamps are still being established
-- `monitor_delay`: live data is present in the database, but freshness timestamps are lagging behind
+- `recovering`: live data is present in the database, and freshness timestamps are still catching up
 - `attention_needed`: one or more crawlers truly need investigation
 - `degraded`: crawler freshness is okay, but another runtime alert is open
 - `unhealthy`: the database or core service health check failed
@@ -47,7 +47,7 @@ Each crawler under `crawlers.<name>.status` will be one of:
 - `ok`
 - `starting`
 - `running`
-- `monitor_delay`
+- `recovering`
 - `attention_needed`
 
 Each crawler also includes:
@@ -68,7 +68,7 @@ Instead, read `crawlers.<name>.timestamps.state`:
 - `recorded`: a successful timestamp exists
 - `pending_first_success`: startup grace is active after restart/deploy
 - `attempt_running`: a crawl is currently in progress
-- `monitor_delay`: DB activity exists but freshness timestamps have not caught up yet
+- `recovering`: DB activity exists and freshness timestamps have not caught up yet
 - `missing`: no successful timestamp is currently recorded
 
 ## Health And Monitoring Tools
@@ -99,13 +99,13 @@ Important fields:
 - `crawler_summary.healthy`
 - `crawler_summary.starting`
 - `crawler_summary.running`
-- `crawler_summary.monitor_delay`
+- `crawler_summary.recovering`
 - `crawler_summary.attention_needed`
 
 Usage guidance:
 - if `status="ok"`, the system is healthy
 - if `status="starting"`, wait for the first full crawler pass
-- if `status="monitor_delay"`, do not call it an outage; monitor logs and timestamps
+- if `status="recovering"`, do not call it an outage; monitor logs and timestamps
 - if `status="attention_needed"`, escalate and inspect scheduler behavior
 - if `status="unhealthy"`, treat it as a real service/database issue
 
@@ -364,7 +364,7 @@ Use:
 Interpretation:
 - if `status="ok"`: no action needed
 - if `status="starting"`: wait for startup grace to clear
-- if `status="monitor_delay"`: monitor, do not call it an outage yet
+- if `status="recovering"`: monitor, do not call it an outage yet
 - if `status="attention_needed"`: investigate scheduler/crawler behavior
 
 ### Example: scratches for Gulfstream race 4 on April 6
@@ -395,7 +395,7 @@ get_results(track="SA", race_date="2026-04-02", race_number=8)
 
 Do not:
 - infer outages from `last_success_at=null` without checking `status`
-- call `monitor_delay` a crawler outage
+- call `recovering` a crawler outage
 - call `starting` a failure state
 - assume `get_changes` and `get_scratches` should return identical records
 - assume missing claimant details in `get_claims` means the endpoint is broken
