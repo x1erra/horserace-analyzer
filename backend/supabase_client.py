@@ -7,12 +7,18 @@ import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
+try:
+    from supabase.lib.client_options import SyncClientOptions
+except Exception:  # pragma: no cover - test stubs may not expose submodules
+    SyncClientOptions = None
+
 # Load environment variables
 load_dotenv()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://vytyhtddhplcrvvgidyy.supabase.co')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE')
+SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv('SUPABASE_POSTGREST_TIMEOUT_SECONDS', '15'))
 
 # Singleton client instance
 _supabase_client: Client = None
@@ -37,7 +43,17 @@ def get_supabase_client() -> Client:
                 "Please check your .env file."
             )
 
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        client_kwargs = {}
+        if SyncClientOptions is not None:
+            client_kwargs["options"] = SyncClientOptions(
+                postgrest_client_timeout=SUPABASE_POSTGREST_TIMEOUT_SECONDS,
+            )
+
+        _supabase_client = create_client(
+            SUPABASE_URL,
+            SUPABASE_SERVICE_KEY,
+            **client_kwargs,
+        )
 
     return _supabase_client
 
