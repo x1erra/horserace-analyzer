@@ -4,6 +4,8 @@ Provides a singleton Supabase client for database operations
 """
 
 import os
+import time
+import httpx
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -19,12 +21,53 @@ load_dotenv()
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://vytyhtddhplcrvvgidyy.supabase.co')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE')
 SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv('SUPABASE_POSTGREST_TIMEOUT_SECONDS', '15'))
+SUPABASE_CLIENT_MAX_AGE_SECONDS = float(os.getenv('SUPABASE_CLIENT_MAX_AGE_SECONDS', '60'))
 
 # Singleton client instance
 _supabase_client: Client = None
+_supabase_client_created_at: float = 0.0
 
 
-def get_supabase_client() -> Client:
+def _close_client(client: Client) -> None:
+    try:
+        client.postgrest.aclose()
+    except Exception:
+        pass
+
+
+def reset_supabase_client() -> None:
+    global _supabase_client, _supabase_client_created_at
+
+    if _supabase_client is not None:
+        _close_client(_supabase_client)
+    _supabase_client = None
+    _supabase_client_created_at = 0.0
+
+
+def _build_client_kwargs():
+    client_kwargs = {}
+
+    if SyncClientOptions is not None:
+        httpx_client = httpx.Client(
+            timeout=httpx.Timeout(SUPABASE_POSTGREST_TIMEOUT_SECONDS),
+            follow_redirects=True,
+            http2=False,
+            trust_env=False,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=0,
+                keepalive_expiry=0,
+            ),
+        )
+        client_kwargs["options"] = SyncClientOptions(
+            postgrest_client_timeout=SUPABASE_POSTGREST_TIMEOUT_SECONDS,
+            httpx_client=httpx_client,
+        )
+
+    return client_kwargs
+
+
+def get_supabase_client(force_refresh: bool = False) -> Client:
     """
     Get or create the Supabase client singleton
 
@@ -34,7 +77,16 @@ def get_supabase_client() -> Client:
     Raises:
         ValueError: If SUPABASE_SERVICE_KEY is not set
     """
-    global _supabase_client
+    global _supabase_client, _supabase_client_created_at
+
+    should_refresh = force_refresh
+    if _supabase_client is not None and SUPABASE_CLIENT_MAX_AGE_SECONDS > 0:
+        should_refresh = should_refresh or (
+            (time.time() - _supabase_client_created_at) >= SUPABASE_CLIENT_MAX_AGE_SECONDS
+        )
+
+    if should_refresh:
+        reset_supabase_client()
 
     if _supabase_client is None:
         if not SUPABASE_SERVICE_KEY:
@@ -43,17 +95,13 @@ def get_supabase_client() -> Client:
                 "Please check your .env file."
             )
 
-        client_kwargs = {}
-        if SyncClientOptions is not None:
-            client_kwargs["options"] = SyncClientOptions(
-                postgrest_client_timeout=SUPABASE_POSTGREST_TIMEOUT_SECONDS,
-            )
-
+        client_kwargs = _build_client_kwargs()
         _supabase_client = create_client(
             SUPABASE_URL,
             SUPABASE_SERVICE_KEY,
             **client_kwargs,
         )
+        _supabase_client_created_at = time.time()
 
     return _supabase_client
 
