@@ -564,6 +564,42 @@ def _describe_crawler_status(crawl_name, item):
     return "A recent successful crawl timestamp is recorded."
 
 
+def _summarize_health_error(error_value):
+    """Condense noisy upstream error payloads into operator-readable text."""
+    if not error_value:
+        return None
+
+    text = str(error_value).strip()
+    lowered = text.lower()
+
+    if "error code 521" in lowered or "'code': 521" in lowered or "web server is down" in lowered:
+        return "Supabase upstream returned Cloudflare 521 (web server down)."
+    if "read operation timed out" in lowered:
+        return "The database request timed out."
+    if len(text) > 220:
+        return f"{text[:217]}..."
+    return text
+
+
+def _classify_crawler_issue(item, public_status):
+    """Separate active failures from historical residue for health reporting."""
+    summarized = _summarize_health_error(item.get("last_error"))
+    if not summarized:
+        return None, None
+
+    if public_status == "attention_needed" or (public_status == "running" and not item.get("last_success_at")):
+        return summarized, None
+
+    if item.get("last_success_at"):
+        return None, {
+            "message": summarized,
+            "historical": True,
+            "note": "This reflects the most recent prior failure, not the current crawler state.",
+        }
+
+    return summarized, None
+
+
 def _status_label(status):
     return {
         "ok": "Healthy",
@@ -704,11 +740,11 @@ def _build_system_health_report():
         else:
             healthy_crawlers.append(crawl_name)
 
+        current_issue, recent_incident = _classify_crawler_issue(item, public_status)
+
         crawler[crawl_name] = {
             "last_attempt_at": item.get("last_attempt_at"),
             "last_success_at": item.get("last_success_at"),
-            "last_error": item.get("last_error"),
-            "last_details": item.get("last_details"),
             "age_minutes": item.get("age_minutes"),
             "threshold_minutes": item.get("threshold_minutes"),
             "status": public_status,
@@ -720,6 +756,12 @@ def _build_system_health_report():
                 **_timestamp_state_for(item, public_status),
             },
         }
+        if current_issue:
+            crawler[crawl_name]["current_issue"] = current_issue
+        if recent_incident:
+            crawler[crawl_name]["recent_incident"] = recent_incident
+        if public_status == "attention_needed" and item.get("last_details"):
+            crawler[crawl_name]["last_details"] = item.get("last_details")
 
     if db["status"] == "disconnected":
         status = "unhealthy"

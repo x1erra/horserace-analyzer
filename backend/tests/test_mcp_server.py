@@ -353,7 +353,7 @@ class TestMcpServer(unittest.TestCase):
             return_value=(
                 {
                     "entries": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:04:07Z", "last_attempt_at": "2026-04-03T04:04:07Z"},
-                    "results": {"stale": False, "in_progress": True, "within_startup_grace": False, "last_success_at": "2026-04-03T04:00:00Z", "last_attempt_at": "2026-04-03T04:05:00Z"},
+                    "results": {"stale": False, "in_progress": True, "within_startup_grace": False, "last_success_at": "2026-04-03T04:00:00Z", "last_attempt_at": "2026-04-03T04:05:00Z", "last_error": "The read operation timed out"},
                     "scratches": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:03:00Z", "last_attempt_at": "2026-04-03T04:03:00Z"},
                 },
                 [],
@@ -379,6 +379,13 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["database"]["status"], "connected")
         self.assertEqual(result["crawlers"]["results"]["status"], "running")
         self.assertEqual(result["status_label"], "Healthy")
+        self.assertNotIn("last_error", result["crawlers"]["results"])
+        self.assertNotIn("current_issue", result["crawlers"]["results"])
+        self.assertEqual(
+            result["crawlers"]["results"]["recent_incident"]["message"],
+            "The database request timed out.",
+        )
+        self.assertTrue(result["crawlers"]["results"]["recent_incident"]["historical"])
 
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
@@ -765,6 +772,41 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["status"], "unhealthy")
         self.assertEqual(result["database"]["status"], "disconnected")
         self.assertIn("missing key", result["database"]["error"])
+
+    def test_get_health_keeps_active_issue_for_attention_needed_crawler(self):
+        with patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {
+                        "stale": True,
+                        "in_progress": False,
+                        "within_startup_grace": False,
+                        "last_success_at": None,
+                        "last_attempt_at": "2026-04-03T04:05:00Z",
+                        "last_error": "Error code 521",
+                        "last_details": {"phase": "today"},
+                    },
+                    "results": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:00:00Z"},
+                    "scratches": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:03:00Z"},
+                },
+                [],
+            ),
+        ), patch.object(
+            mcp_server,
+            "probe_database_health",
+            return_value={"status": "connected", "label": "Connected", "message": "Successfully queried the primary database.", "error": None},
+        ):
+            result = mcp_server.get_health()
+
+        self.assertEqual(result["status"], "attention_needed")
+        self.assertEqual(
+            result["crawlers"]["entries"]["current_issue"],
+            "Supabase upstream returned Cloudflare 521 (web server down).",
+        )
+        self.assertNotIn("recent_incident", result["crawlers"]["entries"])
+        self.assertEqual(result["crawlers"]["entries"]["last_details"], {"phase": "today"})
 
     def test_get_changes_bulk_hydrates_race_and_entry_context(self):
         today = "2026-03-31"
