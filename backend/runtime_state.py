@@ -73,6 +73,7 @@ def _empty_state():
         "version": STATE_VERSION,
         "service_boots": {},
         "crawl_status": {},
+        "database_health": {},
         "dashboard_summaries": {},
         "api_snapshots": {},
         "summary_failures": {},
@@ -145,6 +146,24 @@ def get_api_payload_snapshot(snapshot_key):
     state = load_state()
     snapshot = state.get("api_snapshots", {}).get(str(snapshot_key))
     return snapshot if isinstance(snapshot, dict) else None
+
+
+def update_database_health_snapshot(payload):
+    payload = dict(payload or {})
+
+    def mutator(state):
+        state["database_health"] = {
+            **payload,
+            "checked_at": utc_now(),
+        }
+
+    update_state(mutator)
+
+
+def get_database_health_snapshot():
+    state = load_state()
+    snapshot = state.get("database_health") or {}
+    return snapshot if isinstance(snapshot, dict) else {}
 
 
 def record_dashboard_summary_failure(target_date, message):
@@ -606,7 +625,12 @@ def _reset_stale_tracking(status):
     status.pop("stale_evaluations", None)
 
 
-def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False, include_crawl_alerts=True):
+def evaluate_runtime_alerts(
+    today_summary_total=None,
+    during_racing_hours=False,
+    include_crawl_alerts=True,
+    include_database_probe=True,
+):
     freshness, _alerts = summarize_freshness()
     required_stale_evaluations = int(
         os.getenv("CRAWL_ALERT_CONFIRM_EVALUATIONS", str(DEFAULT_CRAWL_ALERT_CONFIRM_EVALUATIONS))
@@ -614,39 +638,44 @@ def evaluate_runtime_alerts(today_summary_total=None, during_racing_hours=False,
     required_db_evaluations = int(
         os.getenv("DATABASE_ALERT_CONFIRM_EVALUATIONS", str(DEFAULT_DATABASE_ALERT_CONFIRM_EVALUATIONS))
     )
-    db_health = probe_database_health()
+    db_health = probe_database_health() if include_database_probe else None
 
     def mutator(state):
-        db_status = state.setdefault("database_status", {})
-        if db_health["status"] != "connected":
-            failure_evaluations = int(db_status.get("failure_evaluations", 0)) + 1
-            db_status["failure_evaluations"] = failure_evaluations
-            db_status.setdefault("failed_since", utc_now())
+        if db_health is not None:
+            state["database_health"] = {
+                **db_health,
+                "checked_at": utc_now(),
+            }
+            db_status = state.setdefault("database_status", {})
+            if db_health["status"] != "connected":
+                failure_evaluations = int(db_status.get("failure_evaluations", 0)) + 1
+                db_status["failure_evaluations"] = failure_evaluations
+                db_status.setdefault("failed_since", utc_now())
 
-            if failure_evaluations >= required_db_evaluations:
-                upsert_alert(
+                if failure_evaluations >= required_db_evaluations:
+                    upsert_alert(
+                        state,
+                        key="database-connectivity",
+                        severity="critical",
+                        message="Database connectivity degraded",
+                        details={
+                            **db_health,
+                            "failed_since": db_status.get("failed_since"),
+                            "failure_evaluations": failure_evaluations,
+                            "last_error": db_health.get("error"),
+                        },
+                    )
+            else:
+                db_status.pop("failure_evaluations", None)
+                db_status.pop("failed_since", None)
+                resolve_alert(
                     state,
-                    key="database-connectivity",
-                    severity="critical",
-                    message="Database connectivity degraded",
+                    "database-connectivity",
                     details={
                         **db_health,
-                        "failed_since": db_status.get("failed_since"),
-                        "failure_evaluations": failure_evaluations,
-                        "last_error": db_health.get("error"),
+                        "last_error": None,
                     },
                 )
-        else:
-            db_status.pop("failure_evaluations", None)
-            db_status.pop("failed_since", None)
-            resolve_alert(
-                state,
-                "database-connectivity",
-                details={
-                    **db_health,
-                    "last_error": None,
-                },
-            )
 
         if include_crawl_alerts:
             for crawl_type, item in freshness.items():

@@ -328,22 +328,12 @@ class TestMcpServer(unittest.TestCase):
             "summarize_freshness",
             return_value=(
                 {
-                    "entries": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
-                    "results": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
-                    "scratches": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": None},
+                    "entries": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T10:00:00Z"},
+                    "results": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T10:00:00Z"},
+                    "scratches": {"stale": True, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T10:00:00Z"},
                 },
                 [],
             ),
-        ), patch.object(
-            mcp_server,
-            "_detect_pipeline_activity",
-            return_value={
-                "entries_data_present": True,
-                "results_data_present": True,
-                "scratches_data_present": True,
-                "any_recent_data": True,
-                "active_signals": ["entries", "results", "scratches"],
-            },
         ):
             result = mcp_server.get_feed_freshness()
 
@@ -353,7 +343,8 @@ class TestMcpServer(unittest.TestCase):
         self.assertTrue(result["pipeline_activity"]["any_recent_data"])
         self.assertEqual(result["risk_level"], "low")
         self.assertIn("Data is flowing, but crawler freshness timestamps are behind", result["recommended_action"])
-        self.assertEqual(result["crawlers"]["entries"]["timestamps"]["state"], "monitor_delay")
+        self.assertEqual(result["crawlers"]["entries"]["status"], "monitor_delay")
+        self.assertEqual(result["crawlers"]["entries"]["timestamps"]["state"], "recorded")
 
     def test_get_health_returns_same_one_stop_report_shape(self):
         with patch.object(

@@ -19,7 +19,13 @@ load_dotenv()
 # Import the shared Supabase client
 sys.path.insert(0, os.path.dirname(__file__))
 from supabase_client import get_supabase_client
-from runtime_state import get_recent_boot_at, probe_database_health, summarize_freshness, utc_now
+from runtime_state import (
+    get_database_health_snapshot,
+    get_recent_boot_at,
+    probe_database_health,
+    summarize_freshness,
+    utc_now,
+)
 
 
 mcp = FastMCP(
@@ -641,15 +647,37 @@ def _freshness_guidance(status, summary):
 def _build_system_health_report():
     freshness, alerts = summarize_freshness()
     open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
-    db = probe_database_health()
+    db_snapshot = get_database_health_snapshot()
+    if db_snapshot.get("status"):
+        db = {
+            "status": db_snapshot.get("status", "unknown"),
+            "label": db_snapshot.get("label", "Unknown"),
+            "message": db_snapshot.get("message", "No recent database health check is recorded."),
+            "error": db_snapshot.get("error"),
+            "checked_at": db_snapshot.get("checked_at"),
+        }
+    else:
+        live_db = probe_database_health()
+        db = {
+            **live_db,
+            "checked_at": utc_now(),
+        }
     scheduler_boot = get_recent_boot_at("scheduler")
-    pipeline_activity = _detect_pipeline_activity() if db["status"] == "connected" else {
-        "entries_data_present": False,
-        "results_data_present": False,
-        "scratches_data_present": False,
-        "any_recent_data": False,
-        "active_signals": [],
+
+    pipeline_activity = {
+        "entries_data_present": bool(freshness.get("entries", {}).get("last_success_at")),
+        "results_data_present": bool(freshness.get("results", {}).get("last_success_at")),
+        "scratches_data_present": bool(freshness.get("scratches", {}).get("last_success_at")),
     }
+    pipeline_activity["active_signals"] = [
+        name.replace("_data_present", "")
+        for name, active in pipeline_activity.items()
+        if name.endswith("_data_present") and active
+    ]
+    pipeline_activity["any_recent_data"] = any(
+        pipeline_activity[name]
+        for name in ("entries_data_present", "results_data_present", "scratches_data_present")
+    )
 
     crawler = {}
     healthy_crawlers = []
@@ -693,9 +721,12 @@ def _build_system_health_report():
             },
         }
 
-    if db["status"] != "connected":
+    if db["status"] == "disconnected":
         status = "unhealthy"
         summary = "The database connection check failed."
+    elif db["status"] == "unknown":
+        status = "starting"
+        summary = "Database health has not been checked yet after the latest restart."
     elif attention_needed_crawlers:
         status = "attention_needed"
         summary = f"One or more crawlers need attention: {', '.join(attention_needed_crawlers)}."

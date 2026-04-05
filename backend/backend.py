@@ -46,10 +46,18 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logger = logging.getLogger(__name__)
+FILTER_OPTIONS_CACHE_SECONDS = int(os.getenv("FILTER_OPTIONS_CACHE_SECONDS", "30"))
 
 
 def _snapshot_key_for_todays_races(target_date):
     return f"todays-races:{target_date}"
+
+
+def _filter_options_snapshot_fresh(snapshot):
+    if not snapshot or not snapshot.get("captured_at"):
+        return False
+    captured_at = datetime.fromisoformat(snapshot["captured_at"].replace("Z", "+00:00"))
+    return (datetime.now(captured_at.tzinfo) - captured_at).total_seconds() <= FILTER_OPTIONS_CACHE_SECONDS
 
 
 def _apply_todays_races_filters(payload, track_filter=None, status_filter=None):
@@ -553,11 +561,18 @@ def get_filter_options():
     }
     """
     try:
-        supabase = get_supabase_client()
         today = date.today().isoformat()
         
         # Determine the target date for the summary
         target_summary_date = request.args.get('date', today)
+        snapshot = get_dashboard_summary_snapshot(target_summary_date)
+        if _filter_options_snapshot_fresh(snapshot) and snapshot.get("payload"):
+            payload = dict(snapshot["payload"])
+            payload["summary_source"] = "cache"
+            payload["snapshot_captured_at"] = snapshot.get("captured_at")
+            return jsonify(payload)
+
+        supabase = get_supabase_client()
 
         # 1. Get all distinct dates
         dates_response = supabase.table('hranalyzer_races')\
@@ -674,6 +689,7 @@ def get_filter_options():
             today_summary_total=total_races if target_summary_date == today else None,
             during_racing_hours=during_racing_hours and target_summary_date == today,
             include_crawl_alerts=False,
+            include_database_probe=False,
         )
 
         return jsonify(payload)
