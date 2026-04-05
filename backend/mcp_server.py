@@ -975,7 +975,31 @@ def _fetch_normalized_change_batch(
     }
 
 
-def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date="", end_date="", race_number=0):
+def _is_race_wide_change(item):
+    """Return True when a normalized change row applies to the full race, not a single horse."""
+    horse_name = (item.get("horse_name") or "").strip().lower()
+    if horse_name in {"race-wide", "race wide", "race-wide change"}:
+        return True
+    return not item.get("entry_id")
+
+
+def _apply_change_visibility(changes, include_race_wide):
+    """Optionally hide race-wide rows for consumers that want only horse-specific changes."""
+    if include_race_wide:
+        return list(changes)
+    return [item for item in changes if not _is_race_wide_change(item)]
+
+
+def fetch_change_feed(
+    mode="upcoming",
+    page=1,
+    limit=20,
+    track="All",
+    start_date="",
+    end_date="",
+    race_number=0,
+    include_race_wide=True,
+):
     """Mirror backend change merge and dedupe logic for MCP consumers."""
     supabase = get_supabase_client()
     today = date.today().isoformat()
@@ -993,7 +1017,7 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
             end_date,
             race_number,
         )
-        final_list = batch["changes"]
+        final_list = _apply_change_visibility(batch["changes"], include_race_wide)
         return {
             "changes": final_list[start:end],
             "count": len(final_list),
@@ -1030,6 +1054,7 @@ def fetch_change_feed(mode="upcoming", page=1, limit=20, track="All", start_date
             if item.get("change_type") != "Wagering"
             and "wagering" not in (item.get("description") or "").lower()
         ]
+        final_list = _apply_change_visibility(final_list, include_race_wide)
 
         exhausted = batch["raw_change_count"] < chunk_size and batch["raw_scratch_count"] < chunk_size
         if len(final_list) > end:
@@ -1060,6 +1085,7 @@ def fetch_scratch_feed(mode="upcoming", page=1, limit=20, track="All", start_dat
         start_date=start_date,
         end_date=end_date,
         race_number=race_number,
+        include_race_wide=False,
     )
     scratch_items = [_format_scratch_feed_item(item) for item in change_feed.get("changes", []) if _is_scratch_feed_item(item)]
     start = max(page - 1, 0) * limit
@@ -1212,6 +1238,9 @@ def get_feed_freshness() -> dict:
     """Backward-compatible alias for the one-stop system health report."""
     report = _build_system_health_report()
     report["tool_alias"] = "get_feed_freshness"
+    report["canonical_tool"] = "get_health"
+    report["deprecated"] = True
+    report["alias_note"] = "Use get_health as the canonical health endpoint. get_feed_freshness returns the same report for backward compatibility."
     return report
 
 
@@ -1722,6 +1751,7 @@ def get_race_details(race_key: str) -> dict:
             "fractional_times": race.get("fractional_times"),
             "equibase_chart_url": race.get("equibase_chart_url"),
             "equibase_pdf_url": race.get("equibase_pdf_url"),
+            "entries": entries,
         },
         "entries": entries,
         "exotic_payouts": exotic_payouts,
@@ -1957,6 +1987,7 @@ def get_horse_profile(horse_id: str = "", horse_name: str = "") -> dict:
         "horse": {
             "id": horse["id"],
             "name": horse["horse_name"],
+            "horse_name": horse["horse_name"],
             "sire": horse.get("sire"),
             "dam": horse.get("dam"),
             "color": horse.get("color"),
@@ -1965,6 +1996,7 @@ def get_horse_profile(horse_id: str = "", horse_name: str = "") -> dict:
         },
         "stats": stats,
         "race_history": race_history,
+        "recent_races": race_history,
     }
 
 
@@ -2043,6 +2075,7 @@ def get_changes(
     start_date: str = "",
     end_date: str = "",
     race_number: int = 0,
+    include_race_wide: bool = False,
 ) -> dict:
     """Get normalized, deduplicated changes feed matching backend semantics."""
     requested_view = mode or view or "upcoming"
@@ -2057,6 +2090,7 @@ def get_changes(
         start_date=start_date,
         end_date=end_date,
         race_number=max(race_number, 0),
+        include_race_wide=include_race_wide,
     )
     applied_view = resolved_mode
     fallback_applied = False
@@ -2077,6 +2111,7 @@ def get_changes(
             start_date=start_date,
             end_date=end_date,
             race_number=max(race_number, 0),
+            include_race_wide=include_race_wide,
         )
         fallback_applied = True
         fallback_reason = "No upcoming changes found; returning the most recent historical changes instead."
@@ -2088,11 +2123,13 @@ def get_changes(
         fallback_applied=fallback_applied,
         fallback_reason=fallback_reason,
     )
+    result["meta"]["include_race_wide"] = include_race_wide
+    result["meta"]["race_wide_hidden"] = not include_race_wide
     return result
 
 
 @mcp.tool()
-def get_race_changes(race_id: str) -> dict:
+def get_race_changes(race_id: str, include_race_wide: bool = False) -> dict:
     """Get all changes for a specific race ID."""
     supabase = get_supabase_client()
     all_changes = []
@@ -2149,7 +2186,16 @@ def get_race_changes(race_id: str) -> dict:
         pass
 
     normalized = _normalize_change_list(all_changes, sort_desc=True)
-    return {"changes": normalized, "count": len(normalized), "race_id": race_id}
+    visible_changes = _apply_change_visibility(normalized, include_race_wide)
+    return {
+        "changes": visible_changes,
+        "count": len(visible_changes),
+        "race_id": race_id,
+        "meta": {
+            "include_race_wide": include_race_wide,
+            "race_wide_hidden": not include_race_wide,
+        },
+    }
 
 
 @mcp.tool()

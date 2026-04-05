@@ -289,6 +289,9 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["open_alerts"][0]["key"], "crawl-stale:results")
         self.assertEqual(result["risk_level"], "high")
         self.assertIn("Trust status first", result["how_to_read"])
+        self.assertEqual(result["tool_alias"], "get_feed_freshness")
+        self.assertEqual(result["canonical_tool"], "get_health")
+        self.assertTrue(result["deprecated"])
 
     def test_get_feed_freshness_reports_startup_grace_clearly(self):
         with patch.object(
@@ -400,6 +403,7 @@ class TestMcpServer(unittest.TestCase):
             start_date="",
             end_date="",
             race_number=0,
+            include_race_wide=False,
         )
 
     def test_get_changes_falls_back_to_all_when_upcoming_is_empty(self):
@@ -437,6 +441,7 @@ class TestMcpServer(unittest.TestCase):
             start_date="2026-03-01",
             end_date="2026-03-31",
             race_number=0,
+            include_race_wide=False,
         )
 
     def test_get_changes_passes_race_number_through(self):
@@ -451,7 +456,41 @@ class TestMcpServer(unittest.TestCase):
             start_date="2026-04-06",
             end_date="2026-04-06",
             race_number=4,
+            include_race_wide=False,
         )
+
+    def test_get_changes_hides_race_wide_by_default_and_can_include_it(self):
+        with patch.object(
+            mcp_server,
+            "fetch_change_feed",
+            side_effect=[
+                {
+                    "changes": [{"id": "chg-1", "horse_name": "Horse A"}],
+                    "count": 1,
+                    "page": 1,
+                    "limit": 20,
+                    "total_pages": 1,
+                    "has_more": False,
+                },
+                {
+                    "changes": [{"id": "chg-1", "horse_name": "Horse A"}],
+                    "count": 1,
+                    "page": 1,
+                    "limit": 20,
+                    "total_pages": 1,
+                    "has_more": False,
+                },
+            ],
+        ) as mock_feed:
+            default_result = mcp_server.get_changes(track="SA")
+            visible_result = mcp_server.get_changes(track="SA", include_race_wide=True)
+
+        first_call = mock_feed.call_args_list[0]
+        second_call = mock_feed.call_args_list[1]
+        self.assertEqual(first_call.kwargs["include_race_wide"], False)
+        self.assertEqual(second_call.kwargs["include_race_wide"], True)
+        self.assertTrue(default_result["meta"]["race_wide_hidden"])
+        self.assertFalse(visible_result["meta"]["race_wide_hidden"])
 
     def test_get_scratches_falls_back_to_all_when_upcoming_is_empty(self):
         with patch.object(
@@ -756,6 +795,112 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["count"], 2)
         self.assertEqual(result["matches"], ambiguous_matches)
 
+    def test_get_horse_profile_returns_alias_fields(self):
+        supabase = SequenceSupabaseStub(
+            [
+                Response(
+                    data={
+                        "id": "horse-1",
+                        "horse_name": "Lightning Run",
+                        "sire": "Sire A",
+                        "dam": "Dam A",
+                        "color": "Bay",
+                        "sex": "G",
+                        "foaling_year": 2021,
+                    }
+                ),
+                Response(
+                    data=[
+                        {
+                            "id": "entry-1",
+                            "program_number": "5",
+                            "finish_position": 1,
+                            "final_odds": "2.5",
+                            "win_payout": "7.80",
+                            "place_payout": "4.20",
+                            "show_payout": "2.80",
+                            "scratched": False,
+                            "run_comments": "Clear trip",
+                            "race": {
+                                "race_key": "GP-20260406-4",
+                                "race_date": "2026-04-06",
+                                "race_number": 4,
+                                "track_code": "GP",
+                                "race_type": "Allowance",
+                                "surface": "Dirt",
+                                "distance": "6 Furlongs",
+                                "purse": "$44,000",
+                                "race_status": "completed",
+                                "track": {"track_name": "Gulfstream Park"},
+                            },
+                            "jockey": {"jockey_name": "Jockey A"},
+                            "trainer": {"trainer_name": "Trainer A"},
+                        }
+                    ]
+                ),
+            ]
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_horse_profile(horse_id="horse-1")
+
+        self.assertEqual(result["horse"]["name"], "Lightning Run")
+        self.assertEqual(result["horse"]["horse_name"], "Lightning Run")
+        self.assertEqual(result["recent_races"], result["race_history"])
+
+    def test_get_race_details_includes_entries_alias_inside_race(self):
+        supabase = SequenceSupabaseStub(
+            [
+                Response(
+                    data={
+                        "id": "race-1",
+                        "race_key": "GP-20260406-4",
+                        "track_code": "GP",
+                        "race_date": "2026-04-06",
+                        "race_number": 4,
+                        "post_time": "14:00:00",
+                        "race_type": "Allowance",
+                        "surface": "Dirt",
+                        "distance": "6 Furlongs",
+                        "distance_feet": 3960,
+                        "conditions": "NW1X",
+                        "purse": "$44,000",
+                        "race_status": "upcoming",
+                        "data_source": "equibase",
+                        "final_time": None,
+                        "fractional_times": None,
+                        "equibase_chart_url": None,
+                        "equibase_pdf_url": None,
+                        "hranalyzer_tracks": {
+                            "track_name": "Gulfstream Park",
+                            "location": "Hallandale Beach, FL",
+                            "timezone": "America/New_York",
+                        },
+                    }
+                ),
+                Response(
+                    data=[
+                        {
+                            "id": "entry-1",
+                            "program_number": "5",
+                            "post_position": 5,
+                            "hranalyzer_horses": {"horse_name": "Target Horse", "sire": None, "dam": None, "color": "Bay", "sex": "G"},
+                            "hranalyzer_jockeys": {"jockey_name": "Jockey A"},
+                            "hranalyzer_trainers": {"trainer_name": "Trainer A"},
+                            "hranalyzer_owners": {"owner_name": "Owner A"},
+                        }
+                    ]
+                ),
+                Response(data=[]),
+            ]
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            result = mcp_server.get_race_details("GP-20260406-4")
+
+        self.assertEqual(result["entries"][0]["horse_name"], "Target Horse")
+        self.assertEqual(result["race"]["entries"][0]["horse_name"], "Target Horse")
+
     def test_get_health_returns_unhealthy_on_connection_failure(self):
         with patch.object(
             mcp_server,
@@ -995,6 +1140,7 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["changes"][0]["change_time"], "2026-03-31T12:00:00Z")
         self.assertEqual(result["changes"][0]["horse_name"], "A Lister")
         self.assertEqual(result["changes"][0]["race_key"], "SA-20260331-3")
+        self.assertTrue(result["meta"]["race_wide_hidden"])
 
     def test_get_race_changes_filters_blank_race_wide_noise(self):
         supabase = SupabaseRouterStub(
@@ -1032,10 +1178,65 @@ class TestMcpServer(unittest.TestCase):
         )
 
         with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
-            result = mcp_server.get_race_changes("race-1")
+            result = mcp_server.get_race_changes("race-1", include_race_wide=True)
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["changes"][0]["change_type"], "Post Time Change")
+
+    def test_get_race_changes_hides_race_wide_by_default_and_can_include_it(self):
+        supabase = SupabaseRouterStub(
+            {
+                "hranalyzer_changes": [
+                    {
+                        "id": "chg-race-wide",
+                        "entry_id": None,
+                        "race_id": "race-1",
+                        "change_type": "Track Condition",
+                        "description": "Track changed to Fast",
+                        "created_at": "2026-03-31T12:00:00Z",
+                    },
+                    {
+                        "id": "chg-horse",
+                        "entry_id": "entry-1",
+                        "race_id": "race-1",
+                        "change_type": "Jockey Change",
+                        "description": "Jockey changed to Jane Doe",
+                        "created_at": "2026-03-31T12:01:00Z",
+                    },
+                ],
+                "hranalyzer_race_entries": [
+                    {
+                        "id": "entry-1",
+                        "race_id": "race-1",
+                        "program_number": "5",
+                        "weight": 124,
+                        "horse": {"horse_name": "Horse A"},
+                        "jockey": {"jockey_name": "Jane Doe"},
+                        "trainer": {"trainer_name": "Trainer A"},
+                    }
+                ],
+                "hranalyzer_races": [
+                    {
+                        "id": "race-1",
+                        "race_key": "SA-20260331-3",
+                        "track_code": "SA",
+                        "race_date": "2026-03-31",
+                        "race_number": 3,
+                        "post_time": "14:00:00",
+                        "track": {"track_name": "Santa Anita"},
+                    }
+                ],
+            }
+        )
+
+        with patch.object(mcp_server, "get_supabase_client", return_value=supabase):
+            default_result = mcp_server.get_race_changes("race-1")
+            full_result = mcp_server.get_race_changes("race-1", include_race_wide=True)
+
+        self.assertEqual(default_result["count"], 1)
+        self.assertEqual(default_result["changes"][0]["horse_name"], "Horse A")
+        self.assertEqual(full_result["count"], 2)
+        self.assertFalse(full_result["meta"]["race_wide_hidden"])
 
     def test_get_claims_filters_by_race_number(self):
         supabase = SupabaseStub(

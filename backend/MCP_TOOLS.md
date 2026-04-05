@@ -117,6 +117,8 @@ Purpose:
 Behavior:
 - returns the same core report as `get_health()`
 - includes `tool_alias="get_feed_freshness"`
+- includes `canonical_tool="get_health"`
+- includes `deprecated=true`
 
 Guidance:
 - new agents should use `get_health()` instead
@@ -237,7 +239,11 @@ Typical use:
 - single-race detail page
 - full result/scratch/entry context
 
-### `get_race_changes(race_id)`
+Important shape notes:
+- top-level `entries` is the canonical entries list
+- `race.entries` is included as a compatibility alias for agents that expect nested entries
+
+### `get_race_changes(race_id, include_race_wide=False)`
 
 Purpose:
 - get all change records for a single race
@@ -251,7 +257,8 @@ Typical use:
 
 Notes:
 - this is broader than `get_scratches`
-- it may include race-level and horse-level changes
+- by default it hides race-wide rows and returns only horse-specific changes
+- pass `include_race_wide=True` to include full-race updates like track condition or post-time changes
 
 ## Horse Tools
 
@@ -284,6 +291,10 @@ Typical use:
 
 Behavior notes:
 - if `horse_name` matches multiple horses, the tool returns an ambiguity response instead of guessing
+- `horse.name` is the canonical horse name field
+- `horse.horse_name` is included as a compatibility alias
+- `race_history` is the canonical history list
+- `recent_races` is included as a compatibility alias to the same list
 
 ## Late Changes, Scratches, And Claims
 
@@ -315,7 +326,7 @@ Fallback behavior:
 - if `upcoming` is empty and no explicit date range is provided, the tool may fall back to recent historical scratches
 - when this happens, `meta.fallback_applied=true`
 
-### `get_changes(view="upcoming", mode="", page=1, limit=20, track="All", start_date="", end_date="", race_number=0)`
+### `get_changes(view="upcoming", mode="", page=1, limit=20, track="All", start_date="", end_date="", race_number=0, include_race_wide=False)`
 
 Purpose:
 - normalized late-changes feed
@@ -336,6 +347,8 @@ Use:
 
 Filtering:
 - supports `track`, `start_date`, `end_date`, and `race_number`
+- hides race-wide rows by default to reduce noise for general consumers
+- pass `include_race_wide=True` when you explicitly want full-race updates too
 
 ### `get_claims(track="", start_date="", end_date="", race_number=0, limit=100)`
 
