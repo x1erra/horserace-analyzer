@@ -625,6 +625,12 @@ def _freshness_guidance(status, summary):
             "recommended_action": "Inspect open runtime alerts. Crawler freshness is current, so the issue is likely elsewhere.",
             "operator_summary": summary,
         }
+    if status == "unhealthy":
+        return {
+            "risk_level": "high",
+            "recommended_action": "Database connectivity is failing. Inspect Supabase connectivity, backend logs, and the database-connectivity alert immediately.",
+            "operator_summary": summary,
+        }
     return {
         "risk_level": "high",
         "recommended_action": "Investigate scheduler logs and /api/health immediately. One or more crawlers are genuinely stale.",

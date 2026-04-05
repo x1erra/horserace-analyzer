@@ -5,9 +5,11 @@ Provides a singleton Supabase client for database operations
 
 import os
 import time
+from typing import Any
+
 import httpx
-from supabase import create_client, Client
 from dotenv import load_dotenv
+from supabase import Client, create_client
 
 try:
     from supabase.lib.client_options import SyncClientOptions
@@ -22,10 +24,91 @@ SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://vytyhtddhplcrvvgidyy.supabase.
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE')
 SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv('SUPABASE_POSTGREST_TIMEOUT_SECONDS', '15'))
 SUPABASE_CLIENT_MAX_AGE_SECONDS = float(os.getenv('SUPABASE_CLIENT_MAX_AGE_SECONDS', '60'))
+SUPABASE_QUERY_RETRY_ATTEMPTS = max(int(os.getenv('SUPABASE_QUERY_RETRY_ATTEMPTS', '1')), 0)
 
 # Singleton client instance
 _supabase_client: Client = None
 _supabase_client_created_at: float = 0.0
+
+
+def _is_retryable_database_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+
+    message = str(exc).lower()
+    retry_markers = (
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "temporarily unavailable",
+        "server disconnected",
+        "remote protocol error",
+    )
+    return any(marker in message for marker in retry_markers)
+
+
+def _build_httpx_client() -> httpx.Client:
+    return httpx.Client(
+        timeout=httpx.Timeout(SUPABASE_POSTGREST_TIMEOUT_SECONDS),
+        follow_redirects=True,
+        http2=False,
+        trust_env=False,
+        headers={"Connection": "close"},
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=0,
+            keepalive_expiry=0,
+        ),
+    )
+
+
+class ResilientTableQuery:
+    """Replay a PostgREST query chain on a fresh client when transient reads fail."""
+
+    def __init__(self, table_name: str):
+        self._table_name = table_name
+        self._operations: list[tuple[str, str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def __getattr__(self, item):
+        if item == "not_":
+            self._operations.append(("attr", item, (), {}))
+            return self
+
+        def recorder(*args, **kwargs):
+            self._operations.append(("call", item, args, kwargs))
+            return self
+
+        return recorder
+
+    def _materialize(self, force_refresh: bool = False):
+        client = _get_raw_supabase_client(force_refresh=force_refresh)
+        raw_table = getattr(client, "_trackdata_raw_table", client.table)
+        builder = raw_table(self._table_name)
+        for kind, name, args, kwargs in self._operations:
+            if kind == "attr":
+                builder = getattr(builder, name)
+            else:
+                result = getattr(builder, name)(*args, **kwargs)
+                if result is not None:
+                    builder = result
+        return builder
+
+    def execute(self):
+        attempts = SUPABASE_QUERY_RETRY_ATTEMPTS + 1
+        last_error = None
+
+        for attempt_index in range(attempts):
+            try:
+                builder = self._materialize(force_refresh=attempt_index > 0)
+                return builder.execute()
+            except Exception as exc:  # pragma: no cover - exercised through callers
+                last_error = exc
+                if attempt_index >= attempts - 1 or not _is_retryable_database_error(exc):
+                    raise
+                reset_supabase_client()
+
+        raise last_error
 
 
 def _close_client(client: Client) -> None:
@@ -48,17 +131,7 @@ def _build_client_kwargs():
     client_kwargs = {}
 
     if SyncClientOptions is not None:
-        httpx_client = httpx.Client(
-            timeout=httpx.Timeout(SUPABASE_POSTGREST_TIMEOUT_SECONDS),
-            follow_redirects=True,
-            http2=False,
-            trust_env=False,
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=0,
-                keepalive_expiry=0,
-            ),
-        )
+        httpx_client = _build_httpx_client()
         client_kwargs["options"] = SyncClientOptions(
             postgrest_client_timeout=SUPABASE_POSTGREST_TIMEOUT_SECONDS,
             httpx_client=httpx_client,
@@ -67,16 +140,25 @@ def _build_client_kwargs():
     return client_kwargs
 
 
-def get_supabase_client(force_refresh: bool = False) -> Client:
-    """
-    Get or create the Supabase client singleton
+def _patch_client(client: Client) -> Client:
+    if getattr(client, "_trackdata_resilient_client", False):
+        return client
 
-    Returns:
-        Client: Supabase client instance
+    if not hasattr(client, "table"):
+        return client
 
-    Raises:
-        ValueError: If SUPABASE_SERVICE_KEY is not set
-    """
+    raw_table = client.table
+
+    def resilient_table(table_name: str):
+        return ResilientTableQuery(table_name)
+
+    client._trackdata_raw_table = raw_table
+    client.table = resilient_table
+    client._trackdata_resilient_client = True
+    return client
+
+
+def _get_raw_supabase_client(force_refresh: bool = False) -> Client:
     global _supabase_client, _supabase_client_created_at
 
     should_refresh = force_refresh
@@ -104,6 +186,19 @@ def get_supabase_client(force_refresh: bool = False) -> Client:
         _supabase_client_created_at = time.time()
 
     return _supabase_client
+
+
+def get_supabase_client(force_refresh: bool = False) -> Client:
+    """
+    Get or create the Supabase client singleton
+
+    Returns:
+        Client: Supabase client instance
+
+    Raises:
+        ValueError: If SUPABASE_SERVICE_KEY is not set
+    """
+    return _patch_client(_get_raw_supabase_client(force_refresh=force_refresh))
 
 
 def test_connection():

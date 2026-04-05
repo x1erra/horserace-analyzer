@@ -74,6 +74,7 @@ def _empty_state():
         "service_boots": {},
         "crawl_status": {},
         "dashboard_summaries": {},
+        "api_snapshots": {},
         "summary_failures": {},
         "alerts": [],
     }
@@ -125,6 +126,24 @@ def snapshot_dashboard_summary(target_date, payload):
 def get_dashboard_summary_snapshot(target_date):
     state = load_state()
     snapshot = state.get("dashboard_summaries", {}).get(str(target_date))
+    return snapshot if isinstance(snapshot, dict) else None
+
+
+def snapshot_api_payload(snapshot_key, payload):
+    snapshot_key = str(snapshot_key)
+
+    def mutator(state):
+        state.setdefault("api_snapshots", {})[snapshot_key] = {
+            "captured_at": utc_now(),
+            "payload": payload,
+        }
+
+    update_state(mutator)
+
+
+def get_api_payload_snapshot(snapshot_key):
+    state = load_state()
+    snapshot = state.get("api_snapshots", {}).get(str(snapshot_key))
     return snapshot if isinstance(snapshot, dict) else None
 
 

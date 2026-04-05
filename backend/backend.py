@@ -17,8 +17,10 @@ from bet_resolution import resolve_all_pending_bets
 from runtime_state import (
     clear_dashboard_summary_failures,
     evaluate_runtime_alerts,
+    get_api_payload_snapshot,
     get_dashboard_summary_snapshot,
     record_dashboard_summary_failure,
+    snapshot_api_payload,
     snapshot_dashboard_summary,
 )
 import traceback
@@ -44,6 +46,39 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_key_for_todays_races(target_date):
+    return f"todays-races:{target_date}"
+
+
+def _apply_todays_races_filters(payload, track_filter=None, status_filter=None):
+    races = list(payload.get("races") or [])
+    filtered = []
+
+    for race in races:
+        track_name = race.get("track_name")
+        track_code = race.get("track_code")
+        race_status = race.get("race_status")
+
+        if track_filter and track_filter != "All":
+            if track_name != track_filter and track_code != track_filter:
+                continue
+
+        if status_filter and status_filter != "All":
+            wanted = status_filter.lower()
+            if wanted == "upcoming" and race_status != "upcoming":
+                continue
+            if wanted == "completed" and race_status != "completed":
+                continue
+
+        filtered.append(race)
+
+    return {
+        **payload,
+        "races": filtered,
+        "count": len(filtered),
+    }
 
 
 def allowed_file(filename):
@@ -379,7 +414,7 @@ def get_todays_races():
 
         # 1. Get ALL races for today first
         query = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name, location, timezone)')\
+            .select('id, race_key, track_code, race_number, race_date, post_time, race_type, surface, distance, purse, race_status, hranalyzer_tracks(track_name, location, timezone)')\
             .eq('race_date', today)\
             .order('race_number')
             
@@ -481,15 +516,29 @@ def get_todays_races():
                 'id': race['id']
             })
 
-        return jsonify({
+        payload = {
             'races': races,
             'count': len(races),
             'date': today
-        })
+        }
+        snapshot_api_payload(_snapshot_key_for_todays_races(today), payload)
+        return jsonify(payload)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
+        snapshot = get_api_payload_snapshot(_snapshot_key_for_todays_races(date.today().isoformat()))
+        if snapshot and snapshot.get("payload"):
+            payload = _apply_todays_races_filters(
+                snapshot["payload"],
+                track_filter=request.args.get("track"),
+                status_filter=request.args.get("status"),
+            )
+            payload["stale"] = True
+            payload["data_source"] = "snapshot"
+            payload["stale_reason"] = str(e)
+            payload["snapshot_captured_at"] = snapshot.get("captured_at")
+            return jsonify(payload), 200
         return jsonify({'error': str(e)}), 500
 
 
@@ -514,6 +563,7 @@ def get_filter_options():
         dates_response = supabase.table('hranalyzer_races')\
             .select('race_date')\
             .order('race_date', desc=True)\
+            .limit(1500)\
             .execute()
         
         all_unique_dates = set(r['race_date'] for r in dates_response.data)
@@ -522,6 +572,7 @@ def get_filter_options():
         # 2. Get all distinct tracks
         tracks_response = supabase.table('hranalyzer_races')\
             .select('track_code, hranalyzer_tracks(track_name)')\
+            .limit(1500)\
             .execute()
             
         unique_tracks = {}
@@ -539,7 +590,7 @@ def get_filter_options():
 
         # 3. Get detailed summary for the TARGET DATE
         today_response = supabase.table('hranalyzer_races')\
-            .select('*, hranalyzer_tracks(track_name, timezone), hranalyzer_race_entries(finish_position, hranalyzer_horses(horse_name))')\
+            .select('id, track_code, race_number, race_date, post_time, race_status, hranalyzer_tracks(track_name, timezone), hranalyzer_race_entries(finish_position, hranalyzer_horses(horse_name))')\
             .eq('race_date', target_summary_date)\
             .order('race_number')\
             .execute()
