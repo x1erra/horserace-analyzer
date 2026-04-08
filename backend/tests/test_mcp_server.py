@@ -953,6 +953,88 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(result["database"]["status"], "disconnected")
         self.assertIn("missing key", result["database"]["error"])
 
+    def test_get_health_ignores_cached_disconnected_snapshot_when_live_probe_recovers(self):
+        with patch.object(
+            mcp_server,
+            "get_database_health_snapshot",
+            return_value={
+                "status": "disconnected",
+                "label": "Disconnected",
+                "message": "The primary database check failed.",
+                "error": "old failure",
+                "checked_at": "2026-04-07T21:00:00Z",
+            },
+        ), patch.object(
+            mcp_server,
+            "probe_database_health",
+            return_value={
+                "status": "connected",
+                "label": "Connected",
+                "message": "Successfully queried the primary database.",
+                "error": None,
+            },
+        ), patch.object(
+            mcp_server,
+            "get_recent_boot_at",
+            return_value=None,
+        ), patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:08:14Z"},
+                    "results": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:35:44Z"},
+                    "scratches": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:38:29Z"},
+                },
+                [],
+            ),
+        ):
+            result = mcp_server.get_health()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["database"]["status"], "connected")
+
+    def test_get_health_ignores_pre_boot_database_snapshot(self):
+        with patch.object(
+            mcp_server,
+            "get_database_health_snapshot",
+            return_value={
+                "status": "disconnected",
+                "label": "Disconnected",
+                "message": "The primary database check failed.",
+                "error": "before reboot",
+                "checked_at": "2026-04-07T20:00:00Z",
+            },
+        ), patch.object(
+            mcp_server,
+            "get_recent_boot_at",
+            return_value=mcp_server.parse_iso("2026-04-07T21:07:18Z"),
+        ), patch.object(
+            mcp_server,
+            "probe_database_health",
+            return_value={
+                "status": "connected",
+                "label": "Connected",
+                "message": "Successfully queried the primary database.",
+                "error": None,
+            },
+        ), patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:08:14Z"},
+                    "results": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:35:44Z"},
+                    "scratches": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-07T21:38:29Z"},
+                },
+                [],
+            ),
+        ):
+            result = mcp_server.get_health()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["database"]["status"], "connected")
+
     def test_get_health_keeps_active_issue_for_attention_needed_crawler(self):
         with patch.object(
             mcp_server,

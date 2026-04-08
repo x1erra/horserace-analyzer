@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from supabase_client import get_supabase_client
 from runtime_state import (
     get_database_health_snapshot,
+    parse_iso,
     get_recent_boot_at,
     probe_database_health,
     summarize_freshness,
@@ -696,11 +697,37 @@ def _freshness_guidance(status, summary):
     }
 
 
+def _db_snapshot_requires_live_probe(db_snapshot, scheduler_boot):
+    if not db_snapshot.get("status"):
+        return True
+
+    checked_at = parse_iso(db_snapshot.get("checked_at"))
+    if checked_at is None:
+        return True
+
+    if scheduler_boot and checked_at < scheduler_boot:
+        return True
+
+    if db_snapshot.get("status") == "disconnected":
+        return True
+
+    snapshot_ttl_minutes = int(os.getenv("DB_HEALTH_CACHE_TTL_MINUTES", "10"))
+    age_minutes = (datetime.now(checked_at.tzinfo) - checked_at).total_seconds() / 60
+    return age_minutes > snapshot_ttl_minutes
+
+
 def _build_system_health_report():
     freshness, alerts = summarize_freshness()
     open_alerts = [alert for alert in alerts if alert.get("status") == "open"]
     db_snapshot = get_database_health_snapshot()
-    if db_snapshot.get("status"):
+    scheduler_boot = get_recent_boot_at("scheduler")
+    if _db_snapshot_requires_live_probe(db_snapshot, scheduler_boot):
+        live_db = probe_database_health()
+        db = {
+            **live_db,
+            "checked_at": utc_now(),
+        }
+    else:
         db = {
             "status": db_snapshot.get("status", "unknown"),
             "label": db_snapshot.get("label", "Unknown"),
@@ -708,13 +735,6 @@ def _build_system_health_report():
             "error": db_snapshot.get("error"),
             "checked_at": db_snapshot.get("checked_at"),
         }
-    else:
-        live_db = probe_database_health()
-        db = {
-            **live_db,
-            "checked_at": utc_now(),
-        }
-    scheduler_boot = get_recent_boot_at("scheduler")
 
     pipeline_activity = {
         "entries_data_present": bool(freshness.get("entries", {}).get("last_success_at")),
