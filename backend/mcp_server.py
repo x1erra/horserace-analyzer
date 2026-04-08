@@ -552,6 +552,16 @@ def _detect_pipeline_activity():
 
 
 def _describe_crawler_status(crawl_name, item):
+    if (
+        crawl_name == "scratches"
+        and item.get("observation_supporting_freshness")
+        and item.get("last_observed_source")
+    ):
+        source = str(item.get("last_observed_source")).replace("_", " ")
+        return (
+            f"Recent scratch evidence was recorded via {source}, so scratch coverage appears current "
+            "even without a recent dedicated late-changes success timestamp."
+        )
     if item.get("within_startup_grace") and not item.get("last_success_at"):
         return "The service recently restarted and is still within startup grace, so a first successful timestamp may not exist yet."
     if item.get("stale"):
@@ -613,6 +623,12 @@ def _status_label(status):
 
 
 def _timestamp_state_for(item, public_status):
+    if item.get("observation_supporting_freshness") and item.get("effective_last_success_at"):
+        source = str(item.get("last_observed_source") or "alternate source").replace("_", " ")
+        return {
+            "state": "observed_via_alternate_source",
+            "message": f"Fresh scratch activity was observed via {source} even though the dedicated crawler timestamp is older or missing.",
+        }
     if item.get("last_success_at"):
         return {
             "state": "recorded",
@@ -703,7 +719,10 @@ def _build_system_health_report():
     pipeline_activity = {
         "entries_data_present": bool(freshness.get("entries", {}).get("last_success_at")),
         "results_data_present": bool(freshness.get("results", {}).get("last_success_at")),
-        "scratches_data_present": bool(freshness.get("scratches", {}).get("last_success_at")),
+        "scratches_data_present": bool(
+            freshness.get("scratches", {}).get("effective_last_success_at")
+            or freshness.get("scratches", {}).get("last_success_at")
+        ),
     }
     pipeline_activity["active_signals"] = [
         name.replace("_data_present", "")
@@ -744,18 +763,26 @@ def _build_system_health_report():
 
         crawler[crawl_name] = {
             "last_attempt_at": item.get("last_attempt_at"),
-            "last_success_at": item.get("last_success_at"),
+            "last_success_at": item.get("effective_last_success_at") or item.get("last_success_at"),
             "age_minutes": item.get("age_minutes"),
             "threshold_minutes": item.get("threshold_minutes"),
             "status": public_status,
             "status_label": _status_label(public_status),
             "reason": _describe_crawler_status(crawl_name, item),
             "timestamps": {
-                "last_success_at": item.get("last_success_at"),
+                "last_success_at": item.get("effective_last_success_at") or item.get("last_success_at"),
                 "last_attempt_at": item.get("last_attempt_at"),
                 **_timestamp_state_for(item, public_status),
             },
         }
+        if crawl_name == "scratches":
+            crawler[crawl_name]["evidence"] = {
+                "effective_last_success_at": item.get("effective_last_success_at"),
+                "last_dedicated_success_at": item.get("last_success_at"),
+                "last_observed_at": item.get("last_observed_at"),
+                "last_observed_source": item.get("last_observed_source"),
+                "using_observed_activity": bool(item.get("observation_supporting_freshness")),
+            }
         if current_issue:
             crawler[crawl_name]["current_issue"] = current_issue
         if recent_incident:

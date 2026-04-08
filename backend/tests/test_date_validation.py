@@ -14,6 +14,7 @@ from crawl_scratches import (
     TVG_LATE_CHANGES_TRACK_URL,
     determine_change_type,
     fetch_direct_track_changes_page,
+    fetch_static_page,
     normalize_change_description,
     parse_mobile_track_changes,
     parse_rss_changes,
@@ -108,6 +109,23 @@ class TestDateValidation(unittest.TestCase):
         self.assertEqual(html, "<html>ok</html>")
         self.assertEqual(source_url, LEGACY_LATE_CHANGES_TRACK_URL.format(track_code="GP"))
         self.assertEqual(fetch_mock.call_count, 2)
+
+    def test_fetch_static_page_uses_playwright_last(self):
+        with patch("crawl_scratches.fetch_page_via_requests", return_value=None) as req_mock, \
+             patch("crawl_scratches.fetch_page_via_cloudscraper", return_value=None) as cloud_mock, \
+             patch("crawl_scratches.fetch_page_via_curl_cffi", return_value=None) as curl_mock, \
+             patch("crawl_scratches.fetch_page_via_powershell", return_value=None) as pwsh_mock, \
+             patch("crawl_scratches.fetch_page_via_selenium", return_value=None) as selenium_mock, \
+             patch("crawl_scratches.fetch_page_via_playwright", return_value="<html>ok</html>") as playwright_mock:
+            html = fetch_static_page("https://example.test/latechanges")
+
+        self.assertEqual(html, "<html>ok</html>")
+        req_mock.assert_called_once()
+        cloud_mock.assert_called_once()
+        curl_mock.assert_called_once()
+        pwsh_mock.assert_called_once()
+        selenium_mock.assert_called_once()
+        playwright_mock.assert_called_once()
 
     def test_parse_mobile_track_changes(self):
         html = f"""

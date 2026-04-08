@@ -390,6 +390,41 @@ class TestMcpServer(unittest.TestCase):
         )
         self.assertTrue(result["crawlers"]["results"]["recent_incident"]["historical"])
 
+    def test_get_health_treats_recent_pdf_scratch_evidence_as_healthy(self):
+        with patch.object(
+            mcp_server,
+            "summarize_freshness",
+            return_value=(
+                {
+                    "entries": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:04:07Z", "last_attempt_at": "2026-04-03T04:04:07Z"},
+                    "results": {"stale": False, "in_progress": False, "within_startup_grace": False, "last_success_at": "2026-04-03T04:00:00Z", "last_attempt_at": "2026-04-03T04:05:00Z"},
+                    "scratches": {
+                        "stale": False,
+                        "in_progress": False,
+                        "within_startup_grace": False,
+                        "last_success_at": None,
+                        "effective_last_success_at": "2026-04-03T04:03:00Z",
+                        "last_attempt_at": "2026-04-03T03:40:00Z",
+                        "last_observed_at": "2026-04-03T04:03:00Z",
+                        "last_observed_source": "results_pdf_inferred",
+                        "observation_supporting_freshness": True,
+                    },
+                },
+                [],
+            ),
+        ), patch.object(
+            mcp_server,
+            "probe_database_health",
+            return_value={"status": "connected", "label": "Connected", "message": "Successfully queried the primary database.", "error": None},
+        ):
+            result = mcp_server.get_health()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["crawlers"]["scratches"]["status"], "ok")
+        self.assertEqual(result["pipeline_activity"]["scratches_data_present"], True)
+        self.assertEqual(result["crawlers"]["scratches"]["timestamps"]["state"], "observed_via_alternate_source")
+        self.assertEqual(result["crawlers"]["scratches"]["evidence"]["last_observed_source"], "results_pdf_inferred")
+
     def test_get_changes_maps_view_all_to_all_mode(self):
         with patch.object(mcp_server, "fetch_change_feed", return_value={"changes": [], "count": 0}) as mock_feed:
             result = mcp_server.get_changes(view="all", page=2, limit=15, track="GP")

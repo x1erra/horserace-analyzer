@@ -73,6 +73,7 @@ def _empty_state():
         "version": STATE_VERSION,
         "service_boots": {},
         "crawl_status": {},
+        "scratch_activity": {},
         "database_health": {},
         "dashboard_summaries": {},
         "api_snapshots": {},
@@ -352,6 +353,15 @@ def _describe_alert_reason(alert, details, is_resolved):
 
     if key.startswith("crawl-stale:"):
         crawl_name = key.split(":", 1)[1].replace("-", " ").title()
+        if (
+            key == "crawl-stale:scratches"
+            and details.get("observation_supporting_freshness")
+            and details.get("last_observed_source")
+        ):
+            source = str(details.get("last_observed_source")).replace("_", " ")
+            if is_resolved:
+                return f"Recent scratch evidence was recorded via {source}."
+            return f"Recent scratch evidence has not been recorded via {source} within the expected window."
         if is_resolved:
             return f"A successful {crawl_name.lower()} crawl was recorded."
         if threshold:
@@ -531,6 +541,27 @@ def mark_crawl_attempt(crawl_type, details=None):
     update_state(mutator)
 
 
+def record_scratch_event(source, details=None, event_at=None):
+    """Record a recent scratch signal from any source, including PDF-derived parsing."""
+    details = dict(details or {})
+    recorded_at = event_at or utc_now()
+
+    def mutator(state):
+        activity = state.setdefault("scratch_activity", {})
+        activity["last_event_at"] = recorded_at
+        activity["last_source"] = source
+        activity["last_details"] = details
+        activity["event_count"] = int(activity.get("event_count", 0)) + 1
+
+    update_state(mutator)
+
+
+def get_scratch_activity_snapshot():
+    state = load_state()
+    snapshot = state.get("scratch_activity") or {}
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
 def update_crawl_status(crawl_type, success, details=None):
     now = utc_now()
     details = details or {}
@@ -579,16 +610,23 @@ def summarize_freshness(now=None):
         "results": int(os.getenv("RESULTS_STALE_MINUTES", str(DEFAULT_RESULTS_STALE_MINUTES))),
         "scratches": int(os.getenv("SCRATCHES_STALE_MINUTES", str(DEFAULT_SCRATCHES_STALE_MINUTES))),
     }
+    scratch_activity = state.get("scratch_activity") or {}
+    scratch_event_at = parse_iso(scratch_activity.get("last_event_at"))
 
     freshness = {}
     for crawl_type, threshold_minutes in thresholds.items():
         status = state.get("crawl_status", {}).get(crawl_type, {})
         last_success_at = parse_iso(status.get("last_success_at"))
         last_attempt_at = parse_iso(status.get("last_attempt_at"))
+        effective_success_at = last_success_at
+        observation_supporting_freshness = False
+        if crawl_type == "scratches" and scratch_event_at and (not effective_success_at or scratch_event_at > effective_success_at):
+            effective_success_at = scratch_event_at
+            observation_supporting_freshness = True
         age_minutes = None
         stale = True
-        if last_success_at:
-            age_delta = now_dt.replace(tzinfo=last_success_at.tzinfo) - last_success_at
+        if effective_success_at:
+            age_delta = now_dt.replace(tzinfo=effective_success_at.tzinfo) - effective_success_at
             age_minutes = int(age_delta.total_seconds() // 60)
             stale = age_minutes > threshold_minutes
         elif within_startup_grace:
@@ -604,6 +642,9 @@ def summarize_freshness(now=None):
         freshness[crawl_type] = {
             "last_attempt_at": status.get("last_attempt_at"),
             "last_success_at": status.get("last_success_at"),
+            "effective_last_success_at": (
+                effective_success_at.isoformat().replace("+00:00", "Z") if effective_success_at else None
+            ),
             "last_error": status.get("last_error"),
             "last_details": status.get("last_details"),
             "age_minutes": age_minutes,
@@ -612,6 +653,11 @@ def summarize_freshness(now=None):
             "within_startup_grace": within_startup_grace,
             "in_progress": in_progress,
         }
+        if crawl_type == "scratches":
+            freshness[crawl_type]["last_observed_at"] = scratch_activity.get("last_event_at")
+            freshness[crawl_type]["last_observed_source"] = scratch_activity.get("last_source")
+            freshness[crawl_type]["last_observed_details"] = scratch_activity.get("last_details")
+            freshness[crawl_type]["observation_supporting_freshness"] = observation_supporting_freshness
         if within_startup_grace and not status.get("last_success_at"):
             freshness[crawl_type]["startup_grace_reason"] = (
                 f"Suppressing stale alerts for {startup_grace_minutes} minutes after deploy/startup"

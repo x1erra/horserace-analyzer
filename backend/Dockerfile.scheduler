@@ -10,7 +10,7 @@ ARG TARGETARCH
 WORKDIR /app
 
 # Install system dependencies
-# Install system dependencies including Chromium for Selenium and PowerShell (via tarball for ARM64)
+# Install system dependencies including Chromium for Selenium/Playwright and PowerShell (via tarball for ARM64)
 RUN apt-get update && apt-get install -y \
   chromium \
   chromium-driver \
@@ -52,6 +52,8 @@ ENV SUPABASE_SERVICE_KEY=""
 ENV PYTHONPATH=/app/backend
 # Set Log Directory to volume mount
 ENV LOG_DIR=/var/log
+# Reuse the system Chromium for Playwright to avoid shipping a second browser binary on the Pi.
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium
 
 # Healthcheck using the heartbeat file
 HEALTHCHECK --interval=5m --timeout=10s --start-period=30s --retries=3 \

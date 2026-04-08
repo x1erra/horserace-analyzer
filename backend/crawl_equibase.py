@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from io import BytesIO
 from supabase_client import get_supabase_client
 from dotenv import load_dotenv
+from runtime_state import record_scratch_event
 
 try:
     from curl_cffi import requests as curl_requests
@@ -1710,6 +1711,7 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
         # A partial PDF parse (e.g. only 1 horse extracted) must NOT wipe
         # out all the pre-existing upcoming entries for the race.
         # ---------------------------------------------------------
+        zombie_scratches_marked = 0
         if updated_entry_ids and len(updated_entry_ids) >= 3:
             try:
                 # 1. Fetch all active (non-scratched) entries for this race
@@ -1728,8 +1730,19 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
                                 .update({'scratched': True, 'finish_position': None})\
                                 .eq('id', entry['id'])\
                                 .execute()
+                            zombie_scratches_marked += 1
             except Exception as e:
                 logger.error(f"Error during zombie cleanup: {e}")
+        if zombie_scratches_marked:
+            record_scratch_event(
+                "results_pdf_inferred",
+                {
+                    "track_code": track_code,
+                    "race_date": race_date.strftime('%Y-%m-%d'),
+                    "race_number": race_number,
+                    "changes_processed": zombie_scratches_marked,
+                },
+            )
         # ---------------------------------------------------------
 
         # Insert exotic payouts
@@ -1747,7 +1760,18 @@ def insert_race_to_db(supabase, track_code: str, race_date: date, race_data: Dic
         # Mark scratches
         scratches = race_data.get('scratches', [])
         if scratches:
-            mark_scratched_horses(supabase, race_id, scratches)
+            scratches_marked = mark_scratched_horses(supabase, race_id, scratches)
+            if scratches_marked:
+                record_scratch_event(
+                    "results_pdf_declared",
+                    {
+                        "track_code": track_code,
+                        "race_date": race_date.strftime('%Y-%m-%d'),
+                        "race_number": race_number,
+                        "changes_processed": scratches_marked,
+                        "scratch_names": scratches,
+                    },
+                )
 
         return True
 
@@ -1959,13 +1983,13 @@ def insert_claim(supabase, race_id: int, claim_data: Dict):
         logger.error(f"Error inserting/updating claim: {e}")
 
 
-def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
+def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]) -> int:
     """
     Mark horses as scratched in the database
     """
     try:
         if not scratched_names:
-            return
+            return 0
 
         # 1. Get all entries for this race to find program numbers/ids by name
         # We need to join with horses table to get names
@@ -1975,9 +1999,10 @@ def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
             .execute()
             
         if not entries.data:
-            return
+            return 0
 
         # 2. Match names with STRICTER logic
+        scratches_marked = 0
         for name in scratched_names:
             norm_scratch = normalize_name(name)
             
@@ -2012,11 +2037,13 @@ def mark_scratched_horses(supabase, race_id: int, scratched_names: List[str]):
                         .execute()
                     
                     logger.info(f"Marked {h_name} as scratched (matched '{name}')")
+                    scratches_marked += 1
                     # Don't break here, in case multiple entries match? No, usually one horse per name.
                     break
-                    
+        return scratches_marked
     except Exception as e:
         logger.error(f"Error marking scratches: {e}")
+        return 0
 
 
 def race_is_completed_and_verified(supabase, race_key: str) -> Tuple[bool, Optional[Dict], int]:

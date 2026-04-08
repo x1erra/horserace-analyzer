@@ -3,13 +3,39 @@ import logging
 import time
 import os
 import re
+import shutil
 import subprocess
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, date
 from email.utils import parsedate_to_datetime
 from supabase_client import get_supabase_client
-from crawl_equibase import normalize_name, normalize_pgm, COMMON_TRACKS
+from crawl_equibase import (
+    COMMON_TRACKS,
+    DEFAULT_BROWSER_HEADERS,
+    create_equibase_webdriver,
+    normalize_name,
+    normalize_pgm,
+    page_looks_like_imperva,
+    warm_equibase_browser_session,
+)
+
+try:
+    import cloudscraper
+except ImportError:  # pragma: no cover - installed in production image
+    cloudscraper = None
+
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:  # pragma: no cover - installed in some environments only
+    curl_requests = None
+
+try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - installed in scheduler image
+    PlaywrightTimeoutError = Exception
+    sync_playwright = None
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -29,68 +55,203 @@ TVG_LATE_CHANGES_TRACK_URL = "https://tvg.equibase.com/static/latechanges/html/l
 LEGACY_LATE_CHANGES_TRACK_URL = "https://www.equibase.com/static/latechanges/html/latechanges{track_code}-USA.html"
 MOBILE_LATE_CHANGES_TRACK_URL = "https://mobile.equibase.com/html/scratches{track_code}.html"
 
-def fetch_static_page(url, retries=3):
-    """
-    Fetch static page using Python requests library with proper headers.
-    Falls back to PowerShell if requests fails.
-    """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-    }
-    
-    for attempt in range(retries):
-        try:
-            # Try Python requests first
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            # Check for Incapsula/Bot blocking despite 200 OK
-            is_blocked = "Pardon Our Interruption" in response.text or "Incapsula" in response.text
-            
-            if response.status_code == 200 and len(response.text) > 500 and not is_blocked:
-                return response.text
-            
-            if is_blocked:
-                logger.warning(f"Requests blocked (Incapsula). Status {response.status_code}. Falling back to PowerShell...")
-            else:
-                logger.warning(f"Requests got status {response.status_code}, trying PowerShell...")
-            
-        except requests.exceptions.Timeout:
-            logger.warning(f"Requests timeout for {url}, trying PowerShell...")
-        except Exception as e:
-            logger.warning(f"Requests failed: {e}, trying PowerShell...")
-        
-        # Fallback to PowerShell
-        try:
-            temp_file = f"temp_scratches_{int(time.time())}_{attempt}.html"
-            # Use basic parsing (BasicParsing) to avoid IE dependency issues if possible, but standard is fine
-            cmd = ["powershell", "-Command", f"Invoke-WebRequest -Uri '{url}' -OutFile '{temp_file}' -TimeoutSec 15 -UserAgent 'Mozilla/5.0'"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
-            
-            if result.returncode == 0 and os.path.exists(temp_file):
-                with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                
-                try: os.remove(temp_file) 
-                except: pass
-                
-                if len(content) > 500 and "Pardon Our Interruption" not in content:
-                    return content
-                else:
-                    logger.warning("PowerShell also blocked or empty.")
-                    
-        except Exception as e:
-            logger.warning(f"PowerShell fallback failed: {e}")
-        finally:
+SCRATCH_PAGE_HEADERS = {
+    **DEFAULT_BROWSER_HEADERS,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Connection': 'keep-alive',
+}
+
+
+def _html_response_is_usable(text):
+    return bool(text) and len(text) > 500 and not page_looks_like_imperva(text)
+
+
+def _discover_chromium_binary():
+    explicit = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    if explicit and os.path.exists(explicit):
+        return explicit
+    for binary in ('/usr/bin/chromium', '/usr/bin/chromium-browser'):
+        if os.path.exists(binary):
+            return binary
+    return None
+
+
+def fetch_page_via_requests(url, timeout=15):
+    try:
+        response = requests.get(url, headers=SCRATCH_PAGE_HEADERS, timeout=timeout)
+        if response.status_code == 200 and _html_response_is_usable(response.text):
+            return response.text
+        logger.warning("requests fetch failed for %s with status %s", url, response.status_code)
+    except requests.exceptions.Timeout:
+        logger.warning("requests timed out for %s", url)
+    except Exception as exc:
+        logger.warning("requests fetch failed for %s: %s", url, exc)
+    return None
+
+
+def fetch_page_via_cloudscraper(url, timeout=20):
+    if cloudscraper is None:
+        return None
+    try:
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, headers=SCRATCH_PAGE_HEADERS, timeout=timeout)
+        if response.status_code == 200 and _html_response_is_usable(response.text):
+            return response.text
+        logger.warning("cloudscraper fetch failed for %s with status %s", url, response.status_code)
+    except Exception as exc:
+        logger.warning("cloudscraper fetch failed for %s: %s", url, exc)
+    return None
+
+
+def fetch_page_via_curl_cffi(url, timeout=20):
+    if curl_requests is None:
+        return None
+    try:
+        response = curl_requests.get(
+            url,
+            headers=SCRATCH_PAGE_HEADERS,
+            impersonate='chrome',
+            timeout=timeout,
+        )
+        if response.status_code == 200 and _html_response_is_usable(response.text):
+            return response.text
+        logger.warning("curl_cffi fetch failed for %s with status %s", url, response.status_code)
+    except Exception as exc:
+        logger.warning("curl_cffi fetch failed for %s: %s", url, exc)
+    return None
+
+
+def fetch_page_via_powershell(url, timeout=20):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        return None
+
+    temp_file = f"/tmp/equibase_scratches_{int(time.time())}_{os.getpid()}.html"
+    script = (
+        "$ProgressPreference='SilentlyContinue'; "
+        f"$headers=@{{'User-Agent'='{SCRATCH_PAGE_HEADERS['User-Agent']}';'Accept'='{SCRATCH_PAGE_HEADERS['Accept']}';'Referer'='{SCRATCH_PAGE_HEADERS['Referer']}'}}; "
+        f"Invoke-WebRequest -Uri '{url}' -Headers $headers -OutFile '{temp_file}' -TimeoutSec {timeout}"
+    )
+
+    try:
+        result = subprocess.run(
+            [shell, "-NoLogo", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 10,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning("PowerShell fetch failed for %s: %s", url, result.stderr.strip())
+            return None
+        if not os.path.exists(temp_file):
+            logger.warning("PowerShell did not produce a file for %s", url)
+            return None
+        with open(temp_file, 'r', encoding='utf-8', errors='ignore') as handle:
+            content = handle.read()
+        if _html_response_is_usable(content):
+            return content
+        logger.warning("PowerShell returned unusable content for %s", url)
+    except Exception as exc:
+        logger.warning("PowerShell fetch failed for %s: %s", url, exc)
+    finally:
+        if os.path.exists(temp_file):
             try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except: pass
-        
-        time.sleep(1)
-        
+                os.remove(temp_file)
+            except OSError:
+                pass
+    return None
+
+
+def fetch_page_via_selenium(url, timeout=45):
+    driver = None
+    try:
+        driver = create_equibase_webdriver(timeout=timeout)
+        if driver is None:
+            return None
+        ready = warm_equibase_browser_session(driver, url, min(timeout, 30))
+        html = driver.page_source or ""
+        if ready and _html_response_is_usable(html):
+            return html
+        logger.warning("selenium returned unusable content for %s", url)
+    except Exception as exc:
+        logger.warning("selenium fetch failed for %s: %s", url, exc)
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+    return None
+
+
+def fetch_page_via_playwright(url, timeout=45):
+    if sync_playwright is None:
+        return None
+
+    chromium_binary = _discover_chromium_binary()
+    launch_options = {
+        "headless": True,
+        "args": [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--window-size=1400,1200",
+        ],
+    }
+    if chromium_binary:
+        launch_options["executable_path"] = chromium_binary
+
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(**launch_options)
+            context = browser.new_context(
+                user_agent=SCRATCH_PAGE_HEADERS["User-Agent"],
+                extra_http_headers={
+                    "Accept": SCRATCH_PAGE_HEADERS["Accept"],
+                    "Accept-Language": SCRATCH_PAGE_HEADERS["Accept-Language"],
+                    "Referer": SCRATCH_PAGE_HEADERS["Referer"],
+                },
+                viewport={"width": 1400, "height": 1200},
+            )
+            page = context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                html = page.content()
+                if _html_response_is_usable(html):
+                    browser.close()
+                    return html
+                page.wait_for_timeout(1000)
+            browser.close()
+            logger.warning("Playwright remained blocked or empty for %s", url)
+    except PlaywrightTimeoutError:
+        logger.warning("Playwright timed out for %s", url)
+    except Exception as exc:
+        logger.warning("Playwright fetch failed for %s: %s", url, exc)
+    return None
+
+
+def fetch_static_page(url, retries=2):
+    """
+    Fetch a late-changes HTML page using layered HTTP and browser fallbacks.
+    """
+    for attempt in range(retries):
+        for fetcher in (
+            fetch_page_via_requests,
+            fetch_page_via_cloudscraper,
+            fetch_page_via_curl_cffi,
+            fetch_page_via_powershell,
+            fetch_page_via_selenium,
+            fetch_page_via_playwright,
+        ):
+            html = fetcher(url)
+            if html:
+                return html
+        if attempt < retries - 1:
+            time.sleep(1)
+
     logger.error(f"All fetch methods failed for {url}")
     return None
 

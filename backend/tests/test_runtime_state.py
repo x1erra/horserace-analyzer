@@ -61,6 +61,19 @@ class TestRuntimeState(unittest.TestCase):
         self.assertTrue(freshness["results"]["in_progress"])
         self.assertFalse(freshness["results"]["stale"])
 
+    def test_pdf_scratch_event_keeps_scratches_fresh(self):
+        self.runtime_state.record_scratch_event(
+            "results_pdf_declared",
+            {"track_code": "GP", "race_number": 4, "changes_processed": 2},
+        )
+        freshness, _alerts = self.runtime_state.summarize_freshness()
+
+        self.assertFalse(freshness["scratches"]["stale"])
+        self.assertIsNone(freshness["scratches"]["last_success_at"])
+        self.assertIsNotNone(freshness["scratches"]["effective_last_success_at"])
+        self.assertEqual(freshness["scratches"]["last_observed_source"], "results_pdf_declared")
+        self.assertTrue(freshness["scratches"]["observation_supporting_freshness"])
+
     def test_dispatches_discord_notification_once_for_open_and_resolved_alert(self):
         os.environ["ALERT_WEBHOOK_URL"] = "https://discord.example/webhook"
 
