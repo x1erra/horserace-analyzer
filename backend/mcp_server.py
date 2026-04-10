@@ -2314,4 +2314,4 @@ def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_n
 if __name__ == "__main__":
     print("Starting TrackData MCP Server on port 8001...")
     print("Connect your AI agent to: http://localhost:8001/mcp")
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="sse")

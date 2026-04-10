@@ -23,7 +23,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://vytyhtddhplcrvvgidyy.supabase.co')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE')
 SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv('SUPABASE_POSTGREST_TIMEOUT_SECONDS', '15'))
-SUPABASE_CLIENT_MAX_AGE_SECONDS = float(os.getenv('SUPABASE_CLIENT_MAX_AGE_SECONDS', '60'))
+SUPABASE_CLIENT_MAX_AGE_SECONDS = float(os.getenv('SUPABASE_CLIENT_MAX_AGE_SECONDS', '14400'))
 SUPABASE_QUERY_RETRY_ATTEMPTS = max(int(os.getenv('SUPABASE_QUERY_RETRY_ATTEMPTS', '1')), 0)
 
 # Singleton client instance
@@ -54,11 +54,10 @@ def _build_httpx_client() -> httpx.Client:
         follow_redirects=True,
         http2=False,
         trust_env=False,
-        headers={"Connection": "close"},
         limits=httpx.Limits(
             max_connections=20,
-            max_keepalive_connections=0,
-            keepalive_expiry=0,
+            max_keepalive_connections=20,
+            keepalive_expiry=30.0,
         ),
     )
 
