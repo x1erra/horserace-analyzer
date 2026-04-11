@@ -62,13 +62,22 @@ SCRATCH_PAGE_HEADERS = {
     'Connection': 'keep-alive',
 }
 
+HEAVY_SCRATCH_FETCHERS = ("powershell", "selenium", "playwright")
+
+
+def _env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _html_response_is_usable(text):
     return bool(text) and len(text) > 500 and not page_looks_like_imperva(text)
 
 
 def _fetcher_chain():
-    return (
+    fetchers = (
         ("requests", fetch_page_via_requests),
         ("cloudscraper", fetch_page_via_cloudscraper),
         ("curl_cffi", fetch_page_via_curl_cffi),
@@ -76,6 +85,13 @@ def _fetcher_chain():
         ("selenium", fetch_page_via_selenium),
         ("playwright", fetch_page_via_playwright),
     )
+    if _env_flag("ENABLE_HEAVY_SCRATCH_FALLBACKS", default=False):
+        return fetchers
+    return tuple((name, fetcher) for name, fetcher in fetchers if name not in HEAVY_SCRATCH_FETCHERS)
+
+
+def _heavy_scratch_fallbacks_enabled():
+    return _env_flag("ENABLE_HEAVY_SCRATCH_FALLBACKS", default=False)
 
 
 def _update_fetch_telemetry(telemetry, fetcher_name, success):
@@ -1225,6 +1241,10 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
     Main entry point for crawling changes.
     """
     logger.info(f"Starting Crawl: Equibase Late Changes (Reset={reset_first})")
+    logger.info(
+        "Heavy scratch fallbacks %s",
+        "enabled" if _heavy_scratch_fallbacks_enabled() else "disabled",
+    )
     
     total_changes_processed = 0
     today = date.today()

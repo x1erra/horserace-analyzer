@@ -43,6 +43,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+      - ENABLE_HEAVY_SCRATCH_FALLBACKS=${ENABLE_HEAVY_SCRATCH_FALLBACKS:-0}
       - TZ=America/New_York
     volumes:
       - ./logs:/var/log
