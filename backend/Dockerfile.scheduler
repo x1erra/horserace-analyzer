@@ -41,9 +41,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY backend/ backend/
 
-# Create log directory without shell chaining so HTML-escaped stack editors can't corrupt the command.
-RUN install -d -m 0777 /var/log
-
 # Environment variables (override these in Portainer/docker-compose)
 ENV PYTHONUNBUFFERED=1
 ENV SUPABASE_URL=""
