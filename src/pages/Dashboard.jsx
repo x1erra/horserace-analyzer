@@ -63,7 +63,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
         className="bg-black border border-purple-900/30 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer h-full flex flex-col justify-between group relative overflow-hidden"
         onClick={onClick}
     >
-        <div>
+        <div className="flex-1 flex flex-col">
             <div className="flex justify-between items-start mb-4">
                 <h5 className="font-bold text-white text-lg">{track.track_name}</h5>
                 <div className="flex items-center gap-2">
@@ -83,7 +83,7 @@ const TrackCard = ({ track, isFavorite, onToggleFavorite, onClick }) => (
                     </button>
                 </div>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 mt-auto">
                 <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Total Races</span>
                     <span className="text-white font-medium">{track.total}</span>
