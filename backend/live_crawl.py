@@ -272,6 +272,13 @@ def run_startup_backfill(now):
     today_date = now.date()
     logger.info("Running startup self-heal backfill...")
     try:
+        mark_crawl_attempt('scratches', {'phase': 'startup', 'target_date': today_date.isoformat()})
+        run_scratches_refresh()
+    except Exception as e:
+        logger.error(f"Startup scratches refresh failed: {e}")
+        record_crawl_result('scratches', success=False, error=str(e))
+
+    try:
         mark_crawl_attempt('entries', {'phase': 'startup', 'target_date': today_date.isoformat()})
         run_entries_refresh(today_date)
     except Exception as e:
@@ -284,13 +291,6 @@ def run_startup_backfill(now):
     except Exception as e:
         logger.error(f"Startup results refresh failed: {e}")
         record_crawl_result('results', success=False, error=str(e))
-
-    try:
-        mark_crawl_attempt('scratches', {'phase': 'startup', 'target_date': today_date.isoformat()})
-        run_scratches_refresh()
-    except Exception as e:
-        logger.error(f"Startup scratches refresh failed: {e}")
-        record_crawl_result('scratches', success=False, error=str(e))
 
     evaluate_runtime_alerts(during_racing_hours=8 <= now.hour <= 23)
 
@@ -330,7 +330,15 @@ def run_crawler():
                 start_time = time.time()
                 try:
                     today_date = now.date()
-                    # 1. Crawl Results (Hourly, only during racing hours)
+                    # 1. Crawl Scratches first so late changes are not starved by long results sweeps.
+                    try:
+                        mark_crawl_attempt('scratches', {'phase': 'scheduled', 'target_date': today_date.isoformat()})
+                        scratches_found = run_scratches_refresh()
+                    except Exception as e:
+                        logger.error(f"Scratch crawl failed: {e}")
+                        record_crawl_result('scratches', success=False, error=str(e))
+
+                    # 2. Crawl Results (Hourly, only during racing hours)
                     # Typical racing is 12 PM - 11 PM
                     # We check Today and Yesterday to catch late-night results or missed races from downtime
                     stats_today = {}
@@ -344,7 +352,7 @@ def run_crawler():
                         logger.error(f"Results crawl failed: {e}")
                         record_crawl_result('results', success=False, error=str(e))
 
-                    # 2. Crawl Upcoming Entries (Once per day)
+                    # 3. Crawl Upcoming Entries (Once per day)
                     entry_stats = {'races_found': 0}
                     entry_total_for_alert = None
                     
@@ -371,14 +379,6 @@ def run_crawler():
                     logger.info(f"Crawl finished in {duration:.1f}s. "
                                 f"Results (Y/T): {stats_yesterday.get('races_found', 0)}/{stats_today.get('races_found', 0)}, "
                                 f"Entries: {entry_stats.get('races_found', 0)}")
-                                
-                    # 2.5 Crawl Scratches (Every loop)
-                    try:
-                        mark_crawl_attempt('scratches', {'phase': 'scheduled', 'target_date': today_date.isoformat()})
-                        scratches_found = run_scratches_refresh()
-                    except Exception as e:
-                        logger.error(f"Scratch crawl failed: {e}")
-                        record_crawl_result('scratches', success=False, error=str(e))
 
                     evaluate_runtime_alerts(
                         today_summary_total=entry_total_for_alert,
