@@ -262,10 +262,10 @@ def run_results_refresh(today_date, current_hour):
 def run_scratches_refresh():
     logger.info("Checking for Late Scratches...")
     scratches_tracks = get_crawl_tracks_for_date(date.today())
-    scratches_found = crawl_late_changes(preferred_tracks=scratches_tracks)
-    logger.info(f"Scratch check complete. Marked: {scratches_found}")
-    record_crawl_result('scratches', success=True, changes_processed=scratches_found, tracks_checked=len(scratches_tracks))
-    return scratches_found
+    changes_processed = crawl_late_changes(preferred_tracks=scratches_tracks)
+    logger.info(f"Scratch check complete. Changes processed: {changes_processed}")
+    record_crawl_result('scratches', success=True, changes_processed=changes_processed, tracks_checked=len(scratches_tracks))
+    return changes_processed
 
 
 def run_startup_backfill(now):

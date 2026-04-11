@@ -3,16 +3,30 @@ DRF PDF Parser
 Parses Daily Racing Form PDFs to extract pre-race data for upcoming races
 """
 
+import gc
 import pdfplumber
 import re
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from supabase_client import get_supabase_client
+from supabase_client import get_supabase_client, reset_supabase_client
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+ENTRY_INSERT_BATCH_SIZE = 25
+GC_PAGE_INTERVAL = 5
+
+
+class EntityCache:
+    """Small per-parse cache to avoid repeated Supabase lookups for the same names."""
+
+    def __init__(self):
+        self.tracks: Dict[str, Optional[str]] = {}
+        self.horses: Dict[str, Optional[str]] = {}
+        self.jockeys: Dict[str, Optional[str]] = {}
+        self.trainers: Dict[str, Optional[str]] = {}
 
 
 # ==========================================
@@ -192,6 +206,36 @@ def extract_header_metadata(first_page) -> Dict:
                 logger.warning(f"Could not parse date format 2: {date_str}")
 
     return metadata
+
+
+def extract_race_content_from_index_page(page_text: str, track_name: Optional[str]) -> str:
+    """
+    Some DRF PDFs place the index and race 1 header on the same first page.
+    Trim off the index block so the parser can still process race 1.
+    """
+    if 'INDEXTOENTRIES' not in page_text.replace(' ', '').upper():
+        return page_text
+
+    if not track_name:
+        return ""
+
+    lines = page_text.split('\n')
+    normalized_track_name = track_name.upper().replace(' ', '')
+
+    for index, line in enumerate(lines[:-1]):
+        if line.strip() != '1':
+            continue
+
+        next_line_normalized = lines[index + 1].strip().upper().replace(' ', '')
+        if (
+            next_line_normalized == normalized_track_name
+            or normalized_track_name in next_line_normalized
+            or next_line_normalized in normalized_track_name
+        ):
+            return '\n'.join(lines[index:])
+
+    # Pure index page with no embedded race content.
+    return ""
 
 
 # ==========================================
@@ -497,14 +541,25 @@ def extract_entry_from_page(page_text: str, program_number: int, horse_name: str
 # DATABASE INSERTION
 # ==========================================
 
-def get_or_create_track(supabase, track_code: str, track_name: str) -> Optional[str]:
+def get_or_create_track(
+    supabase,
+    track_code: str,
+    track_name: str,
+    entity_cache: Optional[EntityCache] = None,
+) -> Optional[str]:
     """Get track ID or create if doesn't exist"""
     try:
+        if entity_cache and track_code in entity_cache.tracks:
+            return entity_cache.tracks[track_code]
+
         # Try to find existing track
         response = supabase.table('hranalyzer_tracks').select('id').eq('track_code', track_code).execute()
 
         if response.data and len(response.data) > 0:
-            return response.data[0]['id']
+            track_id = response.data[0]['id']
+            if entity_cache:
+                entity_cache.tracks[track_code] = track_id
+            return track_id
 
         # Determine Timezone
         timezone_map = {
@@ -544,37 +599,57 @@ def get_or_create_track(supabase, track_code: str, track_name: str) -> Optional[
             'timezone': tz
         }).execute()
 
-        return new_track.data[0]['id'] if new_track.data else None
+        track_id = new_track.data[0]['id'] if new_track.data else None
+        if entity_cache:
+            entity_cache.tracks[track_code] = track_id
+        return track_id
     except Exception as e:
         logger.error(f"Error getting/creating track {track_code}: {e}")
         return None
 
 
-def get_or_create_horse(supabase, horse_name: str) -> Optional[str]:
+def get_or_create_horse(
+    supabase,
+    horse_name: str,
+    entity_cache: Optional[EntityCache] = None,
+) -> Optional[str]:
     """Get horse ID or create if doesn't exist"""
     try:
         normalized_name = normalize_horse_name(horse_name)
         if not normalized_name:
             return None
 
+        if entity_cache and normalized_name in entity_cache.horses:
+            return entity_cache.horses[normalized_name]
+
         # Try to find existing horse
         response = supabase.table('hranalyzer_horses').select('id').eq('horse_name', normalized_name).execute()
 
         if response.data and len(response.data) > 0:
-            return response.data[0]['id']
+            horse_id = response.data[0]['id']
+            if entity_cache:
+                entity_cache.horses[normalized_name] = horse_id
+            return horse_id
 
         # Create new horse
         new_horse = supabase.table('hranalyzer_horses').insert({
             'horse_name': normalized_name
         }).execute()
 
-        return new_horse.data[0]['id'] if new_horse.data else None
+        horse_id = new_horse.data[0]['id'] if new_horse.data else None
+        if entity_cache:
+            entity_cache.horses[normalized_name] = horse_id
+        return horse_id
     except Exception as e:
         logger.error(f"Error getting/creating horse {horse_name}: {e}")
         return None
 
 
-def get_or_create_jockey(supabase, jockey_name: str) -> Optional[str]:
+def get_or_create_jockey(
+    supabase,
+    jockey_name: str,
+    entity_cache: Optional[EntityCache] = None,
+) -> Optional[str]:
     """Get jockey ID or create if doesn't exist"""
     if not jockey_name:
         return None
@@ -582,22 +657,35 @@ def get_or_create_jockey(supabase, jockey_name: str) -> Optional[str]:
     try:
         normalized_name = normalize_person_name(jockey_name)
 
+        if entity_cache and normalized_name in entity_cache.jockeys:
+            return entity_cache.jockeys[normalized_name]
+
         response = supabase.table('hranalyzer_jockeys').select('id').eq('jockey_name', normalized_name).execute()
 
         if response.data and len(response.data) > 0:
-            return response.data[0]['id']
+            jockey_id = response.data[0]['id']
+            if entity_cache:
+                entity_cache.jockeys[normalized_name] = jockey_id
+            return jockey_id
 
         new_jockey = supabase.table('hranalyzer_jockeys').insert({
             'jockey_name': normalized_name
         }).execute()
 
-        return new_jockey.data[0]['id'] if new_jockey.data else None
+        jockey_id = new_jockey.data[0]['id'] if new_jockey.data else None
+        if entity_cache:
+            entity_cache.jockeys[normalized_name] = jockey_id
+        return jockey_id
     except Exception as e:
         logger.error(f"Error getting/creating jockey {jockey_name}: {e}")
         return None
 
 
-def get_or_create_trainer(supabase, trainer_name: str) -> Optional[str]:
+def get_or_create_trainer(
+    supabase,
+    trainer_name: str,
+    entity_cache: Optional[EntityCache] = None,
+) -> Optional[str]:
     """Get trainer ID or create if doesn't exist"""
     if not trainer_name:
         return None
@@ -605,16 +693,25 @@ def get_or_create_trainer(supabase, trainer_name: str) -> Optional[str]:
     try:
         normalized_name = normalize_person_name(trainer_name)
 
+        if entity_cache and normalized_name in entity_cache.trainers:
+            return entity_cache.trainers[normalized_name]
+
         response = supabase.table('hranalyzer_trainers').select('id').eq('trainer_name', normalized_name).execute()
 
         if response.data and len(response.data) > 0:
-            return response.data[0]['id']
+            trainer_id = response.data[0]['id']
+            if entity_cache:
+                entity_cache.trainers[normalized_name] = trainer_id
+            return trainer_id
 
         new_trainer = supabase.table('hranalyzer_trainers').insert({
             'trainer_name': normalized_name
         }).execute()
 
-        return new_trainer.data[0]['id'] if new_trainer.data else None
+        trainer_id = new_trainer.data[0]['id'] if new_trainer.data else None
+        if entity_cache:
+            entity_cache.trainers[normalized_name] = trainer_id
+        return trainer_id
     except Exception as e:
         logger.error(f"Error getting/creating trainer {trainer_name}: {e}")
         return None
@@ -628,7 +725,7 @@ def insert_race_to_db(supabase, race_data: Dict, track_id: str, track_code: str,
 
         # Check if race already exists
         # Check if race already exists
-        existing = supabase.table('hranalyzer_races').select('*').eq('race_key', race_key).execute()
+        existing = supabase.table('hranalyzer_races').select('id, post_time').eq('race_key', race_key).execute()
         if existing.data and len(existing.data) > 0:
             existing_race = existing.data[0]
             logger.info(f"Race {race_key} already exists.")
@@ -686,23 +783,85 @@ def insert_race_to_db(supabase, race_data: Dict, track_id: str, track_code: str,
         return None
 
 
-def insert_entries_to_db(supabase, race_id: str, entries: List[Dict]) -> int:
-    """Insert race entries into database, return count"""
+def _chunked_records(records: List[Dict], chunk_size: int):
+    for index in range(0, len(records), chunk_size):
+        yield records[index:index + chunk_size]
+
+
+def _insert_records_in_batches(
+    supabase,
+    table_name: str,
+    records: List[Dict],
+    batch_size: int = ENTRY_INSERT_BATCH_SIZE,
+    on_conflict: Optional[str] = None,
+) -> int:
     inserted_count = 0
+
+    for batch in _chunked_records(records, batch_size):
+        try:
+            if on_conflict:
+                supabase.table(table_name).upsert(batch, on_conflict=on_conflict).execute()
+            else:
+                supabase.table(table_name).insert(batch).execute()
+            inserted_count += len(batch)
+        except Exception as batch_error:
+            logger.warning(
+                "Batch insert into %s failed; retrying rows individually: %s",
+                table_name,
+                batch_error,
+            )
+            for record in batch:
+                try:
+                    if on_conflict:
+                        supabase.table(table_name).upsert(record, on_conflict=on_conflict).execute()
+                    else:
+                        supabase.table(table_name).insert(record).execute()
+                    inserted_count += 1
+                except Exception as row_error:
+                    logger.error(
+                        "Error inserting row into %s (%s): %s",
+                        table_name,
+                        record.get('program_number') or record.get('horse_name') or record.get('race_id'),
+                        row_error,
+                    )
+
+    return inserted_count
+
+
+def insert_entries_to_db(
+    supabase,
+    race_id: str,
+    entries: List[Dict],
+    entity_cache: Optional[EntityCache] = None,
+) -> int:
+    """Insert race entries into database, return count"""
+    entry_records: List[Dict] = []
 
     for entry in entries:
         try:
             # Get or create related entities
-            horse_id = get_or_create_horse(supabase, entry['horse_name']) if entry['horse_name'] else None
-            jockey_id = get_or_create_jockey(supabase, entry['jockey']) if entry['jockey'] else None
-            trainer_id = get_or_create_trainer(supabase, entry['trainer']) if entry['trainer'] else None
+            horse_id = (
+                get_or_create_horse(supabase, entry['horse_name'], entity_cache)
+                if entry['horse_name']
+                else None
+            )
+            jockey_id = (
+                get_or_create_jockey(supabase, entry['jockey'], entity_cache)
+                if entry['jockey']
+                else None
+            )
+            trainer_id = (
+                get_or_create_trainer(supabase, entry['trainer'], entity_cache)
+                if entry['trainer']
+                else None
+            )
 
             if not horse_id:
                 logger.warning(f"Skipping entry {entry['program_number']} - no horse name")
                 continue
 
             # Insert entry
-            entry_insert = {
+            entry_records.append({
                 'race_id': race_id,
                 'horse_id': horse_id,
                 'jockey_id': jockey_id,
@@ -712,16 +871,62 @@ def insert_entries_to_db(supabase, race_id: str, entries: List[Dict]) -> int:
                 'weight': entry.get('weight'),
                 'medication': entry.get('medication'),
                 'equipment': entry.get('equipment')
-            }
-
-            supabase.table('hranalyzer_race_entries').insert(entry_insert).execute()
-            inserted_count += 1
+            })
 
         except Exception as e:
             logger.error(f"Error inserting entry {entry.get('program_number')}: {e}")
             continue
 
+    if not entry_records:
+        return 0
+
+    inserted_count = _insert_records_in_batches(
+        supabase,
+        'hranalyzer_race_entries',
+        entry_records,
+        on_conflict='race_id, program_number',
+    )
+    entry_records.clear()
     return inserted_count
+
+
+def _finalize_race_entries(current_race: Dict, current_race_entries: List[Dict]) -> Dict:
+    """Combine header-embedded entries with continuation pages, favoring detailed continuation data."""
+    all_entries = {}
+
+    for entry in current_race.get('embedded_entries', []):
+        all_entries[entry['program_number']] = {
+            'program_number': entry['program_number'],
+            'horse_name': entry['horse_name'],
+            'jockey': None,
+            'trainer': None,
+            'owner': None,
+            'morning_line_odds': None,
+            'weight': None,
+            'medication': None,
+            'equipment': None
+        }
+
+    for entry in current_race_entries:
+        all_entries[entry['program_number']] = entry
+
+    finalized_race = dict(current_race)
+    finalized_race['entries'] = list(all_entries.values())
+    return finalized_race
+
+
+def _build_implicit_race_one(race_1_entries: List[Dict], race_1_post_time: Optional[str]) -> Dict:
+    return {
+        'race_number': 1,
+        'post_time': race_1_post_time,
+        'race_type': None,
+        'surface': 'Dirt',
+        'distance': None,
+        'distance_feet': None,
+        'purse': None,
+        'conditions': None,
+        'entries': list(race_1_entries)
+    }
 
 
 # ==========================================
@@ -740,6 +945,7 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
     """
     try:
         supabase = get_supabase_client()
+        entity_cache = EntityCache()
 
         with pdfplumber.open(pdf_path) as pdf:
             # Extract metadata from first page
@@ -754,28 +960,37 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
             logger.info(f"Parsing {metadata['track_name']} ({metadata['track_code']}) - {metadata['race_date']}")
 
             # Get or create track
-            track_id = get_or_create_track(supabase, metadata['track_code'], metadata['track_name'])
+            track_id = get_or_create_track(
+                supabase,
+                metadata['track_code'],
+                metadata['track_name'],
+                entity_cache=entity_cache,
+            )
             if not track_id:
                 return {
                     'success': False,
                     'error': 'Could not get/create track in database'
                 }
 
-            # Parse races page by page
             races_data = []
             current_race = None
             current_race_entries = []
             race_1_entries = []  # Special handling for Race 1 (no header page)
-            race_1_post_time = None 
+            race_1_post_time = None
 
             for page_num, page in enumerate(pdf.pages):
                 page_text = page.extract_text()
                 if not page_text:
                     continue
 
-                # Skip index page (page 1)
-                if page_num == 0 and 'INDEXTOENTRIES' in page_text.replace(' ', ''):
-                    continue
+                # Some cards embed race 1 on the same page as the entry index.
+                if page_num == 0:
+                    page_text = extract_race_content_from_index_page(
+                        page_text,
+                        metadata.get('track_name'),
+                    )
+                    if not page_text:
+                        continue
 
                 # Check if this is a race header page
                 is_header, race_number = is_race_header_page(page_text)
@@ -785,48 +1000,23 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                     # If this is the FIRST header we've found (current_race is None)
                     # AND we have collected race_1_entries (meaning we saw horse pages before this header)
                     if current_race is None and len(race_1_entries) > 0:
-                        race_1 = {
-                            'race_number': 1,
-                            'post_time': race_1_post_time,
-                            'race_type': None,
-                            'surface': 'Dirt',  # Default
-                            'distance': None,
-                            'distance_feet': None,
-                            'purse': None,
-                            'conditions': None,
-                            'entries': race_1_entries
-                        }
+                        race_1 = _build_implicit_race_one(race_1_entries, race_1_post_time)
                         races_data.append(race_1)
                         logger.info(f"Found implicit race 1 with {len(race_1_entries)} entries")
-                        race_1_entries = [] # Clear to prevent double add
+                        race_1_entries.clear()
+                        gc.collect()
 
                     # Save previous race if exists
                     if current_race:
-                        # Combine embedded entries from header + separate PP page entries
-                        # Use dict to deduplicate by program number (prefer separate PP page data)
-                        all_entries = {}
-
-                        # First add embedded entries from header
-                        for entry in current_race.get('embedded_entries', []):
-                            all_entries[entry['program_number']] = {
-                                'program_number': entry['program_number'],
-                                'horse_name': entry['horse_name'],
-                                'jockey': None,
-                                'trainer': None,
-                                'owner': None,
-                                'morning_line_odds': None,
-                                'weight': None,
-                                'medication': None,
-                                'equipment': None
-                            }
-
-                        # Then add/override with separate PP page entries (more detailed)
-                        for entry in current_race_entries:
-                            all_entries[entry['program_number']] = entry
-
-                        current_race['entries'] = list(all_entries.values())
-                        races_data.append(current_race)
-                        logger.info(f"Found race {current_race['race_number']} with {len(current_race['entries'])} entries")
+                        finalized_race = _finalize_race_entries(current_race, current_race_entries)
+                        logger.info(
+                            "Found race %s with %s entries",
+                            finalized_race['race_number'],
+                            len(finalized_race['entries']),
+                        )
+                        races_data.append(finalized_race)
+                        current_race_entries.clear()
+                        gc.collect()
 
                     # Start new race
                     current_race = extract_race_header_from_page(page_text, race_number)
@@ -854,52 +1044,28 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                                 if time_match:
                                     race_1_post_time = time_match.group(1)
 
+                del page_text
+                if page_num and page_num % GC_PAGE_INTERVAL == 0:
+                    gc.collect()
+
             # Don't forget the last race
             if current_race:
-                # Combine embedded entries from header + separate PP page entries
-                all_entries = {}
-
-                # First add embedded entries from header
-                for entry in current_race.get('embedded_entries', []):
-                    all_entries[entry['program_number']] = {
-                        'program_number': entry['program_number'],
-                        'horse_name': entry['horse_name'],
-                        'jockey': None,
-                        'trainer': None,
-                        'owner': None,
-                        'morning_line_odds': None,
-                        'weight': None,
-                        'medication': None,
-                        'equipment': None
-                    }
-
-                # Then add/override with separate PP page entries (more detailed)
-                for entry in current_race_entries:
-                    all_entries[entry['program_number']] = entry
-
-                current_race['entries'] = list(all_entries.values())
-                races_data.append(current_race)
-                logger.info(f"Found race {current_race['race_number']} with {len(current_race['entries'])} entries")
+                finalized_race = _finalize_race_entries(current_race, current_race_entries)
+                logger.info(
+                    "Found race %s with %s entries",
+                    finalized_race['race_number'],
+                    len(finalized_race['entries']),
+                )
+                races_data.append(finalized_race)
 
             # If we only have Race 1 entries and no other races
             elif len(race_1_entries) > 0:
-                race_1 = {
-                    'race_number': 1,
-                    'post_time': race_1_post_time,
-                    'race_type': None,
-                    'surface': 'Dirt',
-                    'distance': None,
-                    'distance_feet': None,
-                    'purse': None,
-                    'conditions': None,
-                    'entries': race_1_entries
-                }
+                race_1 = _build_implicit_race_one(race_1_entries, race_1_post_time)
                 races_data.append(race_1)
                 logger.info(f"Found race 1 with {len(race_1_entries)} entries")
 
             logger.info(f"Total races found: {len(races_data)}")
 
-            # Insert races into database
             total_entries = 0
             successful_races = 0
 
@@ -914,7 +1080,12 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                 )
 
                 if race_id and race_data.get('entries'):
-                    entries_count = insert_entries_to_db(supabase, race_id, race_data['entries'])
+                    entries_count = insert_entries_to_db(
+                        supabase,
+                        race_id,
+                        race_data['entries'],
+                        entity_cache=entity_cache,
+                    )
                     total_entries += entries_count
                     successful_races += 1
                     logger.info(f"Inserted race {race_data['race_number']} with {entries_count} entries")
@@ -965,6 +1136,12 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
             'success': False,
             'error': str(e)
         }
+    finally:
+        gc.collect()
+        try:
+            reset_supabase_client()
+        except Exception:
+            pass
 
 
 def parse_drf_pdf_safe(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:

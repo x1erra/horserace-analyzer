@@ -67,6 +67,62 @@ def _html_response_is_usable(text):
     return bool(text) and len(text) > 500 and not page_looks_like_imperva(text)
 
 
+def _fetcher_chain():
+    return (
+        ("requests", fetch_page_via_requests),
+        ("cloudscraper", fetch_page_via_cloudscraper),
+        ("curl_cffi", fetch_page_via_curl_cffi),
+        ("powershell", fetch_page_via_powershell),
+        ("selenium", fetch_page_via_selenium),
+        ("playwright", fetch_page_via_playwright),
+    )
+
+
+def _update_fetch_telemetry(telemetry, fetcher_name, success):
+    if telemetry is None:
+        return
+    attempts = telemetry.setdefault("attempts_by_fetcher", {})
+    attempts[fetcher_name] = attempts.get(fetcher_name, 0) + 1
+
+    if success:
+        successes = telemetry.setdefault("successes_by_fetcher", {})
+        successes[fetcher_name] = successes.get(fetcher_name, 0) + 1
+        telemetry["successful_fetcher"] = fetcher_name
+
+
+def _merge_fetch_telemetry(target, source):
+    if target is None or not source:
+        return
+
+    for key in ("attempts_by_fetcher", "successes_by_fetcher"):
+        source_map = source.get(key, {})
+        if not source_map:
+            continue
+        target_map = target.setdefault(key, {})
+        for fetcher_name, count in source_map.items():
+            target_map[fetcher_name] = target_map.get(fetcher_name, 0) + count
+
+
+def _format_fetcher_label(telemetry):
+    if not telemetry:
+        return "unknown fetcher"
+    return telemetry.get("successful_fetcher") or "unknown fetcher"
+
+
+def _summarize_contributions(source_counts):
+    ordered_keys = ("rss", "direct_html", "mobile_html", "index_html", "otb")
+    return ", ".join(f"{key}={source_counts.get(key, 0)}" for key in ordered_keys)
+
+
+def _summarize_fetchers(fetch_telemetry):
+    successes = (fetch_telemetry or {}).get("successes_by_fetcher", {})
+    if not successes:
+        return "none"
+    order = ("requests", "cloudscraper", "curl_cffi", "powershell", "selenium", "playwright")
+    parts = [f"{name}={successes[name]}" for name in order if successes.get(name)]
+    return ", ".join(parts) if parts else "none"
+
+
 def _discover_chromium_binary():
     explicit = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
     if explicit and os.path.exists(explicit):
@@ -233,20 +289,14 @@ def fetch_page_via_playwright(url, timeout=45):
     return None
 
 
-def fetch_static_page(url, retries=2):
+def fetch_static_page(url, retries=2, telemetry=None):
     """
     Fetch a late-changes HTML page using layered HTTP and browser fallbacks.
     """
     for attempt in range(retries):
-        for fetcher in (
-            fetch_page_via_requests,
-            fetch_page_via_cloudscraper,
-            fetch_page_via_curl_cffi,
-            fetch_page_via_powershell,
-            fetch_page_via_selenium,
-            fetch_page_via_playwright,
-        ):
+        for fetcher_name, fetcher in _fetcher_chain():
             html = fetcher(url)
+            _update_fetch_telemetry(telemetry, fetcher_name, bool(html))
             if html:
                 return html
         if attempt < retries - 1:
@@ -255,12 +305,12 @@ def fetch_static_page(url, retries=2):
     logger.error(f"All fetch methods failed for {url}")
     return None
 
-def parse_late_changes_index():
+def parse_late_changes_index(telemetry=None):
     """
     Parse the main late changes page to find links for specific tracks
     Returns: List of dicts { 'track_code': 'GP', 'url': '...' }
     """
-    html = fetch_static_page(LATE_CHANGES_INDEX_URL)
+    html = fetch_static_page(LATE_CHANGES_INDEX_URL, telemetry=telemetry)
     if not html:
         logger.error("Failed to fetch Late Changes index")
         return []
@@ -283,7 +333,7 @@ def parse_late_changes_index():
     return links
 
 
-def fetch_direct_track_changes_page(track_code):
+def fetch_direct_track_changes_page(track_code, telemetry=None):
     """
     Fetch a late-changes page directly for a specific track code.
     This avoids relying on the legacy index page to enumerate available tracks.
@@ -292,15 +342,15 @@ def fetch_direct_track_changes_page(track_code):
     """
     for template in (TVG_LATE_CHANGES_TRACK_URL, LEGACY_LATE_CHANGES_TRACK_URL):
         url = template.format(track_code=track_code)
-        html = fetch_static_page(url)
+        html = fetch_static_page(url, telemetry=telemetry)
         if html:
             return html, url
     return None, None
 
 
-def fetch_mobile_track_changes_page(track_code):
+def fetch_mobile_track_changes_page(track_code, telemetry=None):
     url = MOBILE_LATE_CHANGES_TRACK_URL.format(track_code=track_code)
-    html = fetch_static_page(url)
+    html = fetch_static_page(url, telemetry=telemetry)
     if html:
         return html, url
     return None, None
@@ -820,7 +870,9 @@ def process_rss_for_track(track_code):
     logger.info(f"RSS found {len(changes)} changes/cancellations for {track_code}")
     
     today = date.today()
-    return update_changes_in_db(track_code, today, changes)
+    processed = update_changes_in_db(track_code, today, changes)
+    logger.info(f"RSS processed {processed} record(s) for {track_code}")
+    return processed
 
 CANCELLATIONS_URL = "https://www.equibase.com/static/latechanges/html/cancellations.html" # Keep for reference or if it starts working
 
@@ -849,11 +901,13 @@ def update_changes_in_db(track_code, race_date, change_list):
             
             # 2. Find Entry to mark
             entry_id = None
+            resolved_program_number = item.get('program_number')
+            entry_was_scratched = False
             
             # Try PGM match
             if item['program_number']:
                 e_res = supabase.table('hranalyzer_race_entries')\
-                    .select('id, scratched')\
+                    .select('id, scratched, program_number')\
                     .eq('race_id', race_id)\
                     .eq('program_number', item['program_number'])\
                     .execute()
@@ -861,11 +915,13 @@ def update_changes_in_db(track_code, race_date, change_list):
                 if e_res.data:
                     entry = e_res.data[0]
                     entry_id = entry['id']
+                    resolved_program_number = entry.get('program_number') or resolved_program_number
+                    entry_was_scratched = bool(entry.get('scratched'))
             
             # Fallback Name match
             if not entry_id and item['horse_name']:
                  all_entries = supabase.table('hranalyzer_race_entries')\
-                    .select('id, hranalyzer_horses!inner(horse_name)')\
+                    .select('id, program_number, scratched, hranalyzer_horses!inner(horse_name)')\
                     .eq('race_id', race_id)\
                     .execute()
                  
@@ -874,6 +930,8 @@ def update_changes_in_db(track_code, race_date, change_list):
                      h_name = e['hranalyzer_horses']['horse_name']
                      if normalize_name(h_name) == target_norm:
                          entry_id = e['id']
+                         resolved_program_number = e.get('program_number') or resolved_program_number
+                         entry_was_scratched = bool(e.get('scratched'))
                          break
             
             # ORPHAN PREVENTION:
@@ -951,9 +1009,18 @@ def update_changes_in_db(track_code, race_date, change_list):
                     .update({'scratched': True})\
                     .eq('id', entry_id)\
                     .execute()
-                
-                logger.info(f"✂️ MARKED SCRATCH: {track_code} R{item['race_number']} #{item['program_number']} ({item['description']})")
-                scratches_marked += 1
+
+                if entry_was_scratched:
+                    logger.info(
+                        f"✂️ SCRATCH CONFIRMED: {track_code} R{item['race_number']} "
+                        f"#{resolved_program_number} ({item['description']})"
+                    )
+                else:
+                    logger.info(
+                        f"✂️ MARKED SCRATCH: {track_code} R{item['race_number']} "
+                        f"#{resolved_program_number} ({item['description']})"
+                    )
+                    scratches_marked += 1
             elif item['change_type'] == 'Race Cancelled':
                 # SAFEGUARD: Do not cancel if race is Completed OR has results
                 # Check for existing results first
@@ -1016,7 +1083,7 @@ def update_changes_in_db(track_code, race_date, change_list):
             
     return count
 
-def crawl_otb_changes():
+def crawl_otb_changes(fetch_telemetry=None):
     """
     Fallback crawler for OffTrackBetting.com
     Returns number of changes processed.
@@ -1031,7 +1098,7 @@ def crawl_otb_changes():
     logger.info("Starting Fallback Crawl: OTB Scratches & Changes")
     url = "https://www.offtrackbetting.com/scratches_changes.html"
     
-    html = fetch_static_page(url)
+    html = fetch_static_page(url, telemetry=fetch_telemetry)
     if not html:
         logger.error("Failed to fetch OTB page")
         return 0
@@ -1145,6 +1212,11 @@ def crawl_otb_changes():
     for trk, chgs in changes_by_track.items():
         total_saved += update_changes_in_db(trk, today, chgs)
         
+    logger.info(
+        "OTB processed %s record(s) using %s",
+        total_saved,
+        _format_fetcher_label(fetch_telemetry),
+    )
     return total_saved
 
 
@@ -1156,6 +1228,14 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
     
     total_changes_processed = 0
     today = date.today()
+    source_counts = {
+        'rss': 0,
+        'direct_html': 0,
+        'mobile_html': 0,
+        'index_html': 0,
+        'otb': 0,
+    }
+    fetch_telemetry = {}
     
     # Reset Logic
     if reset_first:
@@ -1203,6 +1283,7 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
         for trk in active_tracks:
             cnt = process_rss_for_track(trk)
             total_changes_processed += cnt
+            source_counts['rss'] += cnt
             
     except Exception as e:
         logger.error(f"RSS Scan Loop failed: {e}")
@@ -1212,28 +1293,52 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
     # even when the index is blocked or incomplete.
     try:
         for trk in active_tracks:
-            html, source_url = fetch_direct_track_changes_page(trk)
+            direct_fetch_meta = {}
+            html, source_url = fetch_direct_track_changes_page(trk, telemetry=direct_fetch_meta)
+            _merge_fetch_telemetry(fetch_telemetry, direct_fetch_meta)
+            source_name = 'direct_html'
             if not html:
                 changes = []
             else:
                 changes = parse_track_changes(html, trk)
             if not changes:
-                mobile_html, mobile_url = fetch_mobile_track_changes_page(trk)
+                mobile_fetch_meta = {}
+                mobile_html, mobile_url = fetch_mobile_track_changes_page(trk, telemetry=mobile_fetch_meta)
+                _merge_fetch_telemetry(fetch_telemetry, mobile_fetch_meta)
                 if mobile_html:
                     changes = parse_mobile_track_changes(mobile_html, trk)
                     source_url = mobile_url
+                    fetcher_label = _format_fetcher_label(mobile_fetch_meta)
+                    source_name = 'mobile_html'
+                else:
+                    fetcher_label = _format_fetcher_label(direct_fetch_meta)
+            else:
+                fetcher_label = _format_fetcher_label(direct_fetch_meta)
             if changes:
                 count = update_changes_in_db(trk, today, changes)
                 total_changes_processed += count
-                logger.info(f"Direct late-changes HTML processed {count} record(s) for {trk} via {source_url}")
+                source_counts[source_name] += count
+                logger.info(
+                    "Direct late-changes HTML processed %s record(s) for %s via %s using %s",
+                    count,
+                    trk,
+                    source_url,
+                    fetcher_label,
+                )
     except Exception as e:
         logger.error(f"Direct track late-changes fetch failed: {e}")
 
     # 1. Try Equibase Track Pages (HTML Fallback)
     try:
-        track_links = parse_late_changes_index() # This might be blocked too
+        index_fetch_meta = {}
+        track_links = parse_late_changes_index(telemetry=index_fetch_meta) # This might be blocked too
+        _merge_fetch_telemetry(fetch_telemetry, index_fetch_meta)
         if track_links:
-            logger.info(f"Found {len(track_links)} tracks with changes on Equibase HTML index")
+            logger.info(
+                "Found %s tracks with changes on Equibase HTML index using %s",
+                len(track_links),
+                _format_fetcher_label(index_fetch_meta),
+            )
             for link in track_links:
                 code = link['track_code']
                 if preferred_tracks and code.upper() not in preferred_tracks:
@@ -1243,12 +1348,22 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
                 # If RSS fails, this might work (via PowerShell)
                 url = link['url']
                 try:
-                    html = fetch_static_page(url)
+                    page_fetch_meta = {}
+                    html = fetch_static_page(url, telemetry=page_fetch_meta)
+                    _merge_fetch_telemetry(fetch_telemetry, page_fetch_meta)
                     if html:
                         changes = parse_track_changes(html, code)
                         if changes:
                             count = update_changes_in_db(code, today, changes)
                             total_changes_processed += count
+                            source_counts['index_html'] += count
+                            logger.info(
+                                "Equibase index HTML processed %s record(s) for %s via %s using %s",
+                                count,
+                                code,
+                                url,
+                                _format_fetcher_label(page_fetch_meta),
+                            )
                 except Exception as e:
                     logger.error(f"Error crawling {code}: {e}")
     except Exception as e:
@@ -1259,11 +1374,17 @@ def crawl_late_changes(reset_first=False, preferred_tracks=None):
     # 2. Run OTB Fallback
     logger.info("Starting OTB Fallback Crawl...")
     try:
-        otb_count = crawl_otb_changes()
+        otb_fetch_meta = {}
+        otb_count = crawl_otb_changes(fetch_telemetry=otb_fetch_meta)
+        _merge_fetch_telemetry(fetch_telemetry, otb_fetch_meta)
         total_changes_processed += otb_count
+        source_counts['otb'] += otb_count
         logger.info(f"OTB Helper added records.")
     except Exception as e:
         logger.error(f"OTB Crawl failed: {e}")
+
+    logger.info("Late-change contribution summary: %s", _summarize_contributions(source_counts))
+    logger.info("HTML fetch success summary: %s", _summarize_fetchers(fetch_telemetry))
         
     return total_changes_processed
 

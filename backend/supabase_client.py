@@ -25,6 +25,14 @@ SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_
 SUPABASE_POSTGREST_TIMEOUT_SECONDS = float(os.getenv('SUPABASE_POSTGREST_TIMEOUT_SECONDS', '15'))
 SUPABASE_CLIENT_MAX_AGE_SECONDS = float(os.getenv('SUPABASE_CLIENT_MAX_AGE_SECONDS', '14400'))
 SUPABASE_QUERY_RETRY_ATTEMPTS = max(int(os.getenv('SUPABASE_QUERY_RETRY_ATTEMPTS', '1')), 0)
+SUPABASE_HTTPX_MAX_CONNECTIONS = max(int(os.getenv('SUPABASE_HTTPX_MAX_CONNECTIONS', '6')), 1)
+SUPABASE_HTTPX_MAX_KEEPALIVE_CONNECTIONS = max(
+    int(os.getenv('SUPABASE_HTTPX_MAX_KEEPALIVE_CONNECTIONS', '4')),
+    0,
+)
+SUPABASE_HTTPX_KEEPALIVE_EXPIRY_SECONDS = float(
+    os.getenv('SUPABASE_HTTPX_KEEPALIVE_EXPIRY_SECONDS', '15')
+)
 
 # Singleton client instance
 _supabase_client: Client = None
@@ -55,9 +63,9 @@ def _build_httpx_client() -> httpx.Client:
         http2=False,
         trust_env=False,
         limits=httpx.Limits(
-            max_connections=20,
-            max_keepalive_connections=20,
-            keepalive_expiry=30.0,
+            max_connections=SUPABASE_HTTPX_MAX_CONNECTIONS,
+            max_keepalive_connections=SUPABASE_HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+            keepalive_expiry=SUPABASE_HTTPX_KEEPALIVE_EXPIRY_SECONDS,
         ),
     )
 

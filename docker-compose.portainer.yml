@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Pi-friendly memory cap for Flask API + DRF parsing subprocesses.
+    mem_limit: 768m
     ports:
       - "${BACKEND_PUBLISHED_PORT:-5001}:5001"
     environment:
@@ -18,11 +20,12 @@ services:
     networks:
       - horse-racing-network
     healthcheck:
-      test: [ "CMD", "python3", "-c", "import requests; requests.get('http://127.0.0.1:5001/api/health/live', timeout=5)" ]
-      interval: 30s
+      # Keep this cheap: just verify the API process is listening, not that it can serve a full HTTP request under load.
+      test: [ "CMD", "python3", "-c", "import socket, sys; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 5001)); s.close()" ]
+      interval: 180s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 10
+      start_period: 180s
     logging:
       driver: "json-file"
       options:
@@ -34,6 +37,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile.scheduler
     restart: unless-stopped
+    # Pi-friendly memory cap for the overnight crawler workload.
+    mem_limit: 512m
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
@@ -47,11 +52,12 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "find", "/tmp/crawler_heartbeat", "-mmin", "-20" ]
-      interval: 300s
+      # Overnight jobs can legitimately run a long time on the Pi, so allow a much older heartbeat before failing.
+      test: [ "CMD", "find", "/tmp/crawler_heartbeat", "-mmin", "-180" ]
+      interval: 1800s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 900s
     logging:
       driver: "json-file"
       options:
@@ -63,6 +69,8 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Keep the MCP sidecar bounded so backend work gets priority on the Pi.
+    mem_limit: 512m
     ports:
       - "${MCP_PUBLISHED_PORT:-8001}:8001"
     environment:
@@ -79,11 +87,12 @@ services:
         condition: service_healthy
     command: [ "python3", "backend/mcp_server.py" ]
     healthcheck:
-      test: [ "CMD", "python3", "-c", "import requests, sys; r = requests.get('http://127.0.0.1:8001/sse', headers={'Accept': 'text/event-stream'}, stream=True, timeout=(2, 5)); ok = r.status_code == 200 and r.headers.get('content-type', '').startswith('text/event-stream'); r.close(); sys.exit(0 if ok else 1)" ]
-      interval: 60s
+      # Port-open check is far more reliable on a Pi than opening an SSE stream for every health probe.
+      test: [ "CMD", "python3", "-c", "import socket, sys; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 8001)); s.close()" ]
+      interval: 300s
       timeout: 10s
-      retries: 3
-      start_period: 15s
+      retries: 10
+      start_period: 180s
     logging:
       driver: "json-file"
       options:
