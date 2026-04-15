@@ -28,6 +28,8 @@ from runtime_state import (
 import traceback
 import pytz
 
+EST = pytz.timezone("America/New_York")
+
 try:
     print("Initializing Flask app...", file=sys.stdout, flush=True)
     app = Flask(__name__)
