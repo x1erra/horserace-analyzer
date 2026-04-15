@@ -19,13 +19,10 @@ services:
       - ./logs:/app/logs
     networks:
       - horse-racing-network
+    # Docker healthchecks rely on exec/fork inside the container, which is unreliable under Pi memory pressure.
+    # TrackData health is monitored from the host via real service endpoints instead.
     healthcheck:
-      # Keep this cheap: just verify the API process is listening, not that it can serve a full HTTP request under load.
-      test: [ "CMD", "python3", "-c", "import socket, sys; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 5001)); s.close()" ]
-      interval: 180s
-      timeout: 10s
-      retries: 10
-      start_period: 180s
+      disable: true
     logging:
       driver: "json-file"
       options:
@@ -51,14 +48,10 @@ services:
       - horse-racing-network
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
+    # Scheduler health is monitored from the host via the mounted scheduler heartbeat file.
     healthcheck:
-      # Overnight jobs can legitimately run a long time on the Pi, so allow a much older heartbeat before failing.
-      test: [ "CMD", "find", "/tmp/crawler_heartbeat", "-mmin", "-180" ]
-      interval: 1800s
-      timeout: 10s
-      retries: 3
-      start_period: 900s
+      disable: true
     logging:
       driver: "json-file"
       options:
@@ -85,15 +78,11 @@ services:
       - horse-racing-network
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_started
     command: [ "python3", "backend/mcp_server.py" ]
+    # MCP health is monitored from the host via direct TCP/SSE checks rather than Docker exec healthchecks.
     healthcheck:
-      # Port-open check is far more reliable on a Pi than opening an SSE stream for every health probe.
-      test: [ "CMD", "python3", "-c", "import socket, sys; s = socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 8001)); s.close()" ]
-      interval: 300s
-      timeout: 10s
-      retries: 10
-      start_period: 180s
+      disable: true
     logging:
       driver: "json-file"
       options:

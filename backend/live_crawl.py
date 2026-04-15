@@ -3,6 +3,7 @@ import logging
 import signal
 import sys
 import os
+import json
 import tempfile
 import pytz
 from datetime import datetime, date, timedelta
@@ -32,6 +33,7 @@ EST = pytz.timezone("America/New_York")
 START_HOUR = 0
 END_HOUR = 23 # Run 24/7 to ensure morning races are captured
 HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "crawler_heartbeat")
+HOST_HEARTBEAT_FILE = os.path.join(log_dir, "scheduler_heartbeat.json")
 
 
 def record_crawl_result(crawl_type, success, **details):
@@ -295,11 +297,22 @@ def run_startup_backfill(now):
     evaluate_runtime_alerts(during_racing_hours=8 <= now.hour <= 23)
 
 def touch_heartbeat():
-    """Update heartbeat file to signal health to Docker"""
+    """Update container-local and host-visible heartbeat files."""
     try:
         with open(HEARTBEAT_FILE, 'w') as f:
             f.write(str(time.time()))
-        logger.debug(f"Heartbeat updated at {HEARTBEAT_FILE}")
+
+        host_payload = {
+            "service": "scheduler",
+            "status": "alive",
+            "pid": os.getpid(),
+            "hostname": os.getenv("HOSTNAME"),
+            "updated_at": datetime.now(EST).isoformat(),
+            "updated_at_epoch": time.time(),
+        }
+        with open(HOST_HEARTBEAT_FILE, 'w') as f:
+            json.dump(host_payload, f)
+        logger.debug(f"Heartbeat updated at {HEARTBEAT_FILE} and {HOST_HEARTBEAT_FILE}")
     except Exception as e:
         logger.error(f"Failed to update heartbeat: {e}")
 
@@ -422,6 +435,8 @@ def signal_handler(sig, frame):
     try:
         if os.path.exists(HEARTBEAT_FILE):
             os.remove(HEARTBEAT_FILE)
+        if os.path.exists(HOST_HEARTBEAT_FILE):
+            os.remove(HOST_HEARTBEAT_FILE)
     except:
         pass
     sys.exit(0)
