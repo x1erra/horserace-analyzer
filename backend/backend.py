@@ -8,7 +8,9 @@ import sys
 print("Backend script starting...", file=sys.stdout, flush=True)
 import subprocess
 import logging
+import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -47,6 +49,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logger = logging.getLogger(__name__)
 FILTER_OPTIONS_CACHE_SECONDS = int(os.getenv("FILTER_OPTIONS_CACHE_SECONDS", "30"))
+SCHEDULER_HEARTBEAT_STALE_SECONDS = int(os.getenv("SCHEDULER_HEARTBEAT_STALE_SECONDS", "7200"))
 
 
 def _snapshot_key_for_todays_races(target_date):
@@ -94,6 +97,23 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _discover_scheduler_heartbeat_file():
+    log_dir = os.getenv("LOG_DIR")
+    candidates = []
+    if log_dir:
+        candidates.append(Path(log_dir) / "scheduler_heartbeat.json")
+    candidates.extend([
+        Path("/app/logs/scheduler_heartbeat.json"),
+        Path(__file__).resolve().parent.parent / "logs" / "scheduler_heartbeat.json",
+    ])
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[0] if candidates else Path("/app/logs/scheduler_heartbeat.json")
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """One-stop system health endpoint for DB, crawler freshness, and runtime alerts."""
@@ -119,6 +139,59 @@ def live_health_check():
         'service': 'backend',
         'version': '1.0.3'
     })
+
+
+@app.route('/api/health/scheduler', methods=['GET'])
+def scheduler_health_check():
+    """Host-monitor-friendly scheduler heartbeat endpoint."""
+    heartbeat_file = _discover_scheduler_heartbeat_file()
+    now = datetime.now(EST)
+
+    if not heartbeat_file.exists():
+        return jsonify({
+            'status': 'missing',
+            'service': 'scheduler',
+            'reason': 'scheduler heartbeat file not found',
+            'heartbeat_file': str(heartbeat_file),
+            'stale_threshold_seconds': SCHEDULER_HEARTBEAT_STALE_SECONDS,
+        }), 503
+
+    try:
+        with heartbeat_file.open('r', encoding='utf-8') as fh:
+            payload = json.load(fh)
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'service': 'scheduler',
+            'reason': f'failed to read scheduler heartbeat: {e}',
+            'heartbeat_file': str(heartbeat_file),
+            'stale_threshold_seconds': SCHEDULER_HEARTBEAT_STALE_SECONDS,
+        }), 503
+
+    updated_at = payload.get('updated_at')
+    updated_at_dt = datetime.fromisoformat(updated_at) if updated_at else None
+    age_seconds = None
+    if updated_at_dt is not None:
+        age_seconds = max(0, int((now - updated_at_dt).total_seconds()))
+
+    status = 'healthy'
+    status_code = 200
+    if age_seconds is None:
+        status = 'unknown'
+        status_code = 503
+    elif age_seconds > SCHEDULER_HEARTBEAT_STALE_SECONDS:
+        status = 'stale'
+        status_code = 503
+
+    return jsonify({
+        'status': status,
+        'service': 'scheduler',
+        'heartbeat_file': str(heartbeat_file),
+        'updated_at': updated_at,
+        'age_seconds': age_seconds,
+        'stale_threshold_seconds': SCHEDULER_HEARTBEAT_STALE_SECONDS,
+        'details': payload,
+    }), status_code
 
 
 def format_to_12h(time_str):
