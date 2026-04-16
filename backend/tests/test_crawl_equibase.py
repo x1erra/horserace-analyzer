@@ -35,6 +35,7 @@ class TestCrawlEquibase(unittest.TestCase):
     def setUp(self):
         crawl_equibase._equibase_cookie_cache['cookies'] = None
         crawl_equibase._equibase_cookie_cache['fetched_at'] = 0.0
+        crawl_equibase.close_shared_equibase_webdriver()
 
     def test_build_race_map_indexes_valid_races_only(self):
         race_map = crawl_equibase.build_race_map([
@@ -111,11 +112,12 @@ class TestCrawlEquibase(unittest.TestCase):
         fake_driver = MagicMock()
         fake_driver.get_cookies.return_value = []
 
-        with patch.object(crawl_equibase, "create_equibase_webdriver", return_value=fake_driver), \
+        with patch.object(crawl_equibase, "get_shared_equibase_webdriver", return_value=fake_driver), \
              patch.object(crawl_equibase, "warm_equibase_browser_session", return_value=True) as warm_session, \
              patch.object(crawl_equibase, "fetch_pdf_via_browser_context", return_value=b"%PDF via browser") as browser_fetch, \
              patch.object(crawl_equibase, "wait_for_downloaded_pdf") as wait_download, \
              patch.object(crawl_equibase, "download_pdf_via_cookie_replay") as cookie_replay:
+            crawl_equibase._equibase_browser_session['download_dir'] = '/tmp'
             content = crawl_equibase.download_pdf_via_selenium("https://example.test/race.pdf", timeout=9)
 
         self.assertEqual(content, b"%PDF via browser")
@@ -123,13 +125,13 @@ class TestCrawlEquibase(unittest.TestCase):
         browser_fetch.assert_called_once()
         wait_download.assert_not_called()
         cookie_replay.assert_not_called()
-        fake_driver.quit.assert_called_once()
+        fake_driver.quit.assert_not_called()
 
     def test_download_pdf_via_selenium_falls_back_to_cookie_replay(self):
         fake_driver = MagicMock()
         fake_driver.get_cookies.return_value = [{"name": "visid", "value": "abc"}]
 
-        with patch.object(crawl_equibase, "create_equibase_webdriver", return_value=fake_driver), \
+        with patch.object(crawl_equibase, "get_shared_equibase_webdriver", return_value=fake_driver), \
              patch.object(crawl_equibase, "warm_equibase_browser_session", return_value=True), \
              patch.object(crawl_equibase, "fetch_pdf_via_browser_context", return_value=None), \
              patch.object(crawl_equibase, "wait_for_downloaded_pdf", return_value=None), \
@@ -138,11 +140,20 @@ class TestCrawlEquibase(unittest.TestCase):
                  "download_pdf_via_cookie_replay",
                  return_value=b"%PDF via replay",
              ) as cookie_replay:
+            crawl_equibase._equibase_browser_session['download_dir'] = '/tmp'
             content = crawl_equibase.download_pdf_via_selenium("https://example.test/race.pdf", timeout=9)
 
         self.assertEqual(content, b"%PDF via replay")
         self.assertEqual(cookie_replay.call_args.args[1], {"visid": "abc"})
-        fake_driver.quit.assert_called_once()
+        fake_driver.quit.assert_not_called()
+
+    def test_download_pdf_via_selenium_skips_when_no_container_headroom(self):
+        with patch.object(crawl_equibase, "get_shared_equibase_webdriver", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_cookie_replay") as cookie_replay:
+            content = crawl_equibase.download_pdf_via_selenium("https://example.test/race.pdf", timeout=9)
+
+        self.assertIsNone(content)
+        cookie_replay.assert_not_called()
 
     def test_parse_equibase_static_pdf_url_extracts_metadata(self):
         parsed = crawl_equibase.parse_equibase_static_pdf_url(

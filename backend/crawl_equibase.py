@@ -9,6 +9,8 @@ import sys
 import logging
 import time
 import re
+import gc
+import atexit
 import shutil
 import base64
 import tempfile
@@ -63,6 +65,178 @@ DEFAULT_BROWSER_HEADERS = {
 }
 COOKIE_CACHE_TTL_SECONDS = 20 * 60
 _equibase_cookie_cache = {'cookies': None, 'fetched_at': 0.0}
+CHROMIUM_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_CHROMIUM_MIN_HEADROOM_MB', '512')) * 1024 * 1024
+POWERSHELL_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_PWSH_MIN_HEADROOM_MB', '192')) * 1024 * 1024
+SHARED_BROWSER_MAX_AGE_SECONDS = int(os.getenv('EQUIBASE_BROWSER_MAX_AGE_SECONDS', '900'))
+SHARED_BROWSER_MAX_DOWNLOADS = int(os.getenv('EQUIBASE_BROWSER_MAX_DOWNLOADS', '18'))
+_equibase_browser_session = {
+    'driver': None,
+    'download_dir': None,
+    'tempdir': None,
+    'created_at': 0.0,
+    'uses': 0,
+}
+
+
+def _read_cgroup_int(*paths: str) -> Optional[int]:
+    """Read the first available cgroup memory value."""
+    for path in paths:
+        try:
+            with open(path, 'r', encoding='utf-8') as fh:
+                raw = fh.read().strip()
+        except OSError:
+            continue
+
+        if not raw or raw == 'max':
+            return None
+
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+
+        # cgroup v1 may expose a very large sentinel when no limit is set.
+        if value <= 0 or value >= (1 << 60):
+            return None
+        return value
+
+    return None
+
+
+def get_container_memory_usage_bytes() -> Optional[int]:
+    return _read_cgroup_int(
+        '/sys/fs/cgroup/memory.current',
+        '/sys/fs/cgroup/memory/memory.usage_in_bytes',
+    )
+
+
+def get_container_memory_limit_bytes() -> Optional[int]:
+    return _read_cgroup_int(
+        '/sys/fs/cgroup/memory.max',
+        '/sys/fs/cgroup/memory/memory.limit_in_bytes',
+    )
+
+
+def has_container_memory_headroom(minimum_bytes: int, label: str) -> bool:
+    """
+    Guard heavy fallbacks against the scheduler's cgroup limit, not host RAM.
+    """
+    usage = get_container_memory_usage_bytes()
+    limit = get_container_memory_limit_bytes()
+    if usage is None or limit is None:
+        return True
+
+    remaining = limit - usage
+    if remaining >= minimum_bytes:
+        return True
+
+    logger.warning(
+        "Skipping %s: only %.1f MB headroom remains under container limit (usage=%.1f MB, limit=%.1f MB)",
+        label,
+        remaining / (1024 * 1024),
+        usage / (1024 * 1024),
+        limit / (1024 * 1024),
+    )
+    return False
+
+
+def close_shared_equibase_webdriver(reason: str = "") -> None:
+    """Tear down the shared Chromium session and its download directory."""
+    driver = _equibase_browser_session.get('driver')
+    tempdir = _equibase_browser_session.get('tempdir')
+
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+    if tempdir is not None:
+        try:
+            tempdir.cleanup()
+        except Exception:
+            pass
+
+    _equibase_browser_session.update(
+        {
+            'driver': None,
+            'download_dir': None,
+            'tempdir': None,
+            'created_at': 0.0,
+            'uses': 0,
+        }
+    )
+
+    if reason:
+        logger.info("Closed shared Equibase browser session (%s)", reason)
+
+
+def clear_shared_browser_download_dir() -> None:
+    """Prevent stale files from being misread as the current download."""
+    download_dir = _equibase_browser_session.get('download_dir')
+    if not download_dir or not os.path.isdir(download_dir):
+        return
+
+    for name in os.listdir(download_dir):
+        path = os.path.join(download_dir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+
+
+def get_shared_equibase_webdriver(timeout: int = 45):
+    """
+    Reuse one Chromium instance across PDF downloads instead of launching one per race.
+    """
+    driver = _equibase_browser_session.get('driver')
+    should_rotate = False
+
+    if driver is not None:
+        age_seconds = time.time() - (_equibase_browser_session.get('created_at') or 0.0)
+        if age_seconds > SHARED_BROWSER_MAX_AGE_SECONDS:
+            should_rotate = True
+        elif _equibase_browser_session.get('uses', 0) >= SHARED_BROWSER_MAX_DOWNLOADS:
+            should_rotate = True
+        else:
+            try:
+                driver.current_url
+            except Exception:
+                should_rotate = True
+
+    if should_rotate:
+        close_shared_equibase_webdriver(reason="rotation")
+        driver = None
+
+    if driver is None:
+        if not has_container_memory_headroom(CHROMIUM_MIN_HEADROOM_BYTES, "Chromium Equibase fallback"):
+            return None
+
+        tempdir = tempfile.TemporaryDirectory(prefix='equibase_browser_')
+        driver = create_equibase_webdriver(download_dir=tempdir.name, timeout=timeout)
+        if driver is None:
+            tempdir.cleanup()
+            return None
+
+        _equibase_browser_session.update(
+            {
+                'driver': driver,
+                'download_dir': tempdir.name,
+                'tempdir': tempdir,
+                'created_at': time.time(),
+                'uses': 0,
+            }
+        )
+        logger.info("Created shared Chromium session for Equibase PDF retrieval")
+
+    _equibase_browser_session['uses'] = _equibase_browser_session.get('uses', 0) + 1
+    clear_shared_browser_download_dir()
+    return _equibase_browser_session['driver']
+
+
+atexit.register(close_shared_equibase_webdriver)
 
 
 def normalize_name(name: str) -> str:
@@ -428,11 +602,9 @@ def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional
     if cached and (time.time() - fetched_at) < COOKIE_CACHE_TTL_SECONDS:
         return cached
 
-    driver = None
-
     try:
         logger.info("Launching headless Chromium to satisfy Equibase protection")
-        driver = create_equibase_webdriver(timeout=timeout)
+        driver = get_shared_equibase_webdriver(timeout=timeout)
         if driver is None:
             return None
         warm_equibase_browser_session(driver, target_url, timeout)
@@ -446,63 +618,51 @@ def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional
         logger.warning("Browser session completed without any Equibase cookies")
     except WebDriverException as e:
         logger.warning(f"Chromium fallback failed while solving Equibase challenge: {e}")
+        close_shared_equibase_webdriver(reason="webdriver error while fetching cookies")
     except Exception as e:
         logger.warning(f"Unexpected Chromium fallback error: {e}")
-    finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        close_shared_equibase_webdriver(reason="unexpected error while fetching cookies")
 
     return None
 
 
 def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes]:
     """Last-resort downloader that uses a real browser session before falling back to cookie replay."""
-    driver = None
     cookies = None
 
     try:
-        with tempfile.TemporaryDirectory(prefix='equibase_dl_') as download_dir:
-            logger.info("Launching headless Chromium for native Equibase PDF retrieval")
-            driver = create_equibase_webdriver(
-                download_dir=download_dir,
-                timeout=min(timeout, 45),
-            )
-            if driver is None:
-                return None
+        logger.info("Reusing shared Chromium session for Equibase PDF retrieval")
+        driver = get_shared_equibase_webdriver(timeout=min(timeout, 45))
+        if driver is None:
+            return None
 
-            warm_equibase_browser_session(driver, 'https://www.equibase.com/', min(timeout, 25))
+        warm_equibase_browser_session(driver, 'https://www.equibase.com/', min(timeout, 25))
 
-            content = fetch_pdf_via_browser_context(driver, pdf_url, timeout=min(timeout, 25))
-            if content:
-                return content
+        content = fetch_pdf_via_browser_context(driver, pdf_url, timeout=min(timeout, 25))
+        if content:
+            return content
 
-            try:
-                driver.get(pdf_url)
-            except Exception as e:
-                logger.warning(f"selenium browser navigation error for {pdf_url}: {e}")
+        try:
+            driver.get(pdf_url)
+        except Exception as e:
+            logger.warning(f"selenium browser navigation error for {pdf_url}: {e}")
 
-            content = wait_for_downloaded_pdf(download_dir, timeout=min(timeout, 25))
-            if content:
-                logger.info(f"selenium browser download captured PDF ({len(content)} bytes)")
-                return content
+        download_dir = _equibase_browser_session.get('download_dir')
+        content = wait_for_downloaded_pdf(download_dir, timeout=min(timeout, 25)) if download_dir else None
+        if content:
+            logger.info(f"selenium browser download captured PDF ({len(content)} bytes)")
+            return content
 
-            cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
-            if cookies:
-                _equibase_cookie_cache['cookies'] = cookies
-                _equibase_cookie_cache['fetched_at'] = time.time()
+        cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
+        if cookies:
+            _equibase_cookie_cache['cookies'] = cookies
+            _equibase_cookie_cache['fetched_at'] = time.time()
     except WebDriverException as e:
         logger.warning(f"Chromium PDF retrieval failed for {pdf_url}: {e}")
+        close_shared_equibase_webdriver(reason="webdriver error during PDF retrieval")
     except Exception as e:
         logger.warning(f"Unexpected Chromium PDF retrieval error for {pdf_url}: {e}")
-    finally:
-        if driver is not None:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+        close_shared_equibase_webdriver(reason="unexpected error during PDF retrieval")
 
     return download_pdf_via_cookie_replay(pdf_url, cookies, timeout=timeout)
 
@@ -510,6 +670,8 @@ def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes
 def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[bytes]:
     """Last-resort downloader using pwsh inside the production container image."""
     if shutil.which("pwsh") is None:
+        return None
+    if not has_container_memory_headroom(POWERSHELL_MIN_HEADROOM_BYTES, "PowerShell Equibase fallback"):
         return None
 
     temp_file = f"/tmp/equibase_{int(time.time())}_{os.getpid()}.pdf"
@@ -581,11 +743,6 @@ def download_full_card_pdf(track_code: str, race_date: date, timeout: int = 60) 
         except Exception as e:
             logger.warning(f"curl_cffi full-card download error: {e}")
 
-    content = download_pdf_via_powershell(url, timeout=timeout)
-    if content:
-        logger.info(f"Recovered full-card PDF for {track_code} {race_date} via pwsh")
-        return content
-
     try:
         logger.info(f"Attempting full-card PDF for {track_code} {race_date} via requests")
         response = requests.get(url, headers=DEFAULT_BROWSER_HEADERS, timeout=timeout)
@@ -599,6 +756,11 @@ def download_full_card_pdf(track_code: str, race_date: date, timeout: int = 60) 
         )
     except Exception as e:
         logger.warning(f"requests full-card download error: {e}")
+
+    content = download_pdf_via_powershell(url, timeout=timeout)
+    if content:
+        logger.info(f"Recovered full-card PDF for {track_code} {race_date} via pwsh")
+        return content
 
     content = download_pdf_via_selenium(url, timeout=timeout)
     if content:
@@ -615,13 +777,22 @@ def download_pdf(pdf_url: str, timeout: int = 40) -> Optional[bytes]:
     """
     logger.info(f"Downloading PDF from {pdf_url} using layered fallbacks")
 
-    for downloader in (
+    lightweight_downloaders = (
         download_pdf_via_curl_cffi,
         download_pdf_via_cloudscraper,
         download_pdf_via_requests,
+    )
+    heavy_downloaders = (
         download_pdf_via_powershell,
         download_pdf_via_selenium,
-    ):
+    )
+
+    for downloader in lightweight_downloaders:
+        content = downloader(pdf_url, timeout=timeout)
+        if content:
+            return content
+
+    for downloader in heavy_downloaders:
         content = downloader(pdf_url, timeout=timeout)
         if content:
             return content
@@ -1550,6 +1721,7 @@ def extract_race_from_pdf(
         else:
             # Parse PDF
             race_data = parse_equibase_pdf(pdf_bytes)
+            del pdf_bytes
             if race_data and race_data.get('horses'):
                 logger.info(f"Successfully extracted race with {len(race_data['horses'])} horses")
                 return race_data
@@ -1569,6 +1741,7 @@ def extract_race_from_pdf(
                 if full_card_pdf:
                     try:
                         full_card_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                        del full_card_pdf
                     except Exception as e:
                         logger.error(f"Full-card fallback parse failed: {e}")
                         full_card_map = None
@@ -1588,6 +1761,7 @@ def extract_race_from_pdf(
                     logger.error(f"Full-card fallback parse failed: {e}")
 
         if attempt < max_retries:
+            gc.collect()
             time.sleep(2 * attempt)
 
     logger.error(f"All extraction attempts failed for {pdf_url}")
@@ -2122,6 +2296,7 @@ def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]])
         if full_card_pdf:
             try:
                 full_card_race_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                del full_card_pdf
                 if full_card_race_map:
                     logger.info(
                         "Loaded %s races from full-card cache for unresolved %s retries on %s",
@@ -2162,6 +2337,9 @@ def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]])
                 stats['races_failed'] += 1
 
             time.sleep(1)
+
+        full_card_race_map = {}
+        gc.collect()
 
     return stats
 
@@ -2206,6 +2384,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
         if full_card_pdf:
             try:
                 full_card_race_map = build_race_map(parse_equibase_full_card(full_card_pdf))
+                del full_card_pdf
                 if full_card_race_map:
                     logger.info(
                         "Loaded %s races from full-card cache for %s on %s",
@@ -2279,6 +2458,9 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
 
             race_num += 1
             time.sleep(1)  # Be polite to Equibase servers
+
+        full_card_race_map = {}
+        gc.collect()
 
     logger.info("\n" + "="*80)
     logger.info("Crawl Summary:")
