@@ -1,6 +1,7 @@
 import os
 import sys
 import types
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +36,9 @@ class TestCrawlEquibase(unittest.TestCase):
     def setUp(self):
         crawl_equibase._equibase_cookie_cache['cookies'] = None
         crawl_equibase._equibase_cookie_cache['fetched_at'] = 0.0
+        for state in crawl_equibase._heavy_fallback_state.values():
+            state['failures'] = 0
+            state['cooldown_until'] = 0.0
         crawl_equibase.close_shared_equibase_webdriver()
 
     def test_build_race_map_indexes_valid_races_only(self):
@@ -90,6 +94,18 @@ class TestCrawlEquibase(unittest.TestCase):
 
         self.assertEqual(content, b"%PDF via selenium")
         selenium_dl.assert_called_once()
+
+    def test_download_pdf_skips_heavy_fallbacks_when_circuit_breaker_is_open(self):
+        with patch.object(crawl_equibase, "download_pdf_via_curl_cffi", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_cloudscraper", return_value=None), \
+             patch.object(crawl_equibase, "download_pdf_via_requests", return_value=None), \
+             patch.object(crawl_equibase, "heavy_fallback_available", return_value=False), \
+             patch.object(crawl_equibase, "get_shared_equibase_webdriver") as shared_driver, \
+             patch.object(crawl_equibase.shutil, "which", return_value="/usr/bin/pwsh"):
+            content = crawl_equibase.download_pdf("https://example.test/race.pdf", timeout=12)
+
+        self.assertIsNone(content)
+        shared_driver.assert_not_called()
 
     def test_download_pdf_via_cookie_replay_uses_browser_cookies(self):
         response = types.SimpleNamespace(
@@ -244,6 +260,7 @@ class TestCrawlEquibase(unittest.TestCase):
                  ],
              ) as extract_race, \
              patch.object(crawl_equibase, "insert_race_to_db", return_value=True) as insert_race, \
+             patch.object(crawl_equibase, "close_shared_equibase_webdriver") as close_browser, \
              patch.object(crawl_equibase, "time") as time_mod:
             stats = crawl_equibase.crawl_specific_races(
                 crawl_equibase.date.fromisoformat("2026-04-02"),
@@ -256,6 +273,7 @@ class TestCrawlEquibase(unittest.TestCase):
         insert_calls = [call.args[3]["race_number"] for call in insert_race.call_args_list]
         self.assertEqual(insert_calls, [8, 3])
         self.assertEqual(time_mod.sleep.call_count, 2)
+        close_browser.assert_called_once()
 
     def test_crawl_specific_races_skips_verified_races(self):
         supabase = MagicMock()

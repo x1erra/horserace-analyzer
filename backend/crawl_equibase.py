@@ -69,12 +69,18 @@ CHROMIUM_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_CHROMIUM_MIN_HEADROOM_MB',
 POWERSHELL_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_PWSH_MIN_HEADROOM_MB', '192')) * 1024 * 1024
 SHARED_BROWSER_MAX_AGE_SECONDS = int(os.getenv('EQUIBASE_BROWSER_MAX_AGE_SECONDS', '900'))
 SHARED_BROWSER_MAX_DOWNLOADS = int(os.getenv('EQUIBASE_BROWSER_MAX_DOWNLOADS', '18'))
+HEAVY_FALLBACK_FAILURE_THRESHOLD = int(os.getenv('EQUIBASE_HEAVY_FAILURE_THRESHOLD', '3'))
+HEAVY_FALLBACK_COOLDOWN_SECONDS = int(os.getenv('EQUIBASE_HEAVY_COOLDOWN_SECONDS', '900'))
 _equibase_browser_session = {
     'driver': None,
     'download_dir': None,
     'tempdir': None,
     'created_at': 0.0,
     'uses': 0,
+}
+_heavy_fallback_state = {
+    'powershell': {'failures': 0, 'cooldown_until': 0.0},
+    'selenium': {'failures': 0, 'cooldown_until': 0.0},
 }
 
 
@@ -138,6 +144,45 @@ def has_container_memory_headroom(minimum_bytes: int, label: str) -> bool:
         limit / (1024 * 1024),
     )
     return False
+
+
+def heavy_fallback_available(name: str) -> bool:
+    state = _heavy_fallback_state[name]
+    cooldown_until = state.get('cooldown_until', 0.0)
+    if cooldown_until <= time.time():
+        return True
+
+    remaining = max(0, int(cooldown_until - time.time()))
+    logger.warning(
+        "Skipping %s fallback: circuit breaker open for %ss after repeated failures",
+        name,
+        remaining,
+    )
+    return False
+
+
+def record_heavy_fallback_success(name: str) -> None:
+    state = _heavy_fallback_state[name]
+    if state.get('failures', 0) or state.get('cooldown_until', 0.0):
+        logger.info("Reset %s fallback circuit after a successful attempt", name)
+    state['failures'] = 0
+    state['cooldown_until'] = 0.0
+
+
+def record_heavy_fallback_failure(name: str) -> None:
+    state = _heavy_fallback_state[name]
+    state['failures'] = state.get('failures', 0) + 1
+    if state['failures'] < HEAVY_FALLBACK_FAILURE_THRESHOLD:
+        return
+
+    state['cooldown_until'] = time.time() + HEAVY_FALLBACK_COOLDOWN_SECONDS
+    logger.warning(
+        "Opening %s fallback circuit for %ss after %s consecutive failures",
+        name,
+        HEAVY_FALLBACK_COOLDOWN_SECONDS,
+        state['failures'],
+    )
+    state['failures'] = 0
 
 
 def close_shared_equibase_webdriver(reason: str = "") -> None:
@@ -628,6 +673,9 @@ def get_equibase_browser_cookies(target_url: str, timeout: int = 45) -> Optional
 
 def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes]:
     """Last-resort downloader that uses a real browser session before falling back to cookie replay."""
+    if not heavy_fallback_available('selenium'):
+        return None
+
     cookies = None
 
     try:
@@ -640,6 +688,7 @@ def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes
 
         content = fetch_pdf_via_browser_context(driver, pdf_url, timeout=min(timeout, 25))
         if content:
+            record_heavy_fallback_success('selenium')
             return content
 
         try:
@@ -651,6 +700,7 @@ def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes
         content = wait_for_downloaded_pdf(download_dir, timeout=min(timeout, 25)) if download_dir else None
         if content:
             logger.info(f"selenium browser download captured PDF ({len(content)} bytes)")
+            record_heavy_fallback_success('selenium')
             return content
 
         cookies = {cookie['name']: cookie['value'] for cookie in driver.get_cookies()}
@@ -659,17 +709,27 @@ def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes
             _equibase_cookie_cache['fetched_at'] = time.time()
     except WebDriverException as e:
         logger.warning(f"Chromium PDF retrieval failed for {pdf_url}: {e}")
+        record_heavy_fallback_failure('selenium')
         close_shared_equibase_webdriver(reason="webdriver error during PDF retrieval")
     except Exception as e:
         logger.warning(f"Unexpected Chromium PDF retrieval error for {pdf_url}: {e}")
+        record_heavy_fallback_failure('selenium')
         close_shared_equibase_webdriver(reason="unexpected error during PDF retrieval")
 
-    return download_pdf_via_cookie_replay(pdf_url, cookies, timeout=timeout)
+    replayed = download_pdf_via_cookie_replay(pdf_url, cookies, timeout=timeout)
+    if replayed:
+        record_heavy_fallback_success('selenium')
+        return replayed
+
+    record_heavy_fallback_failure('selenium')
+    return None
 
 
 def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[bytes]:
     """Last-resort downloader using pwsh inside the production container image."""
     if shutil.which("pwsh") is None:
+        return None
+    if not heavy_fallback_available('powershell'):
         return None
     if not has_container_memory_headroom(POWERSHELL_MIN_HEADROOM_BYTES, "PowerShell Equibase fallback"):
         return None
@@ -695,18 +755,23 @@ def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[byt
         )
         if result.returncode != 0:
             logger.warning(f"pwsh download failed for {pdf_url}: {result.stderr.strip()}")
+            record_heavy_fallback_failure('powershell')
             return None
         if not os.path.exists(temp_file):
             logger.warning(f"pwsh did not produce a file for {pdf_url}")
+            record_heavy_fallback_failure('powershell')
             return None
         with open(temp_file, 'rb') as fh:
             content = fh.read()
         if is_pdf_bytes(content):
             logger.info(f"pwsh downloaded PDF ({len(content)} bytes)")
+            record_heavy_fallback_success('powershell')
             return content
         logger.warning(f"pwsh download for {pdf_url} was not a PDF")
+        record_heavy_fallback_failure('powershell')
     except Exception as e:
         logger.warning(f"pwsh static download error for {pdf_url}: {e}")
+        record_heavy_fallback_failure('powershell')
     finally:
         if os.path.exists(temp_file):
             try:
@@ -2341,6 +2406,7 @@ def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]])
         full_card_race_map = {}
         gc.collect()
 
+    close_shared_equibase_webdriver(reason="focused retry crawl complete")
     return stats
 
 
@@ -2462,6 +2528,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
         full_card_race_map = {}
         gc.collect()
 
+    close_shared_equibase_webdriver(reason="historical crawl complete")
     logger.info("\n" + "="*80)
     logger.info("Crawl Summary:")
     logger.info(f"  Date: {stats['date']}")
