@@ -146,6 +146,24 @@ def has_container_memory_headroom(minimum_bytes: int, label: str) -> bool:
     return False
 
 
+def format_container_memory_summary() -> str:
+    usage = get_container_memory_usage_bytes()
+    limit = get_container_memory_limit_bytes()
+    if usage is None or limit is None:
+        return "container_memory=unknown"
+
+    remaining = max(0, limit - usage)
+    return (
+        f"container_memory usage={usage / (1024 * 1024):.1f}MB "
+        f"limit={limit / (1024 * 1024):.1f}MB "
+        f"headroom={remaining / (1024 * 1024):.1f}MB"
+    )
+
+
+def log_container_memory(label: str) -> None:
+    logger.info("%s | %s", label, format_container_memory_summary())
+
+
 def heavy_fallback_available(name: str) -> bool:
     state = _heavy_fallback_state[name]
     cooldown_until = state.get('cooldown_until', 0.0)
@@ -2356,6 +2374,7 @@ def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]])
     supabase = get_supabase_client()
 
     for track_code in grouped_targets:
+        log_container_memory(f"Focused retry starting track {track_code}")
         full_card_race_map = {}
         full_card_pdf = download_full_card_pdf(track_code, target_date)
         if full_card_pdf:
@@ -2405,6 +2424,7 @@ def crawl_specific_races(target_date: date, race_targets: List[Tuple[str, int]])
 
         full_card_race_map = {}
         gc.collect()
+        log_container_memory(f"Focused retry finished track {track_code}")
 
     close_shared_equibase_webdriver(reason="focused retry crawl complete")
     return stats
@@ -2440,6 +2460,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
 
     for track_code in tracks:
         logger.info(f"\nProcessing track: {track_code}")
+        log_container_memory(f"Historical crawl starting track {track_code}")
 
         track_had_races = False
         race_num = 1
@@ -2527,6 +2548,7 @@ def crawl_historical_races(target_date: date, tracks: List[str] = None) -> Dict:
 
         full_card_race_map = {}
         gc.collect()
+        log_container_memory(f"Historical crawl finished track {track_code}")
 
     close_shared_equibase_webdriver(reason="historical crawl complete")
     logger.info("\n" + "="*80)

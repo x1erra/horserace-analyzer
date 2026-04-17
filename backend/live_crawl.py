@@ -5,9 +5,11 @@ import sys
 import os
 import json
 import tempfile
+import traceback
 import pytz
+from multiprocessing import get_context
 from datetime import datetime, date, timedelta
-from crawl_equibase import crawl_historical_races, crawl_specific_races, COMMON_TRACKS
+from crawl_equibase import COMMON_TRACKS
 from crawl_entries import crawl_entries
 from crawl_scratches import crawl_late_changes
 from bet_resolution import resolve_all_pending_bets
@@ -34,10 +36,88 @@ START_HOUR = 0
 END_HOUR = 23 # Run 24/7 to ensure morning races are captured
 HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "crawler_heartbeat")
 HOST_HEARTBEAT_FILE = os.path.join(log_dir, "scheduler_heartbeat.json")
+EQUIBASE_CHILD_TIMEOUT_SECONDS = int(os.getenv("EQUIBASE_CHILD_TIMEOUT_SECONDS", "5400"))
 
 
 def record_crawl_result(crawl_type, success, **details):
     update_crawl_status(crawl_type, success=success, details=details)
+
+
+def _equibase_child_worker(conn, task_name, payload):
+    try:
+        from crawl_equibase import crawl_historical_races, crawl_specific_races
+
+        if task_name == "historical":
+            result = crawl_historical_races(
+                date.fromisoformat(payload["target_date"]),
+                payload.get("tracks"),
+            )
+        elif task_name == "specific":
+            result = crawl_specific_races(
+                date.fromisoformat(payload["target_date"]),
+                payload.get("race_targets") or [],
+            )
+        else:
+            raise ValueError(f"Unsupported Equibase task: {task_name}")
+
+        conn.send({"ok": True, "result": result})
+    except Exception as e:
+        conn.send(
+            {
+                "ok": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+        )
+    finally:
+        conn.close()
+
+
+def run_equibase_task_in_subprocess(task_name, **payload):
+    """
+    Run heavy Equibase crawling in a short-lived child process so memory is returned
+    at the end of each sweep instead of accumulating in the long-lived scheduler.
+    """
+    ctx = get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(
+        target=_equibase_child_worker,
+        args=(child_conn, task_name, payload),
+        daemon=False,
+    )
+
+    logger.info("Starting isolated Equibase task %s with payload %s", task_name, payload)
+    proc.start()
+    child_conn.close()
+
+    message = None
+    try:
+        if parent_conn.poll(EQUIBASE_CHILD_TIMEOUT_SECONDS):
+            try:
+                message = parent_conn.recv()
+            except EOFError:
+                message = None
+        else:
+            logger.error("Equibase task %s exceeded timeout (%ss); terminating child", task_name, EQUIBASE_CHILD_TIMEOUT_SECONDS)
+            proc.terminate()
+    finally:
+        parent_conn.close()
+
+    proc.join(timeout=30)
+    if proc.is_alive():
+        logger.error("Equibase task %s child did not exit cleanly after terminate; killing", task_name)
+        proc.kill()
+        proc.join(timeout=5)
+
+    if message is None:
+        raise RuntimeError(f"Equibase task {task_name} exited without a result (exitcode={proc.exitcode})")
+
+    if not message.get("ok"):
+        logger.error("Equibase task %s failed in child process:\n%s", task_name, message.get("traceback", message.get("error")))
+        raise RuntimeError(message.get("error") or f"Equibase task {task_name} failed")
+
+    logger.info("Equibase task %s completed in isolated child process", task_name)
+    return message["result"]
 
 
 def parse_post_time_to_iso(race_date_str, post_time_str, tz_name="America/New_York"):
@@ -218,7 +298,11 @@ def run_results_refresh(today_date, current_hour):
                 "Retrying unresolved same-day races before broad results sweep: %s",
                 ", ".join(unresolved_labels),
             )
-            unresolved_stats = crawl_specific_races(today_date, unresolved_targets)
+            unresolved_stats = run_equibase_task_in_subprocess(
+                "specific",
+                target_date=today_date.isoformat(),
+                race_targets=unresolved_targets,
+            )
             logger.info(
                 "Unresolved retry results: requested=%s inserted=%s failed=%s skipped_verified=%s",
                 unresolved_stats.get("races_requested", 0),
@@ -226,7 +310,11 @@ def run_results_refresh(today_date, current_hour):
                 unresolved_stats.get("races_failed", 0),
                 unresolved_stats.get("races_skipped_verified", 0),
             )
-        stats_today = crawl_historical_races(today_date, today_tracks)
+        stats_today = run_equibase_task_in_subprocess(
+            "historical",
+            target_date=today_date.isoformat(),
+            tracks=today_tracks,
+        )
         record_crawl_result(
             'results',
             success=True,
@@ -236,7 +324,11 @@ def run_results_refresh(today_date, current_hour):
             races_found=stats_today.get('races_found', 0),
             unresolved_retry_count=len(unresolved_targets),
         )
-        stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), yesterday_tracks)
+        stats_yesterday = run_equibase_task_in_subprocess(
+            "historical",
+            target_date=(today_date - timedelta(days=1)).isoformat(),
+            tracks=yesterday_tracks,
+        )
         record_crawl_result(
             'results',
             success=True,
@@ -249,7 +341,11 @@ def run_results_refresh(today_date, current_hour):
         )
     else:
         logger.info("Slow hours. Performing maintenance check on yesterday's results...")
-        stats_yesterday = crawl_historical_races(today_date - timedelta(days=1), yesterday_tracks)
+        stats_yesterday = run_equibase_task_in_subprocess(
+            "historical",
+            target_date=(today_date - timedelta(days=1)).isoformat(),
+            tracks=yesterday_tracks,
+        )
         record_crawl_result(
             'results',
             success=True,
