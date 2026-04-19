@@ -2249,14 +2249,24 @@ def get_race_changes(race_id: str, include_race_wide: bool = False) -> dict:
 def get_claims(track: str = "", start_date: str = "", end_date: str = "", race_number: int = 0, limit: int = 100) -> dict:
     """Get claims with race context and IDs."""
     supabase = get_supabase_client()
+    track = (track or "").strip()
     limit = min(max(limit, 1), 500)
-    response = (
+    query = (
         supabase.table("hranalyzer_claims")
-        .select("*, hranalyzer_races(race_key, track_code, race_date, race_number, hranalyzer_tracks(track_name))")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
+        .select("*, hranalyzer_races!inner(race_key, track_code, race_date, race_number, hranalyzer_tracks(track_name))")
     )
+
+    track_code_filter = track
+    if track_code_filter and track_code_filter == track_code_filter.upper() and " " not in track_code_filter:
+        query = query.eq("hranalyzer_races.track_code", track_code_filter)
+    if start_date:
+        query = query.gte("hranalyzer_races.race_date", start_date)
+    if end_date:
+        query = query.lte("hranalyzer_races.race_date", end_date)
+    if race_number:
+        query = query.eq("hranalyzer_races.race_number", race_number)
+
+    response = query.order("created_at", desc=True).limit(limit).execute()
 
     claims = []
     missing_claimant_details = 0

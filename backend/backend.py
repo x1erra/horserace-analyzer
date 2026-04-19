@@ -52,6 +52,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logger = logging.getLogger(__name__)
 FILTER_OPTIONS_CACHE_SECONDS = int(os.getenv("FILTER_OPTIONS_CACHE_SECONDS", "30"))
 SCHEDULER_HEARTBEAT_STALE_SECONDS = int(os.getenv("SCHEDULER_HEARTBEAT_STALE_SECONDS", "7200"))
+SUPABASE_PAGE_SIZE = int(os.getenv("SUPABASE_PAGE_SIZE", "1000"))
 
 
 def _snapshot_key_for_todays_races(target_date):
@@ -92,6 +93,45 @@ def _apply_todays_races_filters(payload, track_filter=None, status_filter=None):
         "races": filtered,
         "count": len(filtered),
     }
+
+
+def _track_name_from_row(row):
+    track = row.get("hranalyzer_tracks") or row.get("track") or {}
+    return (track.get("track_name") or row.get("track_code") or "").strip()
+
+
+def _fetch_all_track_options(supabase, page_size=SUPABASE_PAGE_SIZE):
+    """Return every track that has race data without relying on capped API defaults."""
+    unique_tracks = {}
+    start = 0
+
+    while True:
+        end = start + page_size - 1
+        response = supabase.table('hranalyzer_races')\
+            .select('track_code, hranalyzer_tracks(track_name)')\
+            .order('track_code')\
+            .range(start, end)\
+            .execute()
+
+        rows = response.data or []
+        for row in rows:
+            code = (row.get('track_code') or '').strip()
+            if not code:
+                continue
+
+            unique_tracks[code] = {
+                'name': _track_name_from_row(row) or code,
+                'code': code
+            }
+
+        if len(rows) < page_size:
+            break
+        start += page_size
+
+    return sorted(
+        unique_tracks.values(),
+        key=lambda track: ((track.get('name') or track.get('code') or '').lower(), track.get('code') or '')
+    )
 
 
 def allowed_file(filename):
@@ -659,24 +699,9 @@ def get_filter_options():
         all_unique_dates = set(r['race_date'] for r in dates_response.data)
         unique_dates = sorted([d for d in all_unique_dates if d <= today], reverse=True)
 
-        # 2. Get all distinct tracks
-        tracks_response = supabase.table('hranalyzer_races')\
-            .select('track_code, hranalyzer_tracks(track_name)')\
-            .limit(1500)\
-            .execute()
-            
-        unique_tracks = {}
-        for r in tracks_response.data:
-            code = r['track_code']
-            name = (r.get('hranalyzer_tracks') or {}).get('track_name', code)
-            unique_tracks[name] = code 
-        
-        sorted_tracks = []
-        for name in sorted(list(unique_tracks.keys())):
-            sorted_tracks.append({
-                'name': name,
-                'code': unique_tracks[name]
-            })
+        # 2. Get every distinct track with race data. This must page through
+        # Supabase rows; a single capped query can silently omit tracks.
+        sorted_tracks = _fetch_all_track_options(supabase)
 
         # 3. Get detailed summary for the TARGET DATE
         today_response = supabase.table('hranalyzer_races')\

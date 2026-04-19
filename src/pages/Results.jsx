@@ -40,9 +40,17 @@ export default function Results() {
     const [sortDirection, setSortDirection] = useState('desc');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedTrack, setSelectedTrack] = useState('All');
+    const [metadataTracks, setMetadataTracks] = useState([]);
 
-    // Derived tracks list from all results
-    const tracks = ['All', ...new Set(allResults.map(r => r.track_name).filter(Boolean))].sort();
+    // Combine global track metadata with loaded result rows so filters do not
+    // disappear just because the current page is capped.
+    const tracks = [
+        'All',
+        ...new Set([
+            ...metadataTracks.map(track => track.name || track.code).filter(Boolean),
+            ...allResults.map(r => r.track_name || r.track_code).filter(Boolean)
+        ])
+    ].sort();
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -51,14 +59,22 @@ export default function Results() {
     // Reset to first page when search changes
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery]);
+    }, [searchQuery, selectedTrack]);
 
     useEffect(() => {
         const fetchResults = async () => {
             try {
                 setLoading(true);
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-                const response = await axios.get(`${baseUrl}/api/past-races`);
+                const params = { limit: 500 };
+                if (selectedTrack !== 'All') {
+                    const selectedTrackMeta = metadataTracks.find(track =>
+                        track.code === selectedTrack || track.name === selectedTrack
+                    );
+                    params.track = selectedTrackMeta?.code || selectedTrack;
+                }
+
+                const response = await axios.get(`${baseUrl}/api/past-races`, { params });
                 setAllResults(response.data.races || []);
                 setError(null);
             } catch (err) {
@@ -69,12 +85,26 @@ export default function Results() {
             }
         };
         fetchResults();
+    }, [metadataTracks, selectedTrack]);
+
+    useEffect(() => {
+        const fetchFilterOptions = async () => {
+            try {
+                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+                const response = await axios.get(`${baseUrl}/api/filter-options`);
+                setMetadataTracks(response.data?.tracks || []);
+            } catch (err) {
+                console.error("Error fetching result filter options:", err);
+            }
+        };
+
+        fetchFilterOptions();
     }, []);
 
     // Filter and sort logic
     const sortedAndFilteredResults = allResults
         .filter(result =>
-            (selectedTrack === 'All' || result.track_name === selectedTrack) &&
+            (selectedTrack === 'All' || result.track_name === selectedTrack || result.track_code === selectedTrack) &&
             ((result.track_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (result.winner || '').toLowerCase().includes(searchQuery.toLowerCase()))
         )

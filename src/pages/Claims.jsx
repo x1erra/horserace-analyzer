@@ -40,6 +40,8 @@ export default function Claims() {
     const [selectedTrack, setSelectedTrack] = useState('All Tracks');
     const [selectedDate, setSelectedDate] = useState('All Dates');
     const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
+    const [metadataTracks, setMetadataTracks] = useState([]);
+    const [metadataDates, setMetadataDates] = useState([]);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -57,7 +59,19 @@ export default function Claims() {
 
             if (showLoading) setLoading(true);
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-            const response = await axios.get(`${baseUrl}/api/claims?limit=200`);
+            const params = { limit: 500 };
+            if (selectedTrack !== 'All Tracks') {
+                const selectedTrackMeta = metadataTracks.find(track =>
+                    track.code === selectedTrack || track.name === selectedTrack
+                );
+                params.track = selectedTrackMeta?.code || selectedTrack;
+            }
+            if (selectedDate !== 'All Dates') {
+                params.start_date = selectedDate;
+                params.end_date = selectedDate;
+            }
+
+            const response = await axios.get(`${baseUrl}/api/claims`, { params });
 
             if (response.data && response.data.claims) {
                 setClaims(response.data.claims);
@@ -69,6 +83,21 @@ export default function Claims() {
         } finally {
             if (isAutoRefresh !== true) setLoading(false);
         }
+    }, [metadataTracks, selectedDate, selectedTrack]);
+
+    useEffect(() => {
+        const fetchFilterOptions = async () => {
+            try {
+                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+                const response = await axios.get(`${baseUrl}/api/filter-options`);
+                setMetadataTracks(response.data?.tracks || []);
+                setMetadataDates(response.data?.dates || []);
+            } catch (err) {
+                console.error("Error fetching claim filter options:", err);
+            }
+        };
+
+        fetchFilterOptions();
     }, []);
 
     useEffect(() => {
@@ -164,8 +193,20 @@ export default function Claims() {
     const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
     // Unique tracks and dates for filters
-    const tracks = ['All Tracks', ...new Set(claims.map(c => c.track_name || c.track_code).filter(Boolean))].sort();
-    const dates = ['All Dates', ...new Set(claims.map(c => c.race_date).filter(Boolean))].sort().reverse();
+    const tracks = [
+        'All Tracks',
+        ...new Set([
+            ...metadataTracks.map(track => track.name || track.code).filter(Boolean),
+            ...claims.map(c => c.track_name || c.track_code).filter(Boolean)
+        ])
+    ].sort();
+    const dates = [
+        'All Dates',
+        ...new Set([
+            ...metadataDates,
+            ...claims.map(c => c.race_date).filter(Boolean)
+        ])
+    ].sort().reverse();
 
     // Initial loading state only (if no data yet)
     if (loading && claims.length === 0) {
