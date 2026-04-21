@@ -1,4 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+    HiOutlineCheckCircle,
+    HiOutlineClock,
+    HiOutlineDocumentText,
+    HiOutlineEye,
+    HiOutlineRefresh,
+    HiOutlineTrash,
+    HiOutlineXCircle,
+} from 'react-icons/hi';
 
 export default function RecentUploads({ limit = 5, compact = false, refreshToken = 0 }) {
     const [uploads, setUploads] = useState([]);
@@ -61,29 +70,34 @@ export default function RecentUploads({ limit = 5, compact = false, refreshToken
         }
     };
 
-    if (loading) return <div className="text-gray-500 text-sm animate-pulse">Loading recent uploads...</div>;
+    if (loading) return <div className="rounded-lg border border-gray-900 bg-black p-5 text-sm text-gray-500 animate-pulse">Loading recent uploads...</div>;
     if (error) return null; // Hide on error to be unobtrusive
-    if (uploads.length === 0) return compact ? null : <div className="text-gray-500">No recent uploads found.</div>;
+    if (uploads.length === 0) return compact ? null : <div className="rounded-lg border border-gray-900 bg-black p-5 text-gray-500">No recent uploads found.</div>;
 
     const stalledAfterMs = 15 * 60 * 1000;
 
     return (
-        <div className={`bg-black rounded-xl border border-purple-900/50 overflow-hidden ${compact ? 'p-4' : 'p-6'}`}>
-            <div className="flex justify-between items-center mb-4">
-                <h4 className={`font-semibold text-white ${compact ? 'text-sm' : 'text-lg'}`}>
-                    {compact ? 'Recent Uploads' : 'Recent Upload History'}
-                </h4>
+        <div className={`rounded-lg border border-purple-900/50 bg-black shadow-[0_0_24px_rgba(147,51,234,0.08)] ${compact ? 'p-4' : 'p-5'}`}>
+            <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                    <h4 className={`font-semibold text-white ${compact ? 'text-sm' : 'text-lg'}`}>
+                        {compact ? 'Recent Uploads' : 'Upload History'}
+                    </h4>
+                    {!compact && <p className="mt-1 text-sm text-gray-500">Recent local PDFs and parser status</p>}
+                </div>
                 {!compact && (
                     <button
                         onClick={fetchUploads}
-                        className="text-xs text-purple-400 hover:text-purple-300 transition"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-800 text-gray-400 transition hover:border-purple-500/50 hover:text-purple-300"
+                        title="Refresh"
+                        aria-label="Refresh uploads"
                     >
-                        Refresh
+                        <HiOutlineRefresh className="h-5 w-5" />
                     </button>
                 )}
             </div>
 
-            <div className="space-y-3">
+            <div className="divide-y divide-gray-900">
                 {uploads.map((upload) => {
                     const uploadedAt = new Date(upload.uploaded_at);
                     const isQueued = upload.upload_status === 'queued';
@@ -93,93 +107,88 @@ export default function RecentUploads({ limit = 5, compact = false, refreshToken
                     const isFailed = upload.upload_status === 'failed';
                     const statusLabel = isStalled ? 'Stalled' : isQueued ? 'Queued' : isParsing ? 'Parsing...' : isFailed ? 'Failed' : null;
                     const statusClass = isStalled || isFailed
-                        ? 'text-red-500 bg-red-900/30'
-                        : 'text-yellow-500 bg-yellow-900/30 animate-pulse';
+                        ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                        : isActive
+                            ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300'
+                            : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+                    const RowStatusIcon = isStalled || isFailed ? HiOutlineXCircle : isActive ? HiOutlineClock : HiOutlineCheckCircle;
 
                     return (
                         <div
                             key={upload.id}
-                            className={`flex items-center justify-between group ${compact ? 'text-xs' : 'text-sm py-2 border-b border-gray-800 last:border-0'}`}
+                            className={`group flex items-center justify-between gap-3 ${compact ? 'py-2 text-xs' : 'py-4 text-sm'}`}
                         >
-                            <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
+                            <div className="flex min-w-0 flex-1 items-start gap-3">
+                                {!compact && (
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-gray-800 bg-gray-950 text-gray-400">
+                                        <HiOutlineDocumentText className="h-5 w-5" />
+                                    </div>
+                                )}
+                                <div className="min-w-0 flex-1">
                                     <a
                                         href={`${baseUrl}/api/uploads/${upload.filename}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-purple-400 hover:text-purple-300 font-medium truncate hover:underline"
+                                        className="block truncate font-medium text-purple-300 transition hover:text-purple-100"
                                         title={upload.filename}
                                     >
                                         {upload.filename}
                                     </a>
-                                    {statusLabel && (
-                                        <span
-                                            className={`${statusClass} text-[10px] px-1.5 py-0.5 rounded`}
-                                            title={upload.error_message || undefined}
-                                        >
-                                            {statusLabel}
-                                        </span>
-                                    )}
-                                </div>
 
-                                {!compact && (
-                                    <div className="flex gap-4 text-gray-500 mt-1">
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-gray-500">
                                         <span>{uploadedAt.toLocaleDateString()}</span>
                                         {upload.track_code && <span>{upload.track_code}</span>}
                                         {upload.race_date && <span>{upload.race_date}</span>}
+                                        <span
+                                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${statusClass}`}
+                                            title={upload.error_message || undefined}
+                                        >
+                                            <RowStatusIcon className="h-3.5 w-3.5" />
+                                            {statusLabel || 'Complete'}
+                                        </span>
                                     </div>
-                                )}
-                                {compact && (
-                                    <div className="text-gray-500 text-[10px] truncate">
-                                        {uploadedAt.toLocaleDateString()}
-                                        {upload.track_code && ` • ${upload.track_code}`}
-                                    </div>
-                                )}
+                                </div>
                             </div>
 
                             {!compact && upload.races_extracted > 0 && (
-                                <div className="text-gray-400 text-xs text-right ml-4">
+                                <div className="hidden text-right text-xs text-gray-400 sm:block">
                                     <div>{upload.races_extracted} races</div>
                                     <div>{upload.entries_extracted} entries</div>
                                 </div>
                             )}
 
-                            <div className="ml-3 flex items-center gap-2">
+                            <div className="flex shrink-0 items-center gap-1">
                                 <a
                                     href={`${baseUrl}/api/uploads/${upload.filename}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-gray-600 group-hover:text-purple-400 transition"
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-600 transition hover:bg-purple-500/10 hover:text-purple-300"
                                     title="View PDF"
+                                    aria-label={`View ${upload.filename}`}
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                    </svg>
+                                    <HiOutlineEye className="h-5 w-5" />
                                 </a>
                                 {!compact && (
                                     <button
                                         type="button"
                                         onClick={() => handleReprocess(upload)}
                                         disabled={isActive}
-                                        className="text-gray-600 hover:text-blue-400 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-600 transition hover:bg-blue-500/10 hover:text-blue-300 disabled:cursor-not-allowed disabled:opacity-30"
                                         title="Reprocess upload"
+                                        aria-label={`Reprocess ${upload.filename}`}
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.64 18.36A9 9 0 0018.36 5.64M18.36 5.64H14M18.36 5.64V10M18.36 5.64A9 9 0 005.64 18.36M5.64 18.36H10M5.64 18.36V14" />
-                                        </svg>
+                                        <HiOutlineRefresh className="h-5 w-5" />
                                     </button>
                                 )}
                                 <button
                                     type="button"
                                     onClick={() => handleDelete(upload)}
                                     disabled={isActive}
-                                    className="text-gray-600 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-600 transition hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-30"
                                     title="Remove upload"
+                                    aria-label={`Remove ${upload.filename}`}
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7M10 11v6M14 11v6M9 7V4h6v3M4 7h16" />
-                                    </svg>
+                                    <HiOutlineTrash className="h-5 w-5" />
                                 </button>
                             </div>
                         </div>

@@ -1,11 +1,23 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import {
+    HiOutlineChartBar,
+    HiOutlineCheckCircle,
+    HiOutlineClock,
+    HiOutlineCloudUpload,
+    HiOutlineDatabase,
+    HiOutlineDocumentText,
+    HiOutlineExclamationCircle,
+    HiOutlineInformationCircle,
+    HiOutlineUpload,
+} from 'react-icons/hi';
 import RecentUploads from '../components/RecentUploads';
 
 export default function Upload() {
     const navigate = useNavigate();
     const [selectedFile, setSelectedFile] = useState(null);
+    const [dragActive, setDragActive] = useState(false);
     const [uploadStatus, setUploadStatus] = useState('');
     const [uploadStatusType, setUploadStatusType] = useState('idle');
     const [uploading, setUploading] = useState(false);
@@ -54,7 +66,7 @@ export default function Upload() {
 
         try {
             setUploading(true);
-            setUploadStatus('Uploading and parsing PDF...');
+            setUploadStatus('Uploading PDF...');
             setUploadStatusType('info');
             setParseResult(null);
 
@@ -101,83 +113,157 @@ export default function Upload() {
     };
 
     const statusClasses = {
-        info: 'bg-blue-900/20 border border-blue-500/50 text-blue-300',
-        success: 'bg-green-900/20 border border-green-500/50 text-green-400',
-        error: 'bg-red-900/20 border border-red-500/50 text-red-400',
-        idle: 'bg-gray-900/20 border border-gray-700 text-gray-400'
+        info: 'bg-blue-500/10 border-blue-500/40 text-blue-200',
+        success: 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200',
+        error: 'bg-red-500/10 border-red-500/40 text-red-200',
+        idle: 'bg-gray-900/40 border-gray-700 text-gray-300'
     };
+    const statusIcon = {
+        info: HiOutlineClock,
+        success: HiOutlineCheckCircle,
+        error: HiOutlineExclamationCircle,
+        idle: HiOutlineInformationCircle
+    };
+    const StatusIcon = statusIcon[uploadStatusType] || statusIcon.idle;
 
     return (
-        <div className="space-y-8">
-            <h3 className="text-3xl font-bold text-white">Upload Daily Racing Form</h3>
-            <p className="text-sm text-gray-400 mb-4">
-                Upload a DRF PDF to extract upcoming races. Results will appear in the Dashboard after parsing.
-            </p>
-
-            {/* Upload Form */}
-            <form onSubmit={handleSubmit} className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-4 opacity-0 animate-fadeIn" style={{ animationDelay: '50ms' }}>
-                <div
-                    onDrop={handleDrop}
-                    onDragOver={(e) => e.preventDefault()}
-                    className="border-2 border-dashed border-purple-900/50 rounded-md p-8 text-center cursor-pointer hover:border-purple-600 transition duration-200"
-                >
-                    <p className="text-gray-300 mb-4">Drag & drop PDF here or click to select</p>
-                    <input
-                        type="file"
-                        accept="application/pdf"
-                        onChange={handleFileChange}
-                        className="hidden"
-                        id="file-upload"
-                        disabled={uploading}
-                    />
-                    <label htmlFor="file-upload" className={`${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-white px-4 py-2 rounded-md transition duration-200 shadow-[0_0_10px_rgba(147,51,234,0.1)]`}>
-                        Select PDF
-                    </label>
-                    {selectedFile && (
-                        <p className="text-purple-400 mt-4">
-                            Selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
-                        </p>
-                    )}
+        <div className="space-y-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-2">
+                    <div className="inline-flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+                        <HiOutlineDatabase className="h-4 w-4" />
+                        Local PDF storage
+                    </div>
+                    <h3 className="text-3xl font-bold text-white md:text-4xl">DRF Uploads</h3>
+                    <p className="max-w-2xl text-sm leading-6 text-gray-400">
+                        Queue dense Daily Racing Form PDFs for local parsing and review extracted race cards as soon as processing finishes.
+                    </p>
                 </div>
-
                 <button
-                    type="submit"
-                    disabled={!selectedFile || uploading}
-                    className="w-full bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-white py-3 rounded-md transition duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(147,51,234,0.1)]"
+                    type="button"
+                    onClick={() => navigate('/dashboard')}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-purple-500/40 bg-purple-500/10 px-4 py-2 text-sm font-medium text-purple-100 transition hover:border-purple-400 hover:bg-purple-500/20"
                 >
-                    {uploading ? 'Uploading & Parsing...' : 'Upload & Parse'}
+                    <HiOutlineChartBar className="h-5 w-5" />
+                    Dashboard
                 </button>
-            </form>
+            </div>
 
             {/* Status Messages */}
             {uploadStatus && (
-                <div className={`p-4 rounded-md ${statusClasses[uploadStatusType] || statusClasses.idle}`}>
-                    <p className="font-medium">
+                <div className={`flex items-center gap-3 rounded-md border p-4 ${statusClasses[uploadStatusType] || statusClasses.idle}`}>
+                    <StatusIcon className="h-5 w-5 shrink-0" />
+                    <p className="text-sm font-medium">
                         {uploadStatus}
                     </p>
                 </div>
             )}
 
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)]">
+                <form
+                    onSubmit={handleSubmit}
+                    className="rounded-lg border border-purple-900/50 bg-black shadow-[0_0_24px_rgba(147,51,234,0.08)] opacity-0 animate-fadeIn"
+                    style={{ animationDelay: '50ms' }}
+                >
+                    <div className="border-b border-purple-900/40 p-5">
+                        <div className="flex items-center justify-between gap-4">
+                            <div>
+                                <h4 className="text-lg font-semibold text-white">New Upload</h4>
+                                <p className="mt-1 text-sm text-gray-500">PDF only, 16 MB maximum</p>
+                            </div>
+                            <div className="flex h-11 w-11 items-center justify-center rounded-md border border-purple-500/40 bg-purple-500/10 text-purple-200">
+                                <HiOutlineCloudUpload className="h-6 w-6" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-5 p-5">
+                        <label
+                            htmlFor="file-upload"
+                            onDrop={(e) => {
+                                setDragActive(false);
+                                handleDrop(e);
+                            }}
+                            onDragOver={(e) => {
+                                e.preventDefault();
+                                setDragActive(true);
+                            }}
+                            onDragLeave={() => setDragActive(false)}
+                            className={`block cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition ${dragActive
+                                ? 'border-emerald-400 bg-emerald-500/10'
+                                : 'border-purple-900/60 bg-gray-950/40 hover:border-purple-500/70 hover:bg-purple-500/10'
+                                } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+                        >
+                            <input
+                                type="file"
+                                accept="application/pdf"
+                                onChange={handleFileChange}
+                                className="hidden"
+                                id="file-upload"
+                                disabled={uploading}
+                            />
+                            <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-md border border-gray-700 bg-black text-gray-300">
+                                {selectedFile ? <HiOutlineDocumentText className="h-8 w-8 text-emerald-300" /> : <HiOutlineUpload className="h-8 w-8" />}
+                            </span>
+                            <span className="mt-5 block text-lg font-semibold text-white">
+                                {selectedFile ? selectedFile.name : 'Drop DRF PDF'}
+                            </span>
+                            <span className="mt-2 block text-sm text-gray-500">
+                                {selectedFile
+                                    ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB ready`
+                                    : 'Click to browse or drag a file here'}
+                            </span>
+                        </label>
+
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                            <button
+                                type="submit"
+                                disabled={!selectedFile || uploading}
+                                className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-100 transition hover:border-emerald-400 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                {uploading ? <HiOutlineClock className="h-5 w-5 animate-spin" /> : <HiOutlineUpload className="h-5 w-5" />}
+                                {uploading ? 'Uploading' : 'Queue Upload'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedFile(null);
+                                    setParseResult(null);
+                                    setUploadStatus('');
+                                    setUploadStatusType('idle');
+                                }}
+                                disabled={uploading || (!selectedFile && !parseResult && !uploadStatus)}
+                                className="inline-flex items-center justify-center rounded-md border border-gray-800 px-5 py-3 text-sm font-medium text-gray-300 transition hover:border-gray-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <RecentUploads limit={10} refreshToken={historyRefreshToken} />
+            </div>
+
             {/* Parse Results */}
             {parseResult && (
-                <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 space-y-4 opacity-0 animate-fadeIn">
-                    <h4 className="text-xl font-semibold text-white mb-4">Parse Results</h4>
+                <div className="rounded-lg border border-emerald-500/30 bg-black p-6 shadow-md opacity-0 animate-fadeIn">
+                    <h4 className="mb-4 text-xl font-semibold text-white">Parse Results</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-purple-900/20 p-4 rounded-md border border-purple-900/50">
+                        <div className="rounded-md border border-gray-800 p-4">
                             <p className="text-gray-400 text-sm">Track</p>
                             <p className="text-white text-2xl font-bold">{parseResult.track_code}</p>
                         </div>
-                        <div className="bg-purple-900/20 p-4 rounded-md border border-purple-900/50">
+                        <div className="rounded-md border border-gray-800 p-4">
                             <p className="text-gray-400 text-sm">Date</p>
                             <p className="text-white text-2xl font-bold">{parseResult.race_date}</p>
                         </div>
-                        <div className="bg-purple-900/20 p-4 rounded-md border border-purple-900/50">
+                        <div className="rounded-md border border-gray-800 p-4">
                             <p className="text-gray-400 text-sm">Races</p>
-                            <p className="text-purple-400 text-2xl font-bold">{parseResult.races_parsed}</p>
+                            <p className="text-emerald-300 text-2xl font-bold">{parseResult.races_parsed}</p>
                         </div>
-                        <div className="bg-purple-900/20 p-4 rounded-md border border-purple-900/50">
+                        <div className="rounded-md border border-gray-800 p-4">
                             <p className="text-gray-400 text-sm">Entries</p>
-                            <p className="text-purple-400 text-2xl font-bold">{parseResult.entries_parsed}</p>
+                            <p className="text-emerald-300 text-2xl font-bold">{parseResult.entries_parsed}</p>
                         </div>
                     </div>
 
@@ -204,19 +290,23 @@ export default function Upload() {
             )}
 
             {/* Instructions */}
-            <div className="bg-black rounded-xl shadow-md p-6 border border-purple-900/50 opacity-0 animate-fadeIn" style={{ animationDelay: '100ms' }}>
-                <h4 className="text-lg font-semibold text-white mb-3">How It Works</h4>
-                <ol className="list-decimal list-inside space-y-2 text-gray-400 text-sm">
-                    <li>Upload a Daily Racing Form (DRF) PDF for today or future races</li>
-                    <li>The parser extracts all races, horses, jockeys, and race conditions</li>
-                    <li>Data is stored in the database with status "upcoming"</li>
-                    <li>View the races on the Dashboard to analyze and make picks</li>
-                    <li>After races complete, the Equibase crawler will fetch results automatically</li>
-                </ol>
-            </div>
-
-            {/* Recent Uploads */}
-            <RecentUploads limit={10} refreshToken={historyRefreshToken} />
+            <details className="rounded-lg border border-gray-900 bg-black px-5 py-4 text-sm text-gray-500">
+                <summary className="cursor-pointer font-medium text-gray-300">Upload notes</summary>
+                <div className="mt-4 grid gap-3 text-gray-500 md:grid-cols-3">
+                    <div className="flex gap-3">
+                        <HiOutlineDatabase className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+                        <p>PDFs are stored locally on the Umbrel-backed upload volume.</p>
+                    </div>
+                    <div className="flex gap-3">
+                        <HiOutlineClock className="mt-0.5 h-5 w-5 shrink-0 text-blue-400" />
+                        <p>Parsing runs in the background, so this page can be left or refreshed.</p>
+                    </div>
+                    <div className="flex gap-3">
+                        <HiOutlineCheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-purple-300" />
+                        <p>Completed race cards are available from Dashboard and race views.</p>
+                    </div>
+                </div>
+            </details>
         </div>
     );
 }
