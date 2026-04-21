@@ -8,10 +8,13 @@ services:
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - TRACKDATA_UPLOAD_FOLDER=/app/uploads
+      - DRF_PARSE_TIMEOUT_SECONDS=${DRF_PARSE_TIMEOUT_SECONDS:-240}
+      - DRF_PARSE_WORKERS=${DRF_PARSE_WORKERS:-1}
       - TZ=America/New_York
       - FLASK_ENV=production
     volumes:
-      - ./uploads:/app/uploads
+      - ${TRACKDATA_UPLOADS_DIR:-./uploads}:/app/uploads
       - ./logs:/app/logs
     networks:
       - horse-racing-network

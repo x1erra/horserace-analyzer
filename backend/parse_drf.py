@@ -4,6 +4,7 @@ Parses Daily Racing Form PDFs to extract pre-race data for upcoming races
 """
 
 import gc
+import os
 import pdfplumber
 import re
 import logging
@@ -138,6 +139,7 @@ def extract_header_metadata(first_page) -> Dict:
     track_mapping = {
         'GULFSTREAMPARK': 'GP',
         'GULFSTREAM': 'GP',
+        'WOODBINE': 'WO',
         'AQUEDUCT': 'AQU',
         'BELMONT': 'BEL',
         'CHURCHILL': 'CD',
@@ -161,24 +163,36 @@ def extract_header_metadata(first_page) -> Dict:
         'race_date': None
     }
 
-    # Extract track name (handle formats like "GulfstreamPark")
-    text_upper = text.upper().replace(' ', '')  # Remove spaces to match concatenated names
-    for track_name, code in track_mapping.items():
-        if track_name.replace(' ', '') in text_upper:
-            metadata['track_code'] = code
-            # Format track name nicely
-            if code == 'GP':
-                metadata['track_name'] = 'Gulfstream Park'
-            elif code == 'SA':
-                metadata['track_name'] = 'Santa Anita'
-            elif code == 'DMR':
-                metadata['track_name'] = 'Del Mar'
-            elif code == 'FG':
-                metadata['track_name'] = 'Fair Grounds'
-            elif code == 'HOU':
-                metadata['track_name'] = 'Sam Houston'
-            else:
-                metadata['track_name'] = track_name.replace('PARK', ' Park').replace('DOWNS', ' Downs').title()
+    # Extract track name from the document header first. Past-performance lines on
+    # page 1 can mention other tracks, which previously caused WO cards to be
+    # misidentified as SAR when a Saratoga running line appeared in the index page.
+    header_text = text.split('INDEXTOENTRIES', 1)[0]
+    if not header_text.strip():
+        header_text = '\n'.join(text.splitlines()[:5])
+
+    for search_text in (header_text, text):
+        text_upper = search_text.upper().replace(' ', '')
+        for track_name, code in track_mapping.items():
+            if track_name.replace(' ', '') in text_upper:
+                metadata['track_code'] = code
+                # Format track name nicely
+                if code == 'GP':
+                    metadata['track_name'] = 'Gulfstream Park'
+                elif code == 'WO':
+                    metadata['track_name'] = 'Woodbine'
+                elif code == 'SA':
+                    metadata['track_name'] = 'Santa Anita'
+                elif code == 'DMR':
+                    metadata['track_name'] = 'Del Mar'
+                elif code == 'FG':
+                    metadata['track_name'] = 'Fair Grounds'
+                elif code == 'HOU':
+                    metadata['track_name'] = 'Sam Houston'
+                else:
+                    metadata['track_name'] = track_name.replace('PARK', ' Park').replace('DOWNS', ' Downs').title()
+                break
+
+        if metadata['track_code']:
             break
 
     # Extract date - try multiple formats
@@ -278,7 +292,7 @@ def is_race_header_page(page_text: str) -> Tuple[bool, Optional[int]]:
             is_valid_header = False
             
             # Check for track indicators
-            if any(track in context_text for track in ['GULFSTREAM', 'PARK', 'DOWNS', 'AQUEDUCT', 'BELMONT', 'KEENELAND', 'SARATOGA', 'DEL MAR', 'SANTA ANITA']):
+            if any(track in context_text for track in ['GULFSTREAM', 'WOODBINE', 'PARK', 'DOWNS', 'AQUEDUCT', 'BELMONT', 'KEENELAND', 'SARATOGA', 'DEL MAR', 'SANTA ANITA']):
                 is_valid_header = True
                 
             # Double check it's not a horse entry
@@ -722,20 +736,27 @@ def insert_race_to_db(supabase, race_data: Dict, track_id: str, track_code: str,
     try:
         # Build race key
         race_key = f"{track_code}-{race_date.replace('-', '')}-{race_data['race_number']}"
+        pdf_storage_key = os.path.basename(pdf_path) if pdf_path else None
 
         # Check if race already exists
         # Check if race already exists
-        existing = supabase.table('hranalyzer_races').select('id, post_time').eq('race_key', race_key).execute()
+        existing = supabase.table('hranalyzer_races').select('id, post_time, drf_pdf_path').eq('race_key', race_key).execute()
         if existing.data and len(existing.data) > 0:
             existing_race = existing.data[0]
             logger.info(f"Race {race_key} already exists.")
+
+            race_update = {}
             
             # Update post_time if it's missing in DB but present in DRF data
             if not existing_race.get('post_time') and race_data.get('post_time'):
                 logger.info(f"Updating missing post_time for {race_key}: {race_data.get('post_time')}")
-                supabase.table('hranalyzer_races').update({
-                    'post_time': race_data.get('post_time')
-                }).eq('id', existing_race['id']).execute()
+                race_update['post_time'] = race_data.get('post_time')
+
+            if pdf_storage_key and existing_race.get('drf_pdf_path') != pdf_storage_key:
+                race_update['drf_pdf_path'] = pdf_storage_key
+
+            if race_update:
+                supabase.table('hranalyzer_races').update(race_update).eq('id', existing_race['id']).execute()
 
             return existing_race['id']
 
@@ -769,7 +790,7 @@ def insert_race_to_db(supabase, race_data: Dict, track_id: str, track_code: str,
             'conditions': race_data.get('conditions'),
             'race_status': race_status,
             'data_source': 'drf',
-            'drf_pdf_path': pdf_path
+            'drf_pdf_path': pdf_storage_key
         }
 
         new_race = supabase.table('hranalyzer_races').insert(race_insert).execute()
@@ -929,6 +950,21 @@ def _build_implicit_race_one(race_1_entries: List[Dict], race_1_post_time: Optio
     }
 
 
+def mark_upload_log_failed(supabase, upload_log_id: Optional[str], error_message: str) -> None:
+    if not upload_log_id:
+        return
+
+    try:
+        supabase.table('hranalyzer_upload_logs').update({
+            'upload_status': 'failed',
+            'parse_status': 'failed',
+            'error_message': error_message[:2000],
+            'parsed_at': datetime.now().isoformat()
+        }).eq('id', upload_log_id).execute()
+    except Exception as log_error:
+        logger.error(f"Error updating fail status in upload log: {log_error}")
+
+
 # ==========================================
 # MAIN PARSING FUNCTION
 # ==========================================
@@ -952,9 +988,11 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
             metadata = extract_header_metadata(pdf.pages[0])
 
             if not metadata['track_code'] or not metadata['race_date']:
+                error_message = 'Could not extract track code or date from PDF'
+                mark_upload_log_failed(supabase, upload_log_id, error_message)
                 return {
                     'success': False,
-                    'error': 'Could not extract track code or date from PDF'
+                    'error': error_message
                 }
 
             logger.info(f"Parsing {metadata['track_name']} ({metadata['track_code']}) - {metadata['race_date']}")
@@ -967,9 +1005,11 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                 entity_cache=entity_cache,
             )
             if not track_id:
+                error_message = 'Could not get/create track in database'
+                mark_upload_log_failed(supabase, upload_log_id, error_message)
                 return {
                     'success': False,
-                    'error': 'Could not get/create track in database'
+                    'error': error_message
                 }
 
             races_data = []
@@ -1122,13 +1162,7 @@ def parse_drf_pdf(pdf_path: str, upload_log_id: Optional[str] = None) -> Dict:
                 # Need to get supabase client again if it wasn't initialized
                 if 'supabase' not in locals():
                     supabase = get_supabase_client()
-                    
-                supabase.table('hranalyzer_upload_logs').update({
-                    'upload_status': 'failed',
-                    'parse_status': 'failed',
-                    'error_message': str(e),
-                    'parsed_at': datetime.now().isoformat()
-                }).eq('id', upload_log_id).execute()
+                mark_upload_log_failed(supabase, upload_log_id, str(e))
             except Exception as log_error:
                 logger.error(f"Error updating fail status in upload log: {log_error}")
                 
@@ -1190,3 +1224,4 @@ if __name__ == '__main__':
         print(f"  Date: {result.get('race_date')}")
     else:
         print(f"  Error: {result.get('error')}")
+        sys.exit(1)

@@ -126,7 +126,10 @@ horse-racing-tool/
 | `/api/horses` | GET | Horse search with aggregate stats |
 | `/api/horse/:id` | GET | Stable horse profile by horse ID |
 | `/api/uploads` | GET | Recent DRF upload logs |
-| `/api/upload-drf` | POST | Upload and parse DRF PDF |
+| `/api/upload-drf` | POST | Upload DRF PDF and queue background parse |
+| `/api/uploads/:id/reprocess` | POST | Queue an existing local upload for parsing |
+| `/api/uploads/:id` | DELETE | Remove an upload log and unreferenced local PDF |
+| `/api/uploads/:filename` | GET | View a locally stored upload PDF |
 
 ## MCP Tools
 
@@ -180,7 +183,8 @@ Two separate data flows:
 ### Flow A: Upcoming Races (DRF)
 ```
 User uploads DRF PDF
-   → Parser extracts races
+   → Backend stores PDF on local disk
+   → Parser job extracts races in the background
    → Status: "upcoming"
    → Display on "Today's Races"
 ```
@@ -217,7 +221,17 @@ SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_KEY=your-service-key
 ```
 
-That's it! No API keys needed for web scraping - everything runs locally.
+Optional local upload storage settings:
+
+```env
+# On Umbrel/Portainer, prefer a stable absolute host path:
+# TRACKDATA_UPLOADS_DIR=/home/umbrel/trackdata/uploads
+TRACKDATA_UPLOADS_DIR=./uploads
+DRF_PARSE_TIMEOUT_SECONDS=240
+DRF_PARSE_WORKERS=1
+```
+
+No API keys are needed for web scraping. DRF PDFs are stored locally and served through the backend.
 
 ### Crawler Schedule
 
@@ -254,6 +268,7 @@ See [INTEGRATION_TEST_RESULTS.md](backend/INTEGRATION_TEST_RESULTS.md) for detai
 # Repo: https://github.com/x1erra/horserace-analyzer.git
 # Compose path: docker-compose.portainer.yml
 # Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, ALERT_WEBHOOK_URL, BACKEND_PUBLISHED_PORT=5001, MCP_PUBLISHED_PORT=8001
+# Recommended upload dir: TRACKDATA_UPLOADS_DIR=/home/umbrel/trackdata/uploads
 
 # Registry/GHCR path (slower, release-style):
 # Compose path: docker-compose.prod.yml

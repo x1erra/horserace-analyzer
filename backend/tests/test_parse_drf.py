@@ -14,7 +14,41 @@ sys.modules["supabase_client"] = supabase_client_stub
 import parse_drf
 
 
+class FakePdfPage:
+    def __init__(self, text):
+        self.text = text
+
+    def extract_text(self):
+        return self.text
+
+
 class TestParseDrf(unittest.TestCase):
+    def test_extract_header_metadata_prefers_header_track_over_pp_running_lines(self):
+        page_text = """Daily Racing Form Woodbine(4/18/2026)
+INDEXTOENTRIES
+>A> ExampleHorse,1
+1
+Woodbine
+MdSpWt
+14æ25=6SAR fm 1 Ñ 23§ :49 1:14¦1:38¦ MdSpWt79k
+"""
+
+        metadata = parse_drf.extract_header_metadata(FakePdfPage(page_text))
+
+        self.assertEqual(metadata["track_code"], "WO")
+        self.assertEqual(metadata["track_name"], "Woodbine")
+        self.assertEqual(metadata["race_date"], "2026-04-18")
+
+    def test_race_header_detection_accepts_woodbine(self):
+        page_text = """2
+Woodbine
+Claiming
+6Furlongs
+Posttime:1:20ET
+"""
+
+        self.assertEqual(parse_drf.is_race_header_page(page_text), (True, 2))
+
     def test_extract_race_content_from_index_page_preserves_race_one_header_and_entries(self):
         page_text = """Daily Racing Form GulfstreamPark(4/10/2026)
 INDEXTOENTRIES

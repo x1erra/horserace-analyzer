@@ -7,19 +7,27 @@ export default function Upload() {
     const navigate = useNavigate();
     const [selectedFile, setSelectedFile] = useState(null);
     const [uploadStatus, setUploadStatus] = useState('');
+    const [uploadStatusType, setUploadStatusType] = useState('idle');
     const [uploading, setUploading] = useState(false);
     const [parseResult, setParseResult] = useState(null);
+    const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+
+    const isPdfFile = (file) => {
+        return file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+    };
 
     // Handle file selection
     const handleFileChange = (e) => {
         const file = e.target.files[0];
-        if (file && file.type === 'application/pdf') {
+        if (isPdfFile(file)) {
             setSelectedFile(file);
             setUploadStatus('');
+            setUploadStatusType('idle');
             setParseResult(null);
         } else {
             setSelectedFile(null);
             setUploadStatus('Please select a PDF file.');
+            setUploadStatusType('error');
         }
     };
 
@@ -27,13 +35,15 @@ export default function Upload() {
     const handleDrop = (e) => {
         e.preventDefault();
         const file = e.dataTransfer.files[0];
-        if (file && file.type === 'application/pdf') {
+        if (isPdfFile(file)) {
             setSelectedFile(file);
             setUploadStatus('');
+            setUploadStatusType('idle');
             setParseResult(null);
         } else {
             setSelectedFile(null);
             setUploadStatus('Please drop a PDF file.');
+            setUploadStatusType('error');
         }
     };
 
@@ -45,6 +55,7 @@ export default function Upload() {
         try {
             setUploading(true);
             setUploadStatus('Uploading and parsing PDF...');
+            setUploadStatusType('info');
             setParseResult(null);
 
             const formData = new FormData();
@@ -58,24 +69,42 @@ export default function Upload() {
                     headers: {
                         'Content-Type': 'multipart/form-data',
                     },
-                    timeout: 60000, // 60 second timeout
+                    timeout: 240000,
                 }
             );
 
-            if (response.data.success) {
+            if (response.data.queued) {
+                setUploadStatus('Upload queued. Parsing will continue in the background.');
+                setUploadStatusType('info');
+                setSelectedFile(null);
+                setHistoryRefreshToken((value) => value + 1);
+            } else if (response.data.success) {
                 setParseResult(response.data);
                 setUploadStatus('Success! PDF parsed successfully.');
+                setUploadStatusType('success');
                 setSelectedFile(null);
+                setHistoryRefreshToken((value) => value + 1);
             } else {
                 setUploadStatus(`Error: ${response.data.error || 'Upload failed'}`);
+                setUploadStatusType('error');
+                setHistoryRefreshToken((value) => value + 1);
             }
         } catch (err) {
             console.error('Upload error:', err);
             const errorMsg = err.response?.data?.error || err.message || 'Upload failed';
             setUploadStatus(`Error: ${errorMsg}`);
+            setUploadStatusType('error');
+            setHistoryRefreshToken((value) => value + 1);
         } finally {
             setUploading(false);
         }
+    };
+
+    const statusClasses = {
+        info: 'bg-blue-900/20 border border-blue-500/50 text-blue-300',
+        success: 'bg-green-900/20 border border-green-500/50 text-green-400',
+        error: 'bg-red-900/20 border border-red-500/50 text-red-400',
+        idle: 'bg-gray-900/20 border border-gray-700 text-gray-400'
     };
 
     return (
@@ -122,8 +151,8 @@ export default function Upload() {
 
             {/* Status Messages */}
             {uploadStatus && (
-                <div className={`p-4 rounded-md ${(parseResult || uploading) ? 'bg-green-900/20 border border-green-500/50' : 'bg-red-900/20 border border-red-500/50'}`}>
-                    <p className={`${(parseResult || uploading) ? 'text-green-400' : 'text-red-400'} font-medium`}>
+                <div className={`p-4 rounded-md ${statusClasses[uploadStatusType] || statusClasses.idle}`}>
+                    <p className="font-medium">
                         {uploadStatus}
                     </p>
                 </div>
@@ -163,6 +192,7 @@ export default function Upload() {
                             onClick={() => {
                                 setParseResult(null);
                                 setUploadStatus('');
+                                setUploadStatusType('idle');
                                 setSelectedFile(null);
                             }}
                             className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-md transition"
@@ -186,7 +216,7 @@ export default function Upload() {
             </div>
 
             {/* Recent Uploads */}
-            <RecentUploads limit={10} />
+            <RecentUploads limit={10} refreshToken={historyRefreshToken} />
         </div>
     );
 }

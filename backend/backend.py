@@ -6,9 +6,12 @@ Provides endpoints for DRF PDF upload, race data retrieval, and Equibase crawlin
 import os
 import sys
 print("Backend script starting...", file=sys.stdout, flush=True)
+import atexit
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import logging
 import json
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from flask import Flask, jsonify, request
@@ -42,7 +45,11 @@ except Exception as e:
     sys.exit(1)
 
 # Configuration
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'uploads')
+UPLOAD_FOLDER = (
+    os.getenv('TRACKDATA_UPLOAD_FOLDER')
+    or os.getenv('UPLOAD_FOLDER')
+    or os.path.join(os.path.dirname(__file__), '..', 'uploads')
+)
 ALLOWED_EXTENSIONS = {'pdf'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -50,9 +57,13 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 logger = logging.getLogger(__name__)
+DRF_PARSE_TIMEOUT_SECONDS = int(os.getenv("DRF_PARSE_TIMEOUT_SECONDS", "240"))
+DRF_PARSE_WORKERS = max(int(os.getenv("DRF_PARSE_WORKERS", "1")), 1)
 FILTER_OPTIONS_CACHE_SECONDS = int(os.getenv("FILTER_OPTIONS_CACHE_SECONDS", "30"))
 SCHEDULER_HEARTBEAT_STALE_SECONDS = int(os.getenv("SCHEDULER_HEARTBEAT_STALE_SECONDS", "7200"))
 SUPABASE_PAGE_SIZE = int(os.getenv("SUPABASE_PAGE_SIZE", "1000"))
+parse_executor = ThreadPoolExecutor(max_workers=DRF_PARSE_WORKERS, thread_name_prefix="drf-parser")
+atexit.register(parse_executor.shutdown, wait=False, cancel_futures=True)
 
 
 def _snapshot_key_for_todays_races(target_date):
@@ -137,6 +148,133 @@ def _fetch_all_track_options(supabase, page_size=SUPABASE_PAGE_SIZE):
 def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def upload_path_for_filename(filename):
+    return os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(os.path.basename(filename)))
+
+
+def unique_upload_filename(filename):
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        safe_name = f"drf-{int(time.time())}.pdf"
+
+    candidate = safe_name
+    stem, ext = os.path.splitext(safe_name)
+    counter = 1
+    while os.path.exists(upload_path_for_filename(candidate)):
+        candidate = f"{stem}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{counter}{ext}"
+        counter += 1
+
+    return candidate
+
+
+def upload_filename_from_row(upload):
+    filename = upload.get('filename')
+    if filename:
+        return secure_filename(os.path.basename(filename))
+
+    file_path = upload.get('file_path') or ''
+    return secure_filename(os.path.basename(file_path))
+
+
+def mark_upload_failed(supabase, upload_log_id, error_message):
+    """Finalize an upload log when parsing cannot complete."""
+    if not supabase or not upload_log_id:
+        return
+
+    try:
+        supabase.table('hranalyzer_upload_logs').update({
+            'upload_status': 'failed',
+            'parse_status': 'failed',
+            'error_message': error_message[:2000],
+            'parsed_at': datetime.now().isoformat()
+        }).eq('id', upload_log_id).execute()
+    except Exception as log_error:
+        logger.error("Error marking upload %s failed: %s", upload_log_id, log_error)
+
+
+def extract_parser_error(stdout, stderr):
+    """Extract the most useful parser error from subprocess output."""
+    stderr = (stderr or '').strip()
+    if stderr:
+        return stderr
+
+    for line in reversed((stdout or '').splitlines()):
+        if 'Error:' in line:
+            return line.split('Error:', 1)[1].strip()
+
+    return 'Failed to parse PDF'
+
+
+def parse_parser_stdout(stdout):
+    lines = (stdout or '').strip().split('\n')
+    parsed = {
+        'success': False,
+        'races_parsed': 0,
+        'entries_parsed': 0,
+        'track_code': None,
+        'race_date': None,
+    }
+
+    for line in lines:
+        if 'Success:' in line:
+            parsed['success'] = line.split(':', 1)[1].strip().lower() == 'true'
+        elif 'Races parsed:' in line:
+            parsed['races_parsed'] = int(line.split(':', 1)[1].strip())
+        elif 'Entries parsed:' in line:
+            parsed['entries_parsed'] = int(line.split(':', 1)[1].strip())
+        elif 'Track:' in line:
+            parsed['track_code'] = line.split(':', 1)[1].strip()
+        elif 'Date:' in line:
+            parsed['race_date'] = line.split(':', 1)[1].strip()
+
+    return parsed
+
+
+def run_drf_parse_job(upload_log_id, filename):
+    """Background parser job for one locally stored upload."""
+    supabase = None
+    filepath = upload_path_for_filename(filename)
+
+    try:
+        supabase = get_supabase_client()
+        supabase.table('hranalyzer_upload_logs').update({
+            'upload_status': 'parsing',
+            'parse_status': 'in_progress',
+            'error_message': None,
+        }).eq('id', upload_log_id).execute()
+
+        if not os.path.exists(filepath):
+            mark_upload_failed(supabase, upload_log_id, f'Uploaded file not found on local storage: {filename}')
+            return
+
+        python_bin = sys.executable
+        parser_script = os.path.join(os.path.dirname(__file__), 'parse_drf.py')
+        result = subprocess.run(
+            [python_bin, parser_script, filepath, upload_log_id],
+            capture_output=True,
+            text=True,
+            timeout=DRF_PARSE_TIMEOUT_SECONDS
+        )
+
+        parsed = parse_parser_stdout(result.stdout)
+        if result.returncode != 0 or not parsed['success']:
+            mark_upload_failed(supabase, upload_log_id, extract_parser_error(result.stdout, result.stderr))
+
+    except subprocess.TimeoutExpired:
+        mark_upload_failed(supabase, upload_log_id, f'DRF parser timed out after {DRF_PARSE_TIMEOUT_SECONDS} seconds')
+    except Exception as e:
+        if supabase is None:
+            try:
+                supabase = get_supabase_client()
+            except Exception:
+                supabase = None
+        mark_upload_failed(supabase, upload_log_id, str(e))
+
+
+def submit_drf_parse_job(upload_log_id, filename):
+    parse_executor.submit(run_drf_parse_job, upload_log_id, filename)
 
 
 def _discover_scheduler_heartbeat_file():
@@ -400,8 +538,7 @@ def trigger_crawl_changes():
 @app.route('/api/upload-drf', methods=['POST'])
 def upload_drf():
     """
-    Upload and parse a DRF PDF file
-    Returns: Parsed race data
+    Upload a DRF PDF file and queue local background parsing.
     """
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
@@ -414,9 +551,12 @@ def upload_drf():
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type. Only PDF files are allowed.'}), 400
 
+    supabase = None
+    upload_log_id = None
+
     try:
         # Save file
-        filename = secure_filename(file.filename)
+        filename = unique_upload_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
@@ -424,69 +564,72 @@ def upload_drf():
         supabase = get_supabase_client()
         upload_log = supabase.table('hranalyzer_upload_logs').insert({
             'filename': filename,
-            'file_path': filepath,
+            'file_path': filename,
             'file_size': os.path.getsize(filepath),
-            'upload_status': 'parsing'
+            'upload_status': 'queued',
+            'parse_status': 'queued',
         }).execute()
         
         upload_log_id = upload_log.data[0]['id'] if upload_log.data else None
 
-        # Use sys.executable to get current python interpreter (works in venv and Docker)
-        import sys
-        python_bin = sys.executable
-        parser_script = os.path.join(os.path.dirname(__file__), 'parse_drf.py')
-        
-        # Prepare arguments
-        args = [python_bin, parser_script, filepath]
         if upload_log_id:
-            args.append(upload_log_id)
+            submit_drf_parse_job(upload_log_id, filename)
 
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-
-        if result.returncode == 0:
-            # Parse the output to get stats
-            lines = result.stdout.strip().split('\n')
-            races_parsed = 0
-            entries_parsed = 0
-            track_code = None
-            race_date = None
-
-            for line in lines:
-                if 'Races parsed:' in line:
-                    races_parsed = int(line.split(':')[1].strip())
-                elif 'Entries parsed:' in line:
-                    entries_parsed = int(line.split(':')[1].strip())
-                elif 'Track:' in line:
-                    track_code = line.split(':')[1].strip()
-                elif 'Date:' in line:
-                    race_date = line.split(':')[1].strip()
-
-            return jsonify({
-                'success': True,
-                'message': f'Successfully parsed DRF PDF',
-                'races_parsed': races_parsed,
-                'entries_parsed': entries_parsed,
-                'track_code': track_code,
-                'race_date': race_date,
-                'filename': filename
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to parse PDF',
-                'details': result.stderr
-            }), 500
+        return jsonify({
+            'success': True,
+            'queued': True,
+            'message': 'DRF PDF uploaded and queued for parsing',
+            'upload_id': upload_log_id,
+            'filename': filename
+        }), 202
 
     except Exception as e:
+        mark_upload_failed(supabase, upload_log_id, str(e))
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/uploads/<upload_log_id>/reprocess', methods=['POST'])
+def reprocess_upload(upload_log_id):
+    """Queue an existing local upload for parsing again."""
+    try:
+        supabase = get_supabase_client()
+        response = supabase.table('hranalyzer_upload_logs')\
+            .select('*')\
+            .eq('id', upload_log_id)\
+            .execute()
+
+        if not response.data:
+            return jsonify({'success': False, 'error': 'Upload not found'}), 404
+
+        upload = response.data[0]
+        filename = upload_filename_from_row(upload)
+        if not filename:
+            return jsonify({'success': False, 'error': 'Upload has no filename'}), 400
+
+        if not os.path.exists(upload_path_for_filename(filename)):
+            mark_upload_failed(supabase, upload_log_id, f'Uploaded file not found on local storage: {filename}')
+            return jsonify({'success': False, 'error': 'Uploaded file not found on local storage'}), 404
+
+        supabase.table('hranalyzer_upload_logs').update({
+            'upload_status': 'queued',
+            'parse_status': 'queued',
+            'error_message': None,
+            'parsed_at': None,
+        }).eq('id', upload_log_id).execute()
+        submit_drf_parse_job(upload_log_id, filename)
+
+        return jsonify({
+            'success': True,
+            'queued': True,
+            'message': 'Upload queued for reprocessing',
+            'upload_id': upload_log_id,
+            'filename': filename,
+        }), 202
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/uploads', methods=['GET'])
@@ -509,12 +652,52 @@ def get_recent_uploads():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/uploads/<upload_log_id>', methods=['DELETE'])
+def delete_upload(upload_log_id):
+    """Delete an upload log and remove its local PDF if no other log references it."""
+    try:
+        supabase = get_supabase_client()
+        response = supabase.table('hranalyzer_upload_logs')\
+            .select('*')\
+            .eq('id', upload_log_id)\
+            .execute()
+
+        if not response.data:
+            return jsonify({'success': False, 'error': 'Upload not found'}), 404
+
+        upload = response.data[0]
+        filename = upload_filename_from_row(upload)
+
+        supabase.table('hranalyzer_upload_logs').delete().eq('id', upload_log_id).execute()
+
+        if filename:
+            remaining = supabase.table('hranalyzer_upload_logs')\
+                .select('id')\
+                .eq('filename', filename)\
+                .limit(1)\
+                .execute()
+
+            if not remaining.data:
+                filepath = upload_path_for_filename(filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+
+        return jsonify({
+            'success': True,
+            'deleted': True,
+            'upload_id': upload_log_id,
+            'filename': filename
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
     """Serve uploaded PDF file"""
     from flask import send_from_directory
     try:
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+        return send_from_directory(app.config['UPLOAD_FOLDER'], secure_filename(filename))
     except Exception as e:
         return jsonify({'error': 'File not found'}), 404
 

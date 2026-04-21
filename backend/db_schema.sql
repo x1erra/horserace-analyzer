@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS hranalyzer_races (
   fractional_times TEXT,
 
   -- URLs and metadata
-  drf_pdf_path VARCHAR(500),      -- Path to uploaded DRF PDF
+  drf_pdf_path VARCHAR(500),      -- Local upload storage key/filename for uploaded DRF PDF
   equibase_chart_url VARCHAR(500),
   equibase_pdf_url VARCHAR(500),
 
@@ -261,11 +261,11 @@ CREATE TABLE IF NOT EXISTS hranalyzer_upload_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   filename VARCHAR(500) NOT NULL,
-  file_path VARCHAR(500) NOT NULL,
+  file_path VARCHAR(500) NOT NULL, -- Local storage key/filename under configured upload directory
   file_size INTEGER,
 
   upload_status VARCHAR(20) NOT NULL DEFAULT 'uploaded',
-  -- 'uploaded' -> 'parsing' -> 'completed' or 'failed'
+  -- 'uploaded'/'queued' -> 'parsing' -> 'completed' or 'failed'
 
   parse_status VARCHAR(20),
   races_extracted INTEGER DEFAULT 0,
