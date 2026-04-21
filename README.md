@@ -224,8 +224,8 @@ SUPABASE_SERVICE_KEY=your-service-key
 Optional local upload storage settings:
 
 ```env
-# On Umbrel/Portainer, prefer a stable absolute host path:
-# TRACKDATA_UPLOADS_DIR=/home/umbrel/trackdata/uploads
+# On this Umbrel/Portainer Docker-in-Docker stack:
+# TRACKDATA_UPLOADS_DIR=/data/trackdata/uploads
 TRACKDATA_UPLOADS_DIR=./uploads
 DRF_PARSE_TIMEOUT_SECONDS=240
 DRF_PARSE_WORKERS=1
@@ -268,7 +268,7 @@ See [INTEGRATION_TEST_RESULTS.md](backend/INTEGRATION_TEST_RESULTS.md) for detai
 # Repo: https://github.com/x1erra/horserace-analyzer.git
 # Compose path: docker-compose.portainer.yml
 # Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, ALERT_WEBHOOK_URL, BACKEND_PUBLISHED_PORT=5001, MCP_PUBLISHED_PORT=8001
-# Recommended upload dir: TRACKDATA_UPLOADS_DIR=/home/umbrel/trackdata/uploads
+# Recommended upload dir: TRACKDATA_UPLOADS_DIR=/data/trackdata/uploads
 
 # Registry/GHCR path (slower, release-style):
 # Compose path: docker-compose.prod.yml
