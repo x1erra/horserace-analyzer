@@ -219,6 +219,7 @@ Required in `.env` file:
 ```env
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_KEY=your-service-key
+TRACKDATA_APP_PASSWORD=your-app-password
 ```
 
 Optional local upload storage settings:

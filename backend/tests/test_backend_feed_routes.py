@@ -74,6 +74,33 @@ class TestBackendFeedRoutes(unittest.TestCase):
     def setUp(self):
         self.client = backend_module.app.test_client()
 
+    def test_auth_login_accepts_runtime_password(self):
+        with patch.dict(os.environ, {"TRACKDATA_APP_PASSWORD": "secret"}, clear=False):
+            response = self.client.post("/api/auth/login", json={"password": "secret"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["authenticated"])
+
+    def test_auth_login_rejects_wrong_password(self):
+        with patch.dict(os.environ, {"TRACKDATA_APP_PASSWORD": "secret"}, clear=False):
+            response = self.client.post("/api/auth/login", json={"password": "wrong"})
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_auth_login_reports_missing_password(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRACKDATA_APP_PASSWORD": "",
+                "APP_PASSWORD": "",
+                "VITE_APP_PASSWORD": "",
+            },
+            clear=False,
+        ):
+            response = self.client.post("/api/auth/login", json={"password": "secret"})
+
+        self.assertEqual(response.status_code, 503)
+
     def test_upload_drf_queues_background_parse(self):
         fake_supabase = FakeSupabaseClient()
 

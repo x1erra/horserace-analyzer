@@ -8,6 +8,7 @@ import sys
 print("Backend script starting...", file=sys.stdout, flush=True)
 import atexit
 from concurrent.futures import ThreadPoolExecutor
+import hmac
 import subprocess
 import logging
 import json
@@ -104,6 +105,14 @@ def _apply_todays_races_filters(payload, track_filter=None, status_filter=None):
         "races": filtered,
         "count": len(filtered),
     }
+
+
+def get_app_password():
+    return (
+        os.getenv("TRACKDATA_APP_PASSWORD")
+        or os.getenv("APP_PASSWORD")
+        or os.getenv("VITE_APP_PASSWORD")
+    )
 
 
 def _track_name_from_row(row):
@@ -319,6 +328,27 @@ def live_health_check():
         'service': 'backend',
         'version': '1.0.3'
     })
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    return jsonify({
+        'configured': bool(get_app_password()),
+    })
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    configured_password = get_app_password()
+    if not configured_password:
+        return jsonify({'error': 'Password not configured'}), 503
+
+    payload = request.get_json(silent=True) or {}
+    candidate_password = str(payload.get('password') or '')
+    if not candidate_password or not hmac.compare_digest(candidate_password, configured_password):
+        return jsonify({'error': 'Incorrect password'}), 401
+
+    return jsonify({'authenticated': True})
 
 
 @app.route('/api/health/scheduler', methods=['GET'])

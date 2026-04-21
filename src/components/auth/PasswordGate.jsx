@@ -5,8 +5,9 @@ const PasswordGate = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
     useEffect(() => {
         const authStatus = localStorage.getItem('isAppAuthenticated');
@@ -16,20 +17,38 @@ const PasswordGate = ({ children }) => {
         setIsLoading(false);
     }, []);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!APP_PASSWORD) {
-            setError('System Error: Password not configured. Please check .env file.');
+        if (!password.trim()) {
+            setError('Enter the application password.');
             return;
         }
 
-        if (password === APP_PASSWORD) {
+        setIsSubmitting(true);
+        setError('');
+
+        try {
+            const response = await fetch(`${API_BASE}/api/auth/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password }),
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                setError(payload.error || 'Unable to unlock application.');
+                return;
+            }
+
             localStorage.setItem('isAppAuthenticated', 'true');
             setIsAuthenticated(true);
-            setError('');
-        } else {
-            setError('Incorrect password. Please try again.');
+        } catch {
+            setError('Unable to reach the authentication service.');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -62,6 +81,7 @@ const PasswordGate = ({ children }) => {
                             className="w-full px-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all font-mono"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            disabled={isSubmitting}
                             autoFocus
                         />
                     </div>
@@ -74,9 +94,10 @@ const PasswordGate = ({ children }) => {
 
                     <button
                         type="submit"
-                        className="w-full py-3 bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-white font-semibold rounded-lg transition-all shadow-[0_0_15px_rgba(147,51,234,0.1)]"
+                        disabled={isSubmitting}
+                        className="w-full py-3 bg-black border border-purple-900/50 hover:bg-purple-900/20 hover:border-purple-500/50 text-white font-semibold rounded-lg transition-all shadow-[0_0_15px_rgba(147,51,234,0.1)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        Unlock Application
+                        {isSubmitting ? 'Unlocking...' : 'Unlock Application'}
                     </button>
                 </form>
 
