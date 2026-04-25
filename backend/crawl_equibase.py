@@ -973,13 +973,22 @@ def parse_pages_as_race(pages: List) -> Optional[Dict]:
             tables = page.extract_tables()
             if tables:
                 all_tables.extend(tables)
-        
-        horses = []
+
+        horse_candidates = []
         if all_tables:
-            horses = parse_horse_table(all_tables, full_text)
-            
-        if not horses:
-            horses = parse_horses_from_text(full_text)
+            table_horses = parse_horse_table(all_tables, full_text)
+            if table_horses:
+                horse_candidates.append(table_horses)
+
+        preview_horses = parse_running_line_preview_horses(full_text)
+        if preview_horses:
+            horse_candidates.append(preview_horses)
+
+        text_horses = parse_horses_from_text(full_text)
+        if text_horses:
+            horse_candidates.append(text_horses)
+
+        horses = max(horse_candidates, key=len) if horse_candidates else []
             
         if horses:
             # Payouts and scratches are usually on the primary page (first page of race)
@@ -1172,6 +1181,89 @@ def parse_race_chart_text(text: str) -> Dict:
     return data
 
 
+def parse_running_line_preview_horses(text: str) -> List[Dict]:
+    """
+    Parse horse rows from the "Past Performance Running Line Preview" section.
+
+    This section is often the most reliable textual source when the results table
+    is incomplete or table extraction misses rows.
+    """
+    horses = []
+    lines = text.split('\n')
+
+    section_start = -1
+    for i, line in enumerate(lines):
+        if re.search(r'Past Performance Running Line Preview', line, re.IGNORECASE):
+            section_start = i + 1
+            break
+
+    if section_start == -1:
+        return horses
+
+    row_start_pattern = re.compile(
+        r'^\s*(\d+[A-Z]?)\s+([A-Za-z][A-Za-z\'&\-.]*(?:\s+[A-Za-z][A-Za-z\'&\-.]*)*)\s+(?:\d+|Head|Neck|Nose)\b'
+    )
+    stop_pattern = re.compile(
+        r'^(Trainers:|Owners:|Footnotes|Copyright|Denotes\b)',
+        re.IGNORECASE,
+    )
+
+    current_row_lines = []
+
+    def flush_row(row_lines: List[str]) -> None:
+        if not row_lines:
+            return
+
+        row_text = re.sub(r'\s+', ' ', ' '.join(row_lines)).strip()
+        match = row_start_pattern.match(row_text)
+        if not match:
+            return
+
+        program_number = normalize_pgm(match.group(1))
+        horse_name = re.sub(r'[^\w\s\'-]', '', match.group(2).strip())
+        if not program_number or not horse_name:
+            return
+
+        horses.append({
+            'program_number': program_number,
+            'horse_name': horse_name,
+            'jockey': None,
+            'trainer': None,
+            'owner': None,
+            'weight': None,
+            'odds': None,
+            'finish_position': len(horses) + 1,
+            'comments': None,
+            'speed_figure': None,
+            'win_payout': None,
+            'place_payout': None,
+            'show_payout': None
+        })
+
+    for raw_line in lines[section_start:]:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if stop_pattern.match(line):
+            break
+
+        if re.match(r'^Pgm\s+Horse\s+Name\b', line, re.IGNORECASE):
+            continue
+
+        if row_start_pattern.match(line):
+            flush_row(current_row_lines)
+            current_row_lines = [line]
+        elif current_row_lines:
+            current_row_lines.append(line)
+
+    flush_row(current_row_lines)
+
+    if horses:
+        logger.info(f"Parsed {len(horses)} horses from running line preview")
+    return horses
+
+
 def parse_horse_table(tables: List, full_text: str) -> List[Dict]:
     """
     Parse horse entries from extracted PDF tables
@@ -1274,6 +1366,11 @@ def parse_horses_from_text(text: str) -> List[Dict]:
     Expects format: LastRaced Pgm HorseName(Jockey) ...
     """
     horses = []
+    
+    preview_horses = parse_running_line_preview_horses(text)
+    if preview_horses:
+        return preview_horses
+
     lines = text.split('\n')
     
     start_parsing = False
@@ -1293,9 +1390,12 @@ def parse_horses_from_text(text: str) -> List[Dict]:
             continue
             
         # Stop parsing if we hit other sections
-        if 'Fractional Times' in line or 'Final Time' in line or 'Run-Up' in line or line.strip() == '':
+        if 'Fractional Times' in line or 'Final Time' in line or 'Run-Up' in line:
             if len(horses) > 0: # If we already found horses, stop
                 break
+
+        if not line.strip():
+            continue
         
         match = re.search(pattern, line)
         if match:

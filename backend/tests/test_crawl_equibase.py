@@ -3,6 +3,7 @@ import sys
 import types
 import time
 import unittest
+from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 # Add parent dir to path
@@ -208,6 +209,51 @@ class TestCrawlEquibase(unittest.TestCase):
         self.assertEqual(race_date.isoformat(), "2026-04-25")
         self.assertEqual(race_number, 1)
 
+    def test_parse_running_line_preview_horses_extracts_all_finishers(self):
+        text = dedent(
+            """
+            Past Performance Running Line Preview
+            Pgm Horse Name Start 1/4 3/8 Str Fin
+            6 King Phoenix 1 12
+            1
+            1 1/2 1
+            2
+            1
+            1
+            2 Battle Anthem 2 22
+            2
+            1 1/2 2
+            2
+            2
+            1
+            4 Taporical 6 69
+            6
+            10 1/2 3
+            10 3
+            12 1/4
+            1 Sittin Chilly 3 34 1/2 5
+            10 5
+            11 1/2 4
+            12 3/4
+            5 Chase a Dream 5 56 1/2 4
+            10 4
+            11 5
+            12 3/4
+            7 Kerner 4 45
+            3
+            9 1/2 6
+            16 1/2 6
+            27
+            Trainers: 6 - Dutrow, Jr., Richard; 2 - Velazquez, Daniel
+            """
+        ).strip()
+
+        horses = crawl_equibase.parse_running_line_preview_horses(text)
+
+        self.assertEqual([h["program_number"] for h in horses], ["6", "2", "4", "1", "5", "7"])
+        self.assertEqual([h["finish_position"] for h in horses], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(horses[2]["horse_name"], "Taporical")
+
     def test_extract_race_from_pdf_falls_back_to_full_card(self):
         fallback_races = [
             {"race_number": 1, "horses": [{"horse_name": "Alpha"}]},
@@ -268,6 +314,35 @@ class TestCrawlEquibase(unittest.TestCase):
             )
 
         self.assertIsNone(race)
+
+    def test_parse_pages_as_race_prefers_more_complete_horse_parse(self):
+        fake_page = MagicMock()
+        fake_page.extract_text.return_value = "Race 1 text"
+        fake_page.extract_tables.return_value = [[["6", "King Phoenix", "Jockey"]]]
+
+        with patch.object(crawl_equibase, "parse_race_chart_text", return_value={"race_number": 1, "horses": []}), \
+             patch.object(crawl_equibase, "parse_horse_table", return_value=[
+                 {"program_number": "6", "horse_name": "King Phoenix", "finish_position": 1},
+                 {"program_number": "2", "horse_name": "Battle Anthem", "finish_position": 2},
+             ]), \
+             patch.object(crawl_equibase, "parse_running_line_preview_horses", return_value=[
+                 {"program_number": "6", "horse_name": "King Phoenix", "finish_position": 1},
+                 {"program_number": "2", "horse_name": "Battle Anthem", "finish_position": 2},
+                 {"program_number": "4", "horse_name": "Taporical", "finish_position": 3},
+                 {"program_number": "1", "horse_name": "Sittin Chilly", "finish_position": 4},
+             ]), \
+             patch.object(crawl_equibase, "parse_horses_from_text", return_value=[]), \
+             patch.object(crawl_equibase, "parse_wps_payouts", return_value={}), \
+             patch.object(crawl_equibase, "parse_trainers_section", return_value={}):
+            race = crawl_equibase.parse_pages_as_race([fake_page])
+
+        self.assertIsNotNone(race)
+        self.assertEqual([h["horse_name"] for h in race["horses"]], [
+            "King Phoenix",
+            "Battle Anthem",
+            "Taporical",
+            "Sittin Chilly",
+        ])
 
     def test_crawl_specific_races_only_processes_requested_targets(self):
         supabase = MagicMock()
