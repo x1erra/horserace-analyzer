@@ -155,7 +155,7 @@ def derive_live_race_status(
 ):
     if has_results or stored_status == "completed":
         return "completed"
-    if stored_status in {"cancelled", "delayed"}:
+    if stored_status in {"cancelled", "delayed", "results_unavailable"}:
         return stored_status
     if stored_status == "past_drf_only":
         return "past"
