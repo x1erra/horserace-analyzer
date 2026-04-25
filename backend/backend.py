@@ -66,6 +66,10 @@ SUPABASE_PAGE_SIZE = int(os.getenv("SUPABASE_PAGE_SIZE", "1000"))
 parse_executor = ThreadPoolExecutor(max_workers=DRF_PARSE_WORKERS, thread_name_prefix="drf-parser")
 atexit.register(parse_executor.shutdown, wait=False, cancel_futures=True)
 
+CANONICAL_TRACK_OPTIONS = {
+    "WO": "Woodbine",
+}
+
 
 def _snapshot_key_for_todays_races(target_date):
     return f"todays-races:{target_date}"
@@ -120,6 +124,30 @@ def _track_name_from_row(row):
     return (track.get("track_name") or row.get("track_code") or "").strip()
 
 
+def _with_canonical_track_options(tracks):
+    """Ensure key tracks remain available even when race-derived metadata is sparse."""
+    by_code = {
+        (track.get("code") or "").strip(): {
+            "name": (track.get("name") or track.get("code") or "").strip(),
+            "code": (track.get("code") or "").strip(),
+        }
+        for track in tracks
+        if (track.get("code") or "").strip()
+    }
+
+    for code, name in CANONICAL_TRACK_OPTIONS.items():
+        current = by_code.get(code)
+        if current:
+            current["name"] = name
+        else:
+            by_code[code] = {"name": name, "code": code}
+
+    return sorted(
+        by_code.values(),
+        key=lambda track: ((track.get("name") or track.get("code") or "").lower(), track.get("code") or "")
+    )
+
+
 def _fetch_all_track_options(supabase, page_size=SUPABASE_PAGE_SIZE):
     """Return every track that has race data without relying on capped API defaults."""
     unique_tracks = {}
@@ -148,10 +176,7 @@ def _fetch_all_track_options(supabase, page_size=SUPABASE_PAGE_SIZE):
             break
         start += page_size
 
-    return sorted(
-        unique_tracks.values(),
-        key=lambda track: ((track.get('name') or track.get('code') or '').lower(), track.get('code') or '')
-    )
+    return _with_canonical_track_options(unique_tracks.values())
 
 
 def allowed_file(filename):

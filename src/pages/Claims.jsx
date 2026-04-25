@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import TrackFilter from '../components/TrackFilter';
+import { getTrackDisplayName, withCanonicalTrackNames, withCanonicalTrackOptions } from '../utils/tracks';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -90,7 +91,7 @@ export default function Claims() {
             try {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
-                setMetadataTracks(response.data?.tracks || []);
+                setMetadataTracks(withCanonicalTrackOptions(response.data?.tracks || []));
                 setMetadataDates(response.data?.dates || []);
             } catch (err) {
                 console.error("Error fetching claim filter options:", err);
@@ -118,7 +119,7 @@ export default function Claims() {
         // 1. Filter
         if (selectedTrack !== 'All Tracks') {
             filtered = filtered.filter(claim =>
-                claim.track_name === selectedTrack || claim.track_code === selectedTrack
+                getTrackDisplayName(claim) === selectedTrack || claim.track_code === selectedTrack
             );
         }
 
@@ -142,6 +143,9 @@ export default function Claims() {
                 } else if (sortConfig.key === 'new_trainer') {
                     aValue = (a.new_trainer_name || '').toLowerCase();
                     bValue = (b.new_trainer_name || '').toLowerCase();
+                } else if (sortConfig.key === 'track_name') {
+                    aValue = getTrackDisplayName(a).toLowerCase();
+                    bValue = getTrackDisplayName(b).toLowerCase();
                 } else if (sortConfig.key === 'created_at') {
                     // String date comparison works for ISO dates
                     aValue = (aValue || '').toString();
@@ -161,8 +165,8 @@ export default function Claims() {
 
                 // Secondary sort: Track Name (Alphabetic) - Only if primary sort is Date
                 if (sortConfig.key === 'race_date') {
-                    const trackA = (a.track_name || a.track_code || '').toLowerCase();
-                    const trackB = (b.track_name || b.track_code || '').toLowerCase();
+                    const trackA = getTrackDisplayName(a).toLowerCase();
+                    const trackB = getTrackDisplayName(b).toLowerCase();
                     if (trackA < trackB) return -1;
                     if (trackA > trackB) return 1;
                 }
@@ -195,11 +199,11 @@ export default function Claims() {
     // Unique tracks and dates for filters
     const tracks = [
         'All Tracks',
-        ...new Set([
-            ...metadataTracks.map(track => track.name || track.code).filter(Boolean),
-            ...claims.map(c => c.track_name || c.track_code).filter(Boolean)
+        ...withCanonicalTrackNames([
+            ...metadataTracks.map(track => track.name || track.code),
+            ...claims.map(c => c.track_name || c.track_code)
         ])
-    ].sort();
+    ];
     const dates = [
         'All Dates',
         ...new Set([
@@ -427,7 +431,7 @@ export default function Claims() {
                                     <div className="flex justify-between items-start">
                                         <div>
                                             <div className="font-bold text-white text-lg">{claim.horse_name}</div>
-                                            <div className="text-xs text-purple-300 mt-0.5">{claim.track_name} • {claim.race_date}</div>
+                                            <div className="text-xs text-purple-300 mt-0.5">{getTrackDisplayName(claim)} • {claim.race_date}</div>
                                         </div>
                                         <div className="text-green-400 font-mono font-bold text-lg">
                                             {claim.claim_price ? `$${claim.claim_price.toLocaleString()}` : '-'}

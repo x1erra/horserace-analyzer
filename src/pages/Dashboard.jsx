@@ -5,6 +5,7 @@ import RecentUploads from '../components/RecentUploads';
 import RaceCard from '../components/RaceCard';
 import { HiStar, HiOutlineStar } from 'react-icons/hi';
 import ErrorMessage from '../components/common/ErrorMessage';
+import { withCanonicalTrackOptions } from '../utils/tracks';
 
 // Helper component for Countdown
 const Countdown = ({ targetIso }) => {
@@ -159,6 +160,7 @@ export default function Dashboard() {
     const [selectedTrack, setSelectedTrack] = useState('All');
     const [selectedStatus, setSelectedStatus] = useState('All'); // 'All' | 'Upcoming' | 'Completed'
     const [availableDates, setAvailableDates] = useState([]);
+    const [availableTracks, setAvailableTracks] = useState([]);
 
     const [loading, setLoading] = useState(false);
     const [metaLoading, setMetaLoading] = useState(true);
@@ -182,6 +184,7 @@ export default function Dashboard() {
             if (response.data) {
                 setTodaySummary(response.data.today_summary || []);
                 setAvailableDates(response.data.dates || []);
+                setAvailableTracks(withCanonicalTrackOptions(response.data.tracks || []));
             }
         } catch (err) {
             console.error("Error fetching summary:", err);
@@ -265,6 +268,14 @@ export default function Dashboard() {
         return { favoritedTracks: favs, remainingTracks: others };
     }, [todaySummary, favoriteTracks]);
 
+    const dashboardTrackOptions = useMemo(() => {
+        const countsByCode = new Map(todaySummary.map(item => [item.track_code, item.total]));
+        return availableTracks.map(track => ({
+            ...track,
+            total: countsByCode.get(track.code) || 0
+        }));
+    }, [availableTracks, todaySummary]);
+
     // Calculate totals for overview
     return (
         <div className="space-y-8">
@@ -310,9 +321,9 @@ export default function Dashboard() {
                             className="w-full bg-black border border-purple-900/30 text-white px-4 py-2.5 rounded-lg focus:outline-none focus:border-purple-600 focus:ring-1 focus:ring-purple-600 transition appearance-none"
                         >
                             <option value="All">All Tracks ({todaySummary.length})</option>
-                            {todaySummary.map(item => (
-                                <option key={item.track_code} value={item.track_name}>
-                                    {item.track_name} ({item.total})
+                            {dashboardTrackOptions.map(item => (
+                                <option key={item.code} value={item.name}>
+                                    {item.name} ({item.total})
                                 </option>
                             ))}
                         </select>

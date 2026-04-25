@@ -4,6 +4,7 @@ import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 import { AlertTriangle, Info, Shuffle, ShieldAlert } from 'lucide-react';
 import TrackFilter from '../components/TrackFilter';
+import { withCanonicalTrackOptions } from '../utils/tracks';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -126,7 +127,7 @@ export default function Changes() {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
                 if (response.data && response.data.tracks) {
-                    setAvailableTracks(['All', ...response.data.tracks.map(t => t.code)]);
+                    setAvailableTracks(['All', ...withCanonicalTrackOptions(response.data.tracks).map(t => t.code)]);
                 }
             } catch (e) { console.error(e); }
         };
@@ -221,6 +222,9 @@ export default function Changes() {
                     selectedTrack={selectedTrack}
                     onSelectTrack={handleTrackChange}
                 />
+                <p className="text-xs text-gray-500 mt-2">
+                    {totalCount} changes available{selectedTrack !== 'All' ? ` for ${selectedTrack}` : ''}.
+                </p>
             </div>
 
             {error && (

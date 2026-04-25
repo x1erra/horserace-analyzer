@@ -101,6 +101,16 @@ class TestBackendFeedRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
 
+    def test_track_options_include_canonical_woodbine(self):
+        tracks = backend_module._with_canonical_track_options(
+            [
+                {"name": "Gulfstream Park", "code": "GP"},
+                {"name": "WO", "code": "WO"},
+            ]
+        )
+
+        self.assertIn({"name": "Woodbine", "code": "WO"}, tracks)
+
     def test_upload_drf_queues_background_parse(self):
         fake_supabase = FakeSupabaseClient()
 

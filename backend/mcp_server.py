@@ -37,6 +37,10 @@ mcp = FastMCP(
     port=8001,
 )
 
+CANONICAL_TRACK_OPTIONS = {
+    "WO": "Woodbine",
+}
+
 
 def format_to_12h(time_str):
     """Convert 24h time string (HH:MM:SS) to 12h format (I:MM PM)."""
@@ -472,6 +476,26 @@ def _track_matches(track_filter, race_track_code, race_track_name):
     if not track_filter:
         return True
     return track_filter in {race_track_code, race_track_name}
+
+
+def _with_canonical_track_options(tracks):
+    by_code = {
+        (track.get("code") or "").strip(): {
+            "name": (track.get("name") or track.get("code") or "").strip(),
+            "code": (track.get("code") or "").strip(),
+        }
+        for track in tracks
+        if (track.get("code") or "").strip()
+    }
+
+    for code, name in CANONICAL_TRACK_OPTIONS.items():
+        current = by_code.get(code)
+        if current:
+            current["name"] = name
+        else:
+            by_code[code] = {"name": name, "code": code}
+
+    return sorted(by_code.values(), key=lambda track: ((track.get("name") or "").lower(), track.get("code") or ""))
 
 
 def _detect_pipeline_activity():
@@ -1198,7 +1222,9 @@ def get_filter_options(summary_date: str = "") -> dict:
         track_name = (row.get("hranalyzer_tracks") or {}).get("track_name", track_code)
         unique_tracks[track_name] = track_code
 
-    sorted_tracks = [{"name": name, "code": unique_tracks[name]} for name in sorted(unique_tracks)]
+    sorted_tracks = _with_canonical_track_options(
+        {"name": name, "code": unique_tracks[name]} for name in sorted(unique_tracks)
+    )
 
     summary_response = (
         supabase.table("hranalyzer_races")

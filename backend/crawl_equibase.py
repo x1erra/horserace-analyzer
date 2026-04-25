@@ -55,6 +55,10 @@ COMMON_TRACKS = [
     'TAM', 'WO', 'MD', 'PRX', 'PIM', 'MVR', 'TUP', 'WRD'
 ]
 
+TRACK_COUNTRY_CODES = {
+    'WO': 'CAN',
+}
+
 DEFAULT_BROWSER_HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -347,15 +351,16 @@ def normalize_pgm(pgm: str) -> str:
 def build_equibase_url(track_code: str, race_date: date, race_number: int) -> str:
     """
     Build the accessible TVG-hosted Equibase PDF URL for a specific race.
-    Format: https://tvg.equibase.com/static/chart/pdf/TTMMDDYYUSAN.pdf
+    Format: https://tvg.equibase.com/static/chart/pdf/TTMMDDYYCOUNTRYN.pdf
 
     Example: GP on 01/04/2024, Race 1 -> https://tvg.equibase.com/static/chart/pdf/GP010424USA1.pdf
     """
     mm = race_date.strftime('%m')
     dd = race_date.strftime('%d')
     yy = race_date.strftime('%y')
+    country_code = TRACK_COUNTRY_CODES.get(str(track_code).upper(), 'USA')
 
-    url = f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA{race_number}.pdf"
+    url = f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}{country_code}{race_number}.pdf"
     return url
 
 
@@ -364,12 +369,13 @@ def build_equibase_full_card_url(track_code: str, race_date: date) -> str:
     mm = race_date.strftime('%m')
     dd = race_date.strftime('%d')
     yy = race_date.strftime('%y')
-    return f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}USA.pdf"
+    country_code = TRACK_COUNTRY_CODES.get(str(track_code).upper(), 'USA')
+    return f"https://tvg.equibase.com/static/chart/pdf/{track_code}{mm}{dd}{yy}{country_code}.pdf"
 
 
 def parse_equibase_static_pdf_url(pdf_url: str) -> Optional[Tuple[str, date, int]]:
     """Extract track/date/race_number from a static chart PDF URL."""
-    match = re.search(r'/([A-Z]{2,4})(\d{2})(\d{2})(\d{2})USA(\d+)\.pdf(?:\?.*)?$', pdf_url)
+    match = re.search(r'/([A-Z]{2,4})(\d{2})(\d{2})(\d{2})(?:USA|CAN)(\d+)\.pdf(?:\?.*)?$', pdf_url)
     if not match:
         return None
 

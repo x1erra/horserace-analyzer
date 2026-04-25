@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Wallet, RefreshCw, Plus, Trash2, TrendingUp, DollarSign, Percent, ChevronDown, ChevronUp } from 'lucide-react';
 import { getPostColor } from '../utils/saddleCloth';
+import { getTrackDisplayName } from '../utils/tracks';
 
 // Use environment variable for API URL (defaults to localhost if not set)
 const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -637,15 +638,20 @@ export default function Betting() {
                                     // Group races by track
                                     const grouped = races.reduce((acc, race) => {
                                         const track = race.track_code;
-                                        if (!acc[track]) acc[track] = [];
-                                        acc[track].push(race);
+                                        if (!acc[track]) {
+                                            acc[track] = {
+                                                label: `${getTrackDisplayName(race)} (${track})`,
+                                                races: []
+                                            };
+                                        }
+                                        acc[track].races.push(race);
                                         return acc;
                                     }, {});
 
                                     // Sort tracks alphabetically
                                     return Object.keys(grouped).sort().map(trackCode => (
-                                        <optgroup key={trackCode} label={trackCode}>
-                                            {grouped[trackCode]
+                                        <optgroup key={trackCode} label={grouped[trackCode].label}>
+                                            {grouped[trackCode].races
                                                 .sort((a, b) => a.race_number - b.race_number)
                                                 .map(race => (
                                                     <option key={race.id} value={race.id}>
@@ -930,7 +936,7 @@ export default function Betting() {
                                         <td className="p-4">
                                             {ticket.hranalyzer_races ? (
                                                 <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-purple-900/20 text-purple-300 text-xs font-bold border border-purple-500/30 font-mono">
-                                                    {ticket.hranalyzer_races.track_code} R{ticket.hranalyzer_races.race_number}
+                                                    {getTrackDisplayName(ticket.hranalyzer_races)} R{ticket.hranalyzer_races.race_number}
                                                 </span>
                                             ) : <span className="text-gray-500">Unknown</span>}
                                         </td>
@@ -938,8 +944,7 @@ export default function Betting() {
                                             {ticket.selection ? (
                                                 <div className="flex flex-wrap gap-1">
                                                     {ticket.selection.map((num, idx) => {
-                                                        const pgm = Array.isArray(num) ? num[0] : num; // Simplify array handling if needed, or map properly
-                                                        // Actually, ticket.selection for Box/Key might be [ [1,2], [3], [4] ] or similar?
+                                                        // ticket.selection for Box/Key may be arrays like [[1,2], [3], [4]].
                                                         // Let's look at how it was rendered before: 
                                                         // #{Array.isArray(num) ? num.join(',') : num}
 
@@ -1019,7 +1024,7 @@ export default function Betting() {
                                     <div>
                                         <div className="text-white font-bold text-lg">
                                             {ticket.hranalyzer_races ? (
-                                                `${ticket.hranalyzer_races.track_code} R${ticket.hranalyzer_races.race_number}`
+                                                `${getTrackDisplayName(ticket.hranalyzer_races)} R${ticket.hranalyzer_races.race_number}`
                                             ) : 'Unknown'}
                                         </div>
                                         <div className="text-xs text-gray-500">

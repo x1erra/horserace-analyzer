@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import TrackFilter from '../components/TrackFilter';
+import { getTrackDisplayName, withCanonicalTrackNames, withCanonicalTrackOptions } from '../utils/tracks';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -46,11 +47,11 @@ export default function Results() {
     // disappear just because the current page is capped.
     const tracks = [
         'All',
-        ...new Set([
-            ...metadataTracks.map(track => track.name || track.code).filter(Boolean),
-            ...allResults.map(r => r.track_name || r.track_code).filter(Boolean)
+        ...withCanonicalTrackNames([
+            ...metadataTracks.map(track => track.name || track.code),
+            ...allResults.map(r => r.track_name || r.track_code)
         ])
-    ].sort();
+    ];
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -92,7 +93,7 @@ export default function Results() {
             try {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
-                setMetadataTracks(response.data?.tracks || []);
+                setMetadataTracks(withCanonicalTrackOptions(response.data?.tracks || []));
             } catch (err) {
                 console.error("Error fetching result filter options:", err);
             }
@@ -104,8 +105,8 @@ export default function Results() {
     // Filter and sort logic
     const sortedAndFilteredResults = allResults
         .filter(result =>
-            (selectedTrack === 'All' || result.track_name === selectedTrack || result.track_code === selectedTrack) &&
-            ((result.track_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (selectedTrack === 'All' || getTrackDisplayName(result) === selectedTrack || result.track_code === selectedTrack) &&
+            (getTrackDisplayName(result).toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (result.winner || '').toLowerCase().includes(searchQuery.toLowerCase()))
         )
         .sort((a, b) => {
@@ -119,6 +120,9 @@ export default function Results() {
             if (sortColumn === 'race_number') {
                 valA = Number(valA);
                 valB = Number(valB);
+            } else if (sortColumn === 'track_name') {
+                valA = getTrackDisplayName(a).toLowerCase();
+                valB = getTrackDisplayName(b).toLowerCase();
             } else if (typeof valA === 'string') {
                 valA = valA.toLowerCase();
                 valB = valB.toLowerCase();
@@ -129,8 +133,8 @@ export default function Results() {
 
             // Secondary sort: Track Name (Alphabetic) - Only if primary sort is Date
             if (sortColumn === 'race_date') {
-                const trackA = (a.track_name || '').toLowerCase();
-                const trackB = (b.track_name || '').toLowerCase();
+                const trackA = getTrackDisplayName(a).toLowerCase();
+                const trackB = getTrackDisplayName(b).toLowerCase();
                 if (trackA < trackB) return -1;
                 if (trackA > trackB) return 1;
             }
@@ -296,7 +300,7 @@ export default function Results() {
                                 <div key={result.race_key || index} className="p-4 space-y-3 hover:bg-purple-900/5 transition">
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <div className="font-bold text-white text-lg">{result.track_name}</div>
+                                            <div className="font-bold text-white text-lg">{getTrackDisplayName(result)}</div>
                                             <div className="text-xs text-gray-400 mt-0.5">{result.race_date}</div>
                                         </div>
                                         <div className="bg-purple-900/30 text-purple-300 text-xs font-mono px-2 py-1 rounded">

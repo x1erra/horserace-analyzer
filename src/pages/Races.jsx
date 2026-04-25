@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RaceCard from '../components/RaceCard';
 import ErrorMessage from '../components/common/ErrorMessage';
+import { withCanonicalTrackOptions } from '../utils/tracks';
 
 export default function Races() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -41,7 +42,7 @@ export default function Races() {
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
 
                 if (response.data) {
-                    setAvailableTracks([{ name: 'All Tracks', code: 'All' }, ...response.data.tracks]);
+                    setAvailableTracks([{ name: 'All Tracks', code: 'All' }, ...withCanonicalTrackOptions(response.data.tracks)]);
                     setAvailableDates(['All Dates', ...response.data.dates]);
                 }
             } catch (err) {

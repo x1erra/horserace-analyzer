@@ -1,6 +1,7 @@
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getTrackDisplayName } from '../utils/tracks';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -59,7 +60,7 @@ export default function RaceDetails() {
                     try {
                         const changesRes = await axios.get(`${baseUrl}/api/race/${raceId}/changes`);
                         setRaceChanges(changesRes.data.changes || []);
-                    } catch (e) {
+                    } catch {
                         console.log('No changes data available');
                     }
                 }
@@ -88,6 +89,7 @@ export default function RaceDetails() {
     if (!raceData || !raceData.race) return <div className="text-gray-400 text-center p-20">Race not found.</div>;
 
     const { race, entries, exotic_payouts, claims, navigation } = raceData;
+    const trackDisplayName = getTrackDisplayName(race);
     const isUpcoming = race.race_status === 'upcoming';
     const isCompleted = race.race_status === 'completed';
     const isCancelled = race.race_status === 'cancelled';
@@ -120,7 +122,7 @@ export default function RaceDetails() {
     });
 
     const raceConditions = [
-        { detail: 'Track', value: race.track_name },
+        { detail: 'Track', value: trackDisplayName },
         { detail: 'Location', value: race.location || 'N/A' },
         { detail: 'Date', value: race.race_date },
         { detail: 'Post Time', value: race.post_time || 'TBD' },
@@ -238,7 +240,7 @@ export default function RaceDetails() {
                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
                     <div>
                         <h3 className="text-2xl md:text-3xl font-bold text-white leading-tight">
-                            Race {race.race_number} - {race.track_name}
+                            Race {race.race_number} - {trackDisplayName}
                         </h3>
                         <p className="text-sm text-gray-400 mt-1">{race.race_date} • {race.post_time || 'TBD'}</p>
                     </div>

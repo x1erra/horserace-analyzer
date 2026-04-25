@@ -253,6 +253,16 @@ class TestMcpServer(unittest.TestCase):
         for tool_name in expected_tools:
             self.assertTrue(hasattr(mcp_server, tool_name), f"Missing MCP tool function: {tool_name}")
 
+    def test_filter_options_include_canonical_woodbine(self):
+        tracks = mcp_server._with_canonical_track_options(
+            [
+                {"name": "Gulfstream Park", "code": "GP"},
+                {"name": "WO", "code": "WO"},
+            ]
+        )
+
+        self.assertIn({"name": "Woodbine", "code": "WO"}, tracks)
+
     def test_get_feed_freshness_surfaces_open_alerts(self):
         with patch.object(
             mcp_server,

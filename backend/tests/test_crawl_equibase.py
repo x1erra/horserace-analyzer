@@ -60,12 +60,27 @@ class TestCrawlEquibase(unittest.TestCase):
         )
         self.assertEqual(url, "https://tvg.equibase.com/static/chart/pdf/PRX033126USA7.pdf")
 
+    def test_build_equibase_url_uses_canadian_suffix_for_woodbine(self):
+        url = crawl_equibase.build_equibase_url(
+            "WO",
+            crawl_equibase.date.fromisoformat("2026-04-25"),
+            1,
+        )
+        self.assertEqual(url, "https://tvg.equibase.com/static/chart/pdf/WO042526CAN1.pdf")
+
     def test_build_equibase_full_card_url_uses_tvg_host(self):
         url = crawl_equibase.build_equibase_full_card_url(
             "PRX",
             crawl_equibase.date.fromisoformat("2026-03-31"),
         )
         self.assertEqual(url, "https://tvg.equibase.com/static/chart/pdf/PRX033126USA.pdf")
+
+    def test_build_equibase_full_card_url_uses_canadian_suffix_for_woodbine(self):
+        url = crawl_equibase.build_equibase_full_card_url(
+            "WO",
+            crawl_equibase.date.fromisoformat("2026-04-25"),
+        )
+        self.assertEqual(url, "https://tvg.equibase.com/static/chart/pdf/WO042526CAN.pdf")
 
     def test_download_pdf_tries_layered_downloaders_until_one_succeeds(self):
         with patch.object(crawl_equibase, "download_pdf_via_curl_cffi", return_value=None) as curl_dl, \
@@ -181,6 +196,17 @@ class TestCrawlEquibase(unittest.TestCase):
         self.assertEqual(track_code, "PRX")
         self.assertEqual(race_date.isoformat(), "2026-03-31")
         self.assertEqual(race_number, 7)
+
+    def test_parse_equibase_static_pdf_url_accepts_canadian_metadata(self):
+        parsed = crawl_equibase.parse_equibase_static_pdf_url(
+            "https://www.equibase.com/static/chart/pdf/WO042526CAN1.pdf"
+        )
+
+        self.assertIsNotNone(parsed)
+        track_code, race_date, race_number = parsed
+        self.assertEqual(track_code, "WO")
+        self.assertEqual(race_date.isoformat(), "2026-04-25")
+        self.assertEqual(race_number, 1)
 
     def test_extract_race_from_pdf_falls_back_to_full_card(self):
         fallback_races = [
