@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import TrackFilter from '../components/TrackFilter';
-import { getTrackDisplayName, withCanonicalTrackNames, withCanonicalTrackOptions } from '../utils/tracks';
+import { getTrackDisplayName, withCanonicalTrackOptions } from '../utils/tracks';
 
 const getPostColor = (number) => {
     const num = parseInt(number);
@@ -38,11 +38,9 @@ export default function Claims() {
     const [filteredClaims, setFilteredClaims] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [selectedTrack, setSelectedTrack] = useState('All Tracks');
-    const [selectedDate, setSelectedDate] = useState('All Dates');
+    const [selectedTrack, setSelectedTrack] = useState('All');
     const [sortConfig, setSortConfig] = useState({ key: 'race_date', direction: 'desc' });
     const [metadataTracks, setMetadataTracks] = useState([]);
-    const [metadataDates, setMetadataDates] = useState([]);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -51,7 +49,7 @@ export default function Claims() {
     // Reset to first page when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [selectedTrack, selectedDate, sortConfig]);
+    }, [selectedTrack, sortConfig]);
 
     const fetchClaims = useCallback(async (isAutoRefresh = false) => {
         try {
@@ -61,15 +59,11 @@ export default function Claims() {
             if (showLoading) setLoading(true);
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
             const params = { limit: 500 };
-            if (selectedTrack !== 'All Tracks') {
+            if (selectedTrack !== 'All') {
                 const selectedTrackMeta = metadataTracks.find(track =>
                     track.code === selectedTrack || track.name === selectedTrack
                 );
                 params.track = selectedTrackMeta?.code || selectedTrack;
-            }
-            if (selectedDate !== 'All Dates') {
-                params.start_date = selectedDate;
-                params.end_date = selectedDate;
             }
 
             const response = await axios.get(`${baseUrl}/api/claims`, { params });
@@ -84,7 +78,7 @@ export default function Claims() {
         } finally {
             if (isAutoRefresh !== true) setLoading(false);
         }
-    }, [metadataTracks, selectedDate, selectedTrack]);
+    }, [metadataTracks, selectedTrack]);
 
     useEffect(() => {
         const fetchFilterOptions = async () => {
@@ -92,7 +86,6 @@ export default function Claims() {
                 const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001';
                 const response = await axios.get(`${baseUrl}/api/filter-options`);
                 setMetadataTracks(withCanonicalTrackOptions(response.data?.tracks || []));
-                setMetadataDates(response.data?.dates || []);
             } catch (err) {
                 console.error("Error fetching claim filter options:", err);
             }
@@ -117,14 +110,10 @@ export default function Claims() {
         let filtered = [...claims];
 
         // 1. Filter
-        if (selectedTrack !== 'All Tracks') {
+        if (selectedTrack !== 'All') {
             filtered = filtered.filter(claim =>
-                getTrackDisplayName(claim) === selectedTrack || claim.track_code === selectedTrack
+                claim.track_code === selectedTrack || getTrackDisplayName(claim) === selectedTrack
             );
-        }
-
-        if (selectedDate !== 'All Dates') {
-            filtered = filtered.filter(claim => claim.race_date === selectedDate);
         }
 
         // 2. Sort
@@ -177,7 +166,7 @@ export default function Claims() {
         }
 
         setFilteredClaims(filtered);
-    }, [selectedTrack, selectedDate, claims, sortConfig]);
+    }, [selectedTrack, claims, sortConfig]);
 
     const handleSort = (key) => {
         let direction = 'asc';
@@ -198,19 +187,12 @@ export default function Claims() {
 
     // Unique tracks and dates for filters
     const tracks = [
-        'All Tracks',
-        ...withCanonicalTrackNames([
-            ...metadataTracks.map(track => track.name || track.code),
-            ...claims.map(c => c.track_name || c.track_code)
-        ])
+        'All',
+        ...withCanonicalTrackOptions([
+            ...metadataTracks,
+            ...claims.map(c => ({ name: c.track_name || c.track_code, code: c.track_code }))
+        ]).map(track => track.code)
     ];
-    const dates = [
-        'All Dates',
-        ...new Set([
-            ...metadataDates,
-            ...claims.map(c => c.race_date).filter(Boolean)
-        ])
-    ].sort().reverse();
 
     // Initial loading state only (if no data yet)
     if (loading && claims.length === 0) {
@@ -257,32 +239,21 @@ export default function Claims() {
 
 
             {/* Filter bar */}
-            <div className="flex flex-col gap-4 mb-8">
+            <div className="mb-6">
                 <TrackFilter
-                    tracks={tracks.filter(t => t !== 'All Tracks').map(t => t)}
-                    selectedTrack={selectedTrack === 'All Tracks' ? 'All' : selectedTrack}
-                    onSelectTrack={(t) => setSelectedTrack(t === 'All' ? 'All Tracks' : t)}
+                    tracks={tracks.filter(t => t !== 'All')}
+                    selectedTrack={selectedTrack}
+                    onSelectTrack={setSelectedTrack}
                 />
-
-                <div className="flex items-center gap-2">
-                    <span className="text-gray-400 text-sm">Filter by Date:</span>
-                    <select
-                        value={selectedDate}
-                        onChange={(e) => setSelectedDate(e.target.value)}
-                        className="bg-black border border-purple-900/30 text-white px-4 py-2 rounded-md focus:outline-none focus:border-purple-600 transition appearance-none"
-                    >
-                        {dates.map(date => (
-                            <option key={date} value={date}>{date}</option>
-                        ))}
-                    </select>
-                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                    {filteredClaims.length} claims available{selectedTrack !== 'All' ? ` for ${selectedTrack}` : ''}.
+                </p>
             </div>
 
             {/* Claims count */}
             <p className="text-sm text-gray-400">
                 Showing {filteredClaims.length} claims
-                {selectedTrack !== 'All Tracks' && ` from ${selectedTrack}`}
-                {selectedDate !== 'All Dates' && ` on ${selectedDate}`}
+                {selectedTrack !== 'All' && ` for ${selectedTrack}`}
             </p>
 
             {/* Claims Table */}
