@@ -13,6 +13,7 @@ import gc
 import atexit
 import shutil
 import base64
+import signal
 import tempfile
 import requests
 import subprocess
@@ -71,6 +72,8 @@ COOKIE_CACHE_TTL_SECONDS = 20 * 60
 _equibase_cookie_cache = {'cookies': None, 'fetched_at': 0.0}
 CHROMIUM_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_CHROMIUM_MIN_HEADROOM_MB', '512')) * 1024 * 1024
 POWERSHELL_MIN_HEADROOM_BYTES = int(os.getenv('EQUIBASE_PWSH_MIN_HEADROOM_MB', '192')) * 1024 * 1024
+HEAVY_FALLBACK_MAX_PIDS = int(os.getenv('EQUIBASE_HEAVY_FALLBACK_MAX_PIDS', '300'))
+ENABLE_POWERSHELL_FALLBACK = os.getenv('EQUIBASE_ENABLE_PWSH_FALLBACK', '1').strip().lower() in {'1', 'true', 'yes', 'on'}
 SHARED_BROWSER_MAX_AGE_SECONDS = int(os.getenv('EQUIBASE_BROWSER_MAX_AGE_SECONDS', '900'))
 SHARED_BROWSER_MAX_DOWNLOADS = int(os.getenv('EQUIBASE_BROWSER_MAX_DOWNLOADS', '18'))
 HEAVY_FALLBACK_FAILURE_THRESHOLD = int(os.getenv('EQUIBASE_HEAVY_FAILURE_THRESHOLD', '3'))
@@ -127,6 +130,34 @@ def get_container_memory_limit_bytes() -> Optional[int]:
     )
 
 
+def get_container_pid_count() -> Optional[int]:
+    return _read_cgroup_int('/sys/fs/cgroup/pids.current')
+
+
+def has_container_pid_headroom(label: str) -> bool:
+    pids = get_container_pid_count()
+    if pids is None:
+        return True
+
+    if pids < HEAVY_FALLBACK_MAX_PIDS:
+        return True
+
+    logger.warning(
+        "Skipping %s: container already has %s PIDs/threads (limit for heavy fallbacks=%s)",
+        label,
+        pids,
+        HEAVY_FALLBACK_MAX_PIDS,
+    )
+    return False
+
+
+def has_heavy_fallback_headroom(memory_bytes: int, label: str) -> bool:
+    return (
+        has_container_pid_headroom(label)
+        and has_container_memory_headroom(memory_bytes, label)
+    )
+
+
 def has_container_memory_headroom(minimum_bytes: int, label: str) -> bool:
     """
     Guard heavy fallbacks against the scheduler's cgroup limit, not host RAM.
@@ -148,6 +179,39 @@ def has_container_memory_headroom(minimum_bytes: int, label: str) -> bool:
         limit / (1024 * 1024),
     )
     return False
+
+
+def run_bounded_subprocess(command: List[str], *, timeout: int, env: Optional[Dict[str, str]] = None) -> subprocess.CompletedProcess:
+    """
+    Run a heavy fallback in its own process group so timeouts clean up descendants too.
+    """
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
 
 def format_container_memory_summary() -> str:
@@ -278,7 +342,7 @@ def get_shared_equibase_webdriver(timeout: int = 45):
         driver = None
 
     if driver is None:
-        if not has_container_memory_headroom(CHROMIUM_MIN_HEADROOM_BYTES, "Chromium Equibase fallback"):
+        if not has_heavy_fallback_headroom(CHROMIUM_MIN_HEADROOM_BYTES, "Chromium Equibase fallback"):
             return None
 
         tempdir = tempfile.TemporaryDirectory(prefix='equibase_browser_')
@@ -751,11 +815,14 @@ def download_pdf_via_selenium(pdf_url: str, timeout: int = 60) -> Optional[bytes
 
 def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[bytes]:
     """Last-resort downloader using pwsh inside the production container image."""
+    if not ENABLE_POWERSHELL_FALLBACK:
+        logger.info("Skipping pwsh fallback because EQUIBASE_ENABLE_PWSH_FALLBACK is disabled")
+        return None
     if shutil.which("pwsh") is None:
         return None
     if not heavy_fallback_available('powershell'):
         return None
-    if not has_container_memory_headroom(POWERSHELL_MIN_HEADROOM_BYTES, "PowerShell Equibase fallback"):
+    if not has_heavy_fallback_headroom(POWERSHELL_MIN_HEADROOM_BYTES, "PowerShell Equibase fallback"):
         return None
 
     temp_file = f"/tmp/equibase_{int(time.time())}_{os.getpid()}.pdf"
@@ -770,12 +837,19 @@ def download_pdf_via_powershell(pdf_url: str, timeout: int = 45) -> Optional[byt
     )
 
     try:
-        result = subprocess.run(
+        child_env = os.environ.copy()
+        child_env.update(
+            {
+                "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+                "POWERSHELL_TELEMETRY_OPTOUT": "1",
+                "COMPlus_ThreadPool_ForceMinWorkerThreads": "1",
+                "COMPlus_ThreadPool_ForceMaxWorkerThreads": os.getenv("EQUIBASE_PWSH_MAX_WORKER_THREADS", "8"),
+            }
+        )
+        result = run_bounded_subprocess(
             ["pwsh", "-NoLogo", "-NoProfile", "-Command", script],
-            capture_output=True,
-            text=True,
             timeout=timeout + 10,
-            check=False,
+            env=child_env,
         )
         if result.returncode != 0:
             logger.warning(f"pwsh download failed for {pdf_url}: {result.stderr.strip()}")

@@ -41,11 +41,17 @@ services:
     restart: unless-stopped
     # Results/PDF crawling with Chromium is bursty on the Pi, so keep headroom above observed ~900 MB peaks.
     mem_limit: 2048m
+    # Hard cap process/thread explosions from browser/.NET fallbacks without disabling those fallbacks.
+    pids_limit: ${SCHEDULER_PIDS_LIMIT:-384}
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
       - ENABLE_HEAVY_SCRATCH_FALLBACKS=${ENABLE_HEAVY_SCRATCH_FALLBACKS:-0}
+      # Keep fallbacks available, but bound them with cgroup PID/memory checks and process-group cleanup.
+      - EQUIBASE_ENABLE_PWSH_FALLBACK=${EQUIBASE_ENABLE_PWSH_FALLBACK:-1}
+      - EQUIBASE_HEAVY_FALLBACK_MAX_PIDS=${EQUIBASE_HEAVY_FALLBACK_MAX_PIDS:-300}
+      - EQUIBASE_PWSH_MAX_WORKER_THREADS=${EQUIBASE_PWSH_MAX_WORKER_THREADS:-8}
       - TZ=America/New_York
     volumes:
       - ./logs:/var/log
